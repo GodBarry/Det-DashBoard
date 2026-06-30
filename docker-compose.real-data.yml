@@ -1,0 +1,38 @@
+services:
+  postgres-real:
+    image: postgres:16
+    container_name: det-dashboard-postgres-real
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    command:
+      - bash
+      - -lc
+      - |
+        chmod 700 /var/lib/postgresql/data
+        rm -f /var/lib/postgresql/data/postmaster.pid
+        exec /usr/lib/postgresql/16/bin/postgres -c listen_addresses='*' -c hba_file=/tmp/pg_hba.real-data.conf
+    ports:
+      - "127.0.0.1:${POSTGRES_REAL_PORT:-55432}:5432"
+    volumes:
+      - ${POSTGRES_DATA_DIR:-./runtime/postgres}:/var/lib/postgresql/data
+      - ./db/pg_hba.real-data.conf:/tmp/pg_hba.real-data.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/lib/postgresql/16/bin/pg_isready -h 127.0.0.1 -p 5432 -U det -d det_dashboard || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio-real:
+    image: minio/minio:latest
+    container_name: det-dashboard-minio-real
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "127.0.0.1:${MINIO_REAL_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_REAL_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ${MINIO_DATA_DIR:-./runtime/minio}:/data

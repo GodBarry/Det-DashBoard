@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "api": "node server.js",
+    "api:pg": "node server/postgres-app.js",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "lucide-react": "latest",
+    "sharp": "latest",
+    "pg": "latest",
+    "minio": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

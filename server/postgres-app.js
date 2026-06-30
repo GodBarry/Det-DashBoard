@@ -1,0 +1,2192 @@
+﻿const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const url = require("url");
+const { spawn, spawnSync } = require("child_process");
+const sharp = require("sharp");
+const { port, dataRoot, storageRoot } = require("./config");
+const { query, transaction } = require("./db");
+const store = require("./object-store");
+const {
+  IMAGE_EXTS,
+  VIDEO_EXTS,
+  walk,
+  hashFile,
+  quickHash,
+  safeReadJson,
+  basenameNoExt,
+  bboxFromPoints,
+  inferModality,
+  exportBaseName,
+  cleanName,
+} = require("./utils");
+
+function sendJson(res, data, code = 200) {
+  res.writeHead(code, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
+  res.end(JSON.stringify(data));
+}
+
+function sendError(res, code, message) {
+  sendJson(res, { error: message }, code);
+}
+
+function psQuote(value) {
+  return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+function selectFolder(defaultPath, description) {
+  try {
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
+      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+      `$dialog.Description = ${psQuote(description || "Select folder")}`,
+      `$dialog.SelectedPath = ${psQuote(defaultPath || dataRoot)}`,
+      "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
+    ].join("; ");
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { encoding: "utf8", timeout: 8000 });
+    if (result.status === null && result.signal) {
+      console.error("selectFolder timeout:", result.signal);
+      return "";
+    }
+    if (result.error) { console.error("selectFolder spawn error:", result.error); return ""; }
+    return String(result.stdout || "").trim();
+  } catch (error) {
+    console.error("selectFolder error:", error);
+    return "";
+  }
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function isInsideRoot(root, target) {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function imageObjectKey(sha256, ext) {
+  return `objects/images/sha256/${sha256.slice(0, 2)}/${sha256}${ext}`;
+}
+
+function videoObjectKey(sha256, ext) {
+  return `objects/videos/sha256/${sha256.slice(0, 2)}/${sha256}${ext}`;
+}
+
+function rawLabelObjectKey(projectId, versionId, name) {
+  return `objects/raw-labels/${projectId}/${versionId}/${name}`;
+}
+
+function uniqueExistingPaths(paths) {
+  return Array.from(new Set(paths.filter(Boolean).map((item) => path.resolve(item)))).filter((item) => fs.existsSync(item));
+}
+
+function detectPythonVersion(pythonPath) {
+  const result = spawnSync(pythonPath, ["--version"], { encoding: "utf8", timeout: 5000 });
+  return String(result.stdout || result.stderr || "").trim();
+}
+
+function detectUltralytics(pythonPath) {
+  const result = spawnSync(pythonPath, ["-c", "import importlib.util; print('yes' if importlib.util.find_spec('ultralytics') else 'no')"], { encoding: "utf8", timeout: 8000 });
+  return String(result.stdout || "").trim() === "yes";
+}
+
+function inferPlatform(pythonPath) {
+  const normalized = String(pythonPath || "").toLowerCase();
+  const osType = normalized.includes("\\") || /^[a-z]:/.test(normalized) ? "windows" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+  return { osType, arch };
+}
+
+function inferEnvType(pythonPath) {
+  const text = String(pythonPath || "").toLowerCase();
+  if (text.includes("miniforge")) return "miniforge";
+  return "conda";
+}
+
+function inspectPythonEnv(pythonPath) {
+  const version = detectPythonVersion(pythonPath);
+  const script = [
+    "import json, importlib.util",
+    "info={'ultralytics': bool(importlib.util.find_spec('ultralytics')), 'torch': False, 'torch_version': '', 'cuda_available': False, 'cuda_version': '', 'device_count': 0}",
+    "spec=importlib.util.find_spec('torch')",
+    "if spec:",
+    "    import torch",
+    "    info['torch']=True",
+    "    info['torch_version']=getattr(torch, '__version__', '')",
+    "    info['cuda_available']=bool(torch.cuda.is_available())",
+    "    info['cuda_version']=getattr(torch.version, 'cuda', '') or ''",
+    "    info['device_count']=torch.cuda.device_count() if torch.cuda.is_available() else 0",
+    "print(json.dumps(info, ensure_ascii=False))",
+  ].join("\n");
+  const result = spawnSync(pythonPath, ["-c", script], { encoding: "utf8", timeout: 30000 });
+  let packages = {};
+  try {
+    packages = JSON.parse(String(result.stdout || "{}").trim() || "{}");
+  } catch {
+    packages = { ultralytics: detectUltralytics(pythonPath) };
+  }
+  const platform = inferPlatform(pythonPath);
+  const accelerator = packages.cuda_available ? "cuda" : "cpu";
+  const status = packages.ultralytics ? "ready" : "missing_ultralytics";
+  return { version, packages, platform, accelerator, status };
+}
+
+async function seedMlRuntimeConfig() {
+  const templateCount = (await query("SELECT count(*)::int AS count FROM training_templates")).rows[0].count;
+  if (!templateCount) {
+    await query(
+      `INSERT INTO training_templates (name, template_key, framework, task_type, default_params_json, capabilities_json, description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        "Ultralytics YOLO 通用训练",
+        "ultralytics_yolo",
+        "ultralytics",
+        "detect",
+        JSON.stringify({ epochs: 100, imgsz: 640, batch: 16, device: "0" }),
+        JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }),
+        "自动识别为支持 detect / segment / classify 的 Ultralytics YOLO 模板",
+      ],
+    );
+  }
+  await query(
+    `UPDATE training_templates
+     SET template_key='ultralytics_yolo',
+         capabilities_json=$1,
+         description=CASE WHEN description='' THEN $2 ELSE description END,
+         updated_at=now()
+     WHERE framework='ultralytics' AND (capabilities_json = '{}'::jsonb OR capabilities_json->'tasks' IS NULL)`,
+    [JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }), "自动识别为支持 detect / segment / classify 的 Ultralytics YOLO 模板"],
+  );
+  const candidates = uniqueExistingPaths([
+    process.env.PYTHON,
+    "D:\\ProgramData\\miniforge3\\python.exe",
+    "C:\\Python314\\python.exe",
+    "python",
+  ]);
+  for (const pythonPath of candidates) {
+    const info = inspectPythonEnv(pythonPath);
+    const exists = (await query("SELECT id FROM python_envs WHERE python_path=$1", [pythonPath])).rows[0];
+    if (exists) {
+      await query(
+        `UPDATE python_envs
+         SET env_type=$1, status=$2, packages_json=$3, os_type=$4, arch=$5, accelerator=$6,
+             python_version=$7, torch_version=$8, cuda_available=$9, cuda_version=$10,
+             capabilities_json=$11, updated_at=now()
+         WHERE id=$12`,
+        [
+          inferEnvType(pythonPath),
+          info.status,
+          JSON.stringify(info.packages),
+          info.platform.osType,
+          info.platform.arch,
+          info.accelerator,
+          info.version,
+          info.packages.torch_version || "",
+          Boolean(info.packages.cuda_available),
+          info.packages.cuda_version || "",
+          JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
+          exists.id,
+        ],
+      );
+      continue;
+    }
+    await query(
+      `INSERT INTO python_envs (name, python_path, env_type, status, packages_json, os_type, arch, accelerator, python_version, torch_version, cuda_available, cuda_version, capabilities_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        info.version ? info.version.replace(/^Python\s*/i, "Python ") : path.basename(pythonPath),
+        pythonPath,
+        inferEnvType(pythonPath),
+        info.status,
+        JSON.stringify(info.packages),
+        info.platform.osType,
+        info.platform.arch,
+        info.accelerator,
+        info.version,
+        info.packages.torch_version || "",
+        Boolean(info.packages.cuda_available),
+        info.packages.cuda_version || "",
+        JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
+      ],
+    );
+  }
+}
+
+async function ensureRuntimeSchema() {
+  const statements = [
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
+    "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    `CREATE TABLE IF NOT EXISTS baseline_merge_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      baseline_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      source_project_ids UUID[] NOT NULL,
+      params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'preview',
+      summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      log_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      applied_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS baseline_conflicts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      merge_run_id UUID NOT NULL REFERENCES baseline_merge_runs(id) ON DELETE CASCADE,
+      image_asset_id UUID NOT NULL REFERENCES image_assets(id),
+      conflict_type TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'pending',
+      resolution TEXT NOT NULL DEFAULT '',
+      preview_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS baseline_annotation_sources (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      merge_run_id UUID NOT NULL REFERENCES baseline_merge_runs(id) ON DELETE CASCADE,
+      baseline_annotation_id UUID REFERENCES image_annotations(id) ON DELETE SET NULL,
+      source_project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_project_image_id UUID NOT NULL REFERENCES project_images(id) ON DELETE CASCADE,
+      source_annotation_id UUID REFERENCES image_annotations(id) ON DELETE SET NULL,
+      resolution_method TEXT NOT NULL DEFAULT '',
+      annotation_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ml_models (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      task_type TEXT NOT NULL DEFAULT 'detect',
+      framework TEXT NOT NULL DEFAULT 'ultralytics',
+      description TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      deleted_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS dataset_snapshots (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      source_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      label_version_id UUID REFERENCES label_versions(id) ON DELETE SET NULL,
+      format TEXT NOT NULL DEFAULT 'yolo',
+      split_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      path TEXT NOT NULL DEFAULT '',
+      image_count INT NOT NULL DEFAULT 0,
+      annotation_count INT NOT NULL DEFAULT 0,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS training_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      template TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
+      dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
+      model_id UUID REFERENCES ml_models(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      priority INT NOT NULL DEFAULT 0,
+      params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      progress INT NOT NULL DEFAULT 0,
+      current_epoch INT NOT NULL DEFAULT 0,
+      total_epochs INT NOT NULL DEFAULT 0,
+      worker_id TEXT NOT NULL DEFAULT '',
+      process_pid INT,
+      heartbeat_at TIMESTAMPTZ,
+      output_root TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS training_job_logs (
+      id BIGSERIAL PRIMARY KEY,
+      job_id UUID NOT NULL REFERENCES training_jobs(id) ON DELETE CASCADE,
+      stream TEXT NOT NULL DEFAULT 'stdout',
+      line TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS training_metrics (
+      id BIGSERIAL PRIMARY KEY,
+      job_id UUID NOT NULL REFERENCES training_jobs(id) ON DELETE CASCADE,
+      step INT NOT NULL DEFAULT 0,
+      epoch INT NOT NULL DEFAULT 0,
+      key TEXT NOT NULL,
+      value NUMERIC,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS model_versions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      model_id UUID NOT NULL REFERENCES ml_models(id) ON DELETE CASCADE,
+      version_name TEXT NOT NULL,
+      training_job_id UUID REFERENCES training_jobs(id) ON DELETE SET NULL,
+      dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
+      stage TEXT NOT NULL DEFAULT 'candidate',
+      metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      artifact_root TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS model_artifacts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      model_version_id UUID REFERENCES model_versions(id) ON DELETE CASCADE,
+      training_job_id UUID REFERENCES training_jobs(id) ON DELETE CASCADE,
+      artifact_type TEXT NOT NULL,
+      path TEXT NOT NULL,
+      size BIGINT,
+      sha256 TEXT,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS inference_jobs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      model_version_id UUID REFERENCES model_versions(id) ON DELETE SET NULL,
+      dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      progress INT NOT NULL DEFAULT 0,
+      output_root TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS inference_results (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      inference_job_id UUID NOT NULL REFERENCES inference_jobs(id) ON DELETE CASCADE,
+      project_image_id UUID REFERENCES project_images(id) ON DELETE SET NULL,
+      predictions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      artifact_path TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS training_templates (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      template_key TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
+      framework TEXT NOT NULL DEFAULT 'ultralytics',
+      task_type TEXT NOT NULL DEFAULT 'detect',
+      command_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      default_params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    `CREATE TABLE IF NOT EXISTS python_envs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      python_path TEXT NOT NULL,
+      env_type TEXT NOT NULL DEFAULT 'miniforge',
+      os_type TEXT NOT NULL DEFAULT 'windows',
+      arch TEXT NOT NULL DEFAULT 'x86_64',
+      accelerator TEXT NOT NULL DEFAULT 'cpu',
+      status TEXT NOT NULL DEFAULT 'unknown',
+      python_version TEXT NOT NULL DEFAULT '',
+      torch_version TEXT NOT NULL DEFAULT '',
+      cuda_available BOOLEAN NOT NULL DEFAULT false,
+      cuda_version TEXT NOT NULL DEFAULT '',
+      packages_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS os_type TEXT NOT NULL DEFAULT 'windows'",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT 'x86_64'",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS accelerator TEXT NOT NULL DEFAULT 'cpu'",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS python_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS torch_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_available BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+  ];
+  for (const sql of statements) await query(sql);
+  await seedMlRuntimeConfig();
+}
+
+async function upsertImageAsset(client, filePath, meta = {}) {
+  const stat = fs.statSync(filePath);
+  const qh = quickHash(filePath);
+  const sha = await hashFile(filePath);
+  const ext = path.extname(filePath).toLowerCase() || ".jpg";
+  const existing = await client.query("SELECT * FROM image_assets WHERE sha256=$1", [sha]);
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    const storedSize = await store.objectSize(row.object_key);
+    if (storedSize !== Number(row.file_size || stat.size)) await store.putFile(row.object_key, filePath);
+    return row;
+  }
+  const objectKey = imageObjectKey(sha, ext);
+  await store.putFile(objectKey, filePath);
+  const inserted = await client.query(
+    `INSERT INTO image_assets (sha256, quick_hash, object_key, original_ext, width, height, file_size)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [sha, qh, objectKey, ext, meta.imageWidth || null, meta.imageHeight || null, stat.size],
+  );
+  return inserted.rows[0];
+}
+
+async function upsertVideoAsset(client, filePath) {
+  const stat = fs.statSync(filePath);
+  const qh = quickHash(filePath);
+  const sha = await hashFile(filePath);
+  const ext = path.extname(filePath).toLowerCase() || ".mp4";
+  const existing = await client.query("SELECT * FROM video_assets WHERE sha256=$1", [sha]);
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    const storedSize = await store.objectSize(row.object_key);
+    if (storedSize !== Number(row.file_size || stat.size)) await store.putFile(row.object_key, filePath);
+    return row;
+  }
+  const objectKey = videoObjectKey(sha, ext);
+  await store.putFile(objectKey, filePath);
+  const inserted = await client.query(
+    `INSERT INTO video_assets (sha256, quick_hash, object_key, original_ext, file_size)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [sha, qh, objectKey, ext, stat.size],
+  );
+  return inserted.rows[0];
+}
+
+function buildJsonMatches(jsons, images) {
+  const imageByBase = new Map(images.map((file) => [basenameNoExt(file), file]));
+  const imageByName = new Map(images.map((file) => [path.basename(file).toLowerCase(), file]));
+  const matches = new Map();
+  const unresolvedJsons = [];
+  for (const jsonFile of jsons) {
+    const meta = safeReadJson(jsonFile);
+    if (!meta) {
+      unresolvedJsons.push({ jsonFile, reason: "invalid_json" });
+      continue;
+    }
+    const jsonDir = path.dirname(jsonFile);
+    const candidates = [];
+    if (meta.imagePath) {
+      candidates.push(path.resolve(jsonDir, meta.imagePath));
+      candidates.push(path.resolve(jsonDir, "..", meta.imagePath));
+      candidates.push(path.resolve(jsonDir, "..", "images", path.basename(meta.imagePath)));
+      candidates.push(imageByName.get(path.basename(meta.imagePath).toLowerCase()));
+    }
+    candidates.push(imageByBase.get(basenameNoExt(jsonFile)));
+    const imageFile = candidates.filter(Boolean).find((file) => fs.existsSync(file));
+    if (!imageFile) {
+      unresolvedJsons.push({ jsonFile, reason: "image_not_found" });
+      continue;
+    }
+    matches.set(path.resolve(imageFile).toLowerCase(), { jsonFile, meta });
+  }
+  return { matches, unresolvedJsons };
+}
+
+async function createProject(body) {
+  const name = body.name || `project_${Date.now()}`;
+  const result = await query("INSERT INTO projects (name, description, project_type) VALUES ($1,$2,$3) RETURNING *", [name, body.description || "", body.project_type || "normal"]);
+  return result.rows[0];
+}
+
+async function listProjects(trash = false) {
+  const result = await query(
+    `SELECT p.*,
+      (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
+      (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
+      (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
+     FROM projects p
+     WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
+     ORDER BY p.created_at DESC`,
+  );
+  return result.rows;
+}
+
+async function importPath(body) {
+  const projectId = body.projectId;
+  if (!projectId) throw new Error("projectId is required");
+  const sourcePath = path.resolve(body.sourcePath || "");
+  if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("sourcePath does not exist");
+  if (!isInsideRoot(dataRoot, sourcePath)) throw new Error(`sourcePath must be inside ${dataRoot}`);
+  const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
+  if (!project) throw new Error("project not found");
+
+  const batch = (await query(
+    `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
+     VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
+    [projectId, sourcePath, "正在扫描文件"],
+  )).rows[0];
+
+  setImmediate(() => {
+    runImportBatch(batch.id, project, body).catch(async (error) => {
+      console.error("import failed", error);
+      await query(
+        "UPDATE import_batches SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+        [error.message || "导入失败", batch.id],
+      ).catch(() => {});
+    });
+  });
+
+  return { project, batch };
+}
+
+async function importCancelled(batchId) {
+  const row = (await query("SELECT status FROM import_batches WHERE id=$1", [batchId])).rows[0];
+  return !row || row.status === "cancel_requested" || row.status === "cancelled" || row.status === "deleted";
+}
+
+async function cancelImport(importId) {
+  await query(
+    "UPDATE import_batches SET status='cancel_requested', message=$1 WHERE id=$2 AND status IN ('scanning','running')",
+    ["正在取消导入", importId],
+  );
+}
+
+async function runImportBatch(batchId, project, body) {
+  const projectId = project.id;
+  const sourcePath = path.resolve(body.sourcePath || "");
+  const files = walk(sourcePath);
+  const images = files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
+  const jsons = files.filter((file) => path.extname(file).toLowerCase() === ".json");
+  const videos = files.filter((file) => VIDEO_EXTS.has(path.extname(file).toLowerCase()));
+  const { matches, unresolvedJsons } = buildJsonMatches(jsons, images);
+
+  await query(
+    "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
+    [images.length + videos.length, `扫描完成，发现 ${images.length} 张图片、${videos.length} 个视频、${jsons.length} 个标注文件`, batchId],
+  );
+  if (await importCancelled(batchId)) {
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
+    return;
+  }
+
+  const client = { query };
+  const version = (await query(
+    `INSERT INTO label_versions (project_id, name, target_type, status, import_batch_id)
+     VALUES ($1,$2,'image','active',$3) RETURNING *`,
+    [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
+  )).rows[0];
+
+  let imageCount = 0;
+  let annCount = 0;
+  let unlabeledImageCount = 0;
+  for (const imageFile of images) {
+    if (imageCount % 5 === 0 && await importCancelled(batchId)) {
+      await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [imageCount, "导入已取消", batchId]);
+      return;
+    }
+    const matched = matches.get(path.resolve(imageFile).toLowerCase());
+    const meta = matched?.meta || {};
+    const asset = await upsertImageAsset(client, imageFile, meta);
+    const modality = inferModality(meta, imageFile);
+    const displayName = body.rename
+      ? `${cleanName(meta.view, "UnknownView")}_${cleanName(meta.scene, "UnknownScene")}_${modality === "infrared" ? "IR" : "VIS"}_${String(imageCount + 1).padStart(6, "0")}${path.extname(imageFile).toLowerCase()}`
+      : path.basename(imageFile);
+    const projectImage = await upsertProjectImage(client, {
+      projectId,
+      imageAssetId: asset.id,
+      importBatchId: batchId,
+      displayName,
+      scene: meta.scene || "UnknownScene",
+      view: meta.view || "UnknownView",
+      modality,
+      keyword: meta.keyword || "",
+    });
+    if (matched?.jsonFile) await store.putJson(rawLabelObjectKey(projectId, version.id, path.basename(matched.jsonFile)), meta);
+    const shapes = Array.isArray(meta.shapes) ? meta.shapes : [];
+    if (!shapes.length) unlabeledImageCount += 1;
+    for (const shape of shapes) {
+      const box = bboxFromPoints(shape.points || []);
+      await client.query(
+        `INSERT INTO image_annotations
+         (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [version.id, projectImage.id, shape.label || "unknown", box.x, box.y, box.width, box.height, shape.shape_type || "rectangle", Boolean(shape.difficult), shape.score, shape.attributes || {}],
+      );
+      annCount += 1;
+    }
+    imageCount += 1;
+    if (imageCount % 5 === 0 || imageCount === images.length) {
+      await query("UPDATE import_batches SET processed_files=$1, message=$2 WHERE id=$3", [imageCount, `正在导入图片 ${imageCount} / ${images.length}`, batchId]);
+    }
+  }
+
+  let videoCount = 0;
+  for (const videoFile of videos) {
+    if (await importCancelled(batchId)) {
+      await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videoCount, "导入已取消", batchId]);
+      return;
+    }
+    const asset = await upsertVideoAsset(client, videoFile);
+    await query(
+      `INSERT INTO project_videos (project_id, video_asset_id, import_batch_id, display_name, label_status)
+       VALUES ($1,$2,$3,$4,'unlabeled')`,
+      [projectId, asset.id, batchId, path.basename(videoFile)],
+    );
+    videoCount += 1;
+    await query("UPDATE import_batches SET processed_files=$1, message=$2 WHERE id=$3", [images.length + videoCount, `正在导入视频 ${videoCount} / ${videos.length}`, batchId]);
+  }
+
+  await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
+  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 未标注图片，${videoCount} 视频，${annCount} 标注，${unresolvedJsons.length} 未匹配JSON`;
+  await query("UPDATE import_batches SET status='done', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videos.length, message, batchId]);
+}
+
+async function upsertProjectImage(client, image) {
+  const params = [
+    image.projectId,
+    image.imageAssetId,
+    image.importBatchId,
+    image.displayName,
+    image.scene,
+    image.view,
+    image.modality,
+    image.keyword,
+  ];
+  const upsertSql = `
+    INSERT INTO project_images (project_id, image_asset_id, import_batch_id, display_name, scene, view, modality, keyword)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    ON CONFLICT (project_id, image_asset_id, display_name)
+    DO UPDATE SET
+      import_batch_id=EXCLUDED.import_batch_id,
+      scene=EXCLUDED.scene,
+      view=EXCLUDED.view,
+      modality=EXCLUDED.modality,
+      keyword=EXCLUDED.keyword,
+      deleted_at=NULL
+    RETURNING *`;
+  try {
+    return (await client.query(upsertSql, params)).rows[0];
+  } catch (error) {
+    if (error.code !== "23505" || error.constraint !== "idx_project_images_unique_asset") throw error;
+    return (await client.query(
+      `UPDATE project_images
+       SET import_batch_id=$3,
+           scene=$5,
+           view=$6,
+           modality=$7,
+           keyword=$8,
+           deleted_at=NULL
+       WHERE project_id=$1 AND image_asset_id=$2 AND display_name=$4
+       RETURNING *`,
+      params,
+    )).rows[0];
+  }
+}
+
+async function listImports(projectId, trash = false) {
+  const result = await query(
+    `SELECT *,
+      CASE WHEN total_files > 0 THEN round((processed_files::numeric / total_files::numeric) * 100)::int ELSE 0 END AS progress
+     FROM import_batches
+     WHERE project_id=$1 AND ${trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"}
+     ORDER BY created_at DESC`,
+    [projectId],
+  );
+  return result.rows;
+}
+
+async function softDeleteImport(importId) {
+  await transaction(async (client) => {
+    await client.query("UPDATE import_batches SET deleted_at=now(), status='deleted' WHERE id=$1", [importId]);
+    await client.query("UPDATE project_images SET deleted_at=now() WHERE import_batch_id=$1", [importId]);
+    await client.query("UPDATE project_videos SET deleted_at=now() WHERE import_batch_id=$1", [importId]);
+    await client.query("UPDATE label_versions SET deleted_at=now(), status='archived' WHERE import_batch_id=$1", [importId]);
+  });
+}
+
+async function restoreImport(importId) {
+  await transaction(async (client) => {
+    await client.query("UPDATE import_batches SET deleted_at=NULL, status='done' WHERE id=$1", [importId]);
+    await client.query("UPDATE project_images SET deleted_at=NULL WHERE import_batch_id=$1", [importId]);
+    await client.query("UPDATE project_videos SET deleted_at=NULL WHERE import_batch_id=$1", [importId]);
+    await client.query("UPDATE label_versions SET deleted_at=NULL, status='active' WHERE import_batch_id=$1", [importId]);
+  });
+}
+
+async function cleanupUnreferencedAssets(client) {
+  const images = await client.query(
+    `DELETE FROM image_assets ia
+     WHERE NOT EXISTS (SELECT 1 FROM project_images pi WHERE pi.image_asset_id=ia.id)
+       AND NOT EXISTS (SELECT 1 FROM extracted_frames ef WHERE ef.image_asset_id=ia.id)
+     RETURNING id, object_key`,
+  );
+  const videos = await client.query(
+    `DELETE FROM video_assets va
+     WHERE NOT EXISTS (SELECT 1 FROM project_videos pv WHERE pv.video_asset_id=va.id)
+     RETURNING id, object_key`,
+  );
+  for (const row of [...images.rows, ...videos.rows]) await store.removeObject(row.object_key);
+  return { image_assets: images.rowCount, video_assets: videos.rowCount };
+}
+
+async function emptyImportTrash(projectId) {
+  return transaction(async (client) => {
+    const batches = await client.query(
+      "SELECT id FROM import_batches WHERE project_id=$1 AND deleted_at IS NOT NULL",
+      [projectId],
+    );
+    const ids = batches.rows.map((row) => row.id);
+    if (!ids.length) return { imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
+
+    await client.query(
+      `UPDATE projects
+       SET active_label_version_id = (
+         SELECT lv.id
+         FROM label_versions lv
+         WHERE lv.project_id=$1
+           AND lv.deleted_at IS NULL
+           AND (lv.import_batch_id IS NULL OR NOT (lv.import_batch_id = ANY($2::uuid[])))
+         ORDER BY lv.created_at DESC
+         LIMIT 1
+       )
+       WHERE id=$1
+         AND active_label_version_id IN (
+           SELECT id FROM label_versions WHERE import_batch_id = ANY($2::uuid[])
+         )`,
+      [projectId, ids],
+    );
+    const labelVersions = await client.query(
+      "DELETE FROM label_versions WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
+      [ids],
+    );
+    const images = await client.query(
+      "DELETE FROM project_images WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
+      [ids],
+    );
+    const videos = await client.query(
+      "DELETE FROM project_videos WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
+      [ids],
+    );
+    const imports = await client.query(
+      "DELETE FROM import_batches WHERE id = ANY($1::uuid[]) RETURNING id",
+      [ids],
+    );
+    const assets = await cleanupUnreferencedAssets(client);
+    return { imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
+  });
+}
+
+async function emptyProjectTrash() {
+  return transaction(async (client) => {
+    const projects = await client.query("SELECT id FROM projects WHERE deleted_at IS NOT NULL");
+    const ids = projects.rows.map((row) => row.id);
+    if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
+
+    await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
+    const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const deletedProjects = await client.query("DELETE FROM projects WHERE id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const assets = await cleanupUnreferencedAssets(client);
+    return { projects: deletedProjects.rowCount, imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
+  });
+}
+
+async function softDeleteProjectImages(projectId, ids = []) {
+  const uniqueIds = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+  if (!uniqueIds.length) return { deleted: 0 };
+  const result = await query(
+    `UPDATE project_images
+     SET deleted_at=now()
+     WHERE project_id=$1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL
+     RETURNING id`,
+    [projectId, uniqueIds],
+  );
+  return { deleted: result.rows.length };
+}
+
+function bboxIou(a, b) {
+  const ax1 = Number(a.bbox_x || 0);
+  const ay1 = Number(a.bbox_y || 0);
+  const ax2 = ax1 + Number(a.bbox_w || 0);
+  const ay2 = ay1 + Number(a.bbox_h || 0);
+  const bx1 = Number(b.bbox_x || 0);
+  const by1 = Number(b.bbox_y || 0);
+  const bx2 = bx1 + Number(b.bbox_w || 0);
+  const by2 = by1 + Number(b.bbox_h || 0);
+  const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(ax1, bx1));
+  const iy = Math.max(0, Math.min(ay2, by2) - Math.max(ay1, by1));
+  const inter = ix * iy;
+  const areaA = Math.max(0, ax2 - ax1) * Math.max(0, ay2 - ay1);
+  const areaB = Math.max(0, bx2 - bx1) * Math.max(0, by2 - by1);
+  return inter / Math.max(1, areaA + areaB - inter);
+}
+
+function normalizeLabel(label, mapping = {}) {
+  const key = String(label || "unknown").trim() || "unknown";
+  return mapping[key] || key;
+}
+
+async function sourceImageRows(sourceProjectIds) {
+  const rows = await query(
+    `SELECT pi.*, ia.sha256, ia.width AS image_width, ia.height AS image_height, ia.original_ext,
+            p.name AS project_name, p.active_label_version_id
+     FROM project_images pi
+     JOIN image_assets ia ON ia.id=pi.image_asset_id
+     JOIN projects p ON p.id=pi.project_id
+     WHERE pi.project_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND p.deleted_at IS NULL
+     ORDER BY pi.created_at`,
+    [sourceProjectIds],
+  );
+  const images = rows.rows;
+  if (!images.length) return [];
+  const anns = await query(
+    `SELECT a.*
+     FROM image_annotations a
+     JOIN projects p ON p.active_label_version_id=a.label_version_id
+     WHERE p.id = ANY($1::uuid[]) AND a.project_image_id = ANY($2::uuid[])
+     ORDER BY a.id`,
+    [sourceProjectIds, images.map((row) => row.id)],
+  );
+  const byImage = new Map();
+  for (const ann of anns.rows) {
+    const key = String(ann.project_image_id);
+    if (!byImage.has(key)) byImage.set(key, []);
+    byImage.get(key).push(ann);
+  }
+  return images.map((row) => ({ ...row, annotations: byImage.get(String(row.id)) || [] }));
+}
+
+function analyzeImageGroup(rows, params) {
+  const iouSame = Number(params.iouSame ?? 0.9);
+  const iouLight = Number(params.iouLight ?? 0.75);
+  const labelMap = params.labelMap || {};
+  const priority = params.sourcePriority || [];
+  const priorityIndex = (projectId) => {
+    const index = priority.indexOf(projectId);
+    return index >= 0 ? index : 9999;
+  };
+  const sorted = [...rows].sort((a, b) => priorityIndex(a.project_id) - priorityIndex(b.project_id) || String(a.project_id).localeCompare(String(b.project_id)));
+  const chosenRow = sorted[0];
+  const all = rows.flatMap((row) => row.annotations.map((ann) => ({ ...ann, source_project_id: row.project_id, source_project_name: row.project_name, source_project_image_id: row.id })));
+  const normalized = all.map((ann) => ({ ...ann, normalized_label: normalizeLabel(ann.label, labelMap) }));
+  const chosen = normalized.filter((ann) => String(ann.source_project_id) === String(chosenRow.project_id));
+  let conflictType = "";
+  let severity = "low";
+  let autoResolved = true;
+  const log = [];
+
+  if (!normalized.length) {
+    log.push("无标注图片，保留图片但不生成标注");
+    return { chosenRow, annotations: [], conflictType: "", severity: "low", autoResolved: true, log };
+  }
+  const counts = new Map(rows.map((row) => [row.project_id, row.annotations.length]));
+  if (new Set(counts.values()).size > 1) {
+    conflictType = "count_conflict";
+    severity = "high";
+    autoResolved = false;
+    log.push("不同来源目标数量不一致");
+  }
+  for (const ann of normalized) {
+    const best = chosen.reduce((acc, item) => {
+      const iou = bboxIou(ann, item);
+      return iou > acc.iou ? { iou, item } : acc;
+    }, { iou: 0, item: null });
+    if (best.item && best.iou >= iouSame && ann.normalized_label !== best.item.normalized_label) {
+      conflictType ||= "label_conflict";
+      severity = "high";
+      autoResolved = false;
+      log.push(`同位置类别不一致：${ann.label} / ${best.item.label}`);
+    } else if (best.item && best.iou >= iouLight && best.iou < iouSame && ann.normalized_label === best.item.normalized_label) {
+      conflictType ||= "bbox_conflict";
+      severity = severity === "high" ? "high" : "medium";
+      log.push(`轻微框偏差：${ann.normalized_label} IoU=${best.iou.toFixed(2)}`);
+    }
+  }
+  if (!conflictType && rows.length > 1) log.push("多来源标注一致，按来源优先级保留");
+  return { chosenRow, annotations: chosen, conflictType, severity, autoResolved, log };
+}
+
+function applyConflictDecision(group, params, conflict) {
+  if (!conflict?.resolution?.startsWith("source_project:")) return analyzeImageGroup(group, params);
+  const sourceProjectId = conflict.resolution.split(":")[1];
+  const chosenRow = group.find((row) => String(row.project_id) === sourceProjectId) || group[0];
+  const labelMap = params.labelMap || {};
+  const annotations = chosenRow.annotations.map((ann) => ({
+    ...ann,
+    source_project_id: chosenRow.project_id,
+    source_project_name: chosenRow.project_name,
+    source_project_image_id: chosenRow.id,
+    normalized_label: normalizeLabel(ann.label, labelMap),
+  }));
+  return {
+    chosenRow,
+    annotations,
+    conflictType: conflict.conflict_type,
+    severity: conflict.severity,
+    autoResolved: false,
+    log: [`人工选择保留来源：${chosenRow.project_name}`],
+  };
+}
+
+async function listBaselineConflicts(runId) {
+  const result = await query(
+    `SELECT bc.*, ia.width AS image_width, ia.height AS image_height, ia.object_key
+     FROM baseline_conflicts bc
+     JOIN image_assets ia ON ia.id=bc.image_asset_id
+     WHERE bc.merge_run_id=$1
+     ORDER BY bc.created_at, bc.id`,
+    [runId],
+  );
+  return result.rows;
+}
+
+async function resolveBaselineConflicts(runId, body = {}) {
+  const ids = Array.from(new Set((body.conflictIds || []).map(String).filter(Boolean)));
+  if (!ids.length) return { updated: 0 };
+  const resolution = String(body.resolution || "pending");
+  const status = body.status || (resolution === "pending" ? "pending" : "resolved");
+  const result = await query(
+    `UPDATE baseline_conflicts
+     SET status=$1, resolution=$2
+     WHERE merge_run_id=$3 AND id = ANY($4::uuid[])
+     RETURNING id`,
+    [status, resolution, runId, ids],
+  );
+  return { updated: result.rowCount };
+}
+
+async function createBaselinePreview(body = {}) {
+  const sourceProjectIds = Array.from(new Set((body.sourceProjectIds || []).map(String).filter(Boolean)));
+  if (sourceProjectIds.length < 1) throw new Error("请选择至少一个来源项目");
+  const params = {
+    iouSame: Number(body.iouSame ?? 0.9),
+    iouLight: Number(body.iouLight ?? 0.75),
+    sourcePriority: body.sourcePriority?.length ? body.sourcePriority : sourceProjectIds,
+    labelMap: body.labelMap || {},
+  };
+  const rows = await sourceImageRows(sourceProjectIds);
+  const byAsset = new Map();
+  for (const row of rows) {
+    const key = String(row.image_asset_id);
+    if (!byAsset.has(key)) byAsset.set(key, []);
+    byAsset.get(key).push(row);
+  }
+  const run = await query(
+    `INSERT INTO baseline_merge_runs (name, source_project_ids, params_json, status)
+     VALUES ($1,$2,$3,'preview') RETURNING *`,
+    [body.name || `baseline_${new Date().toISOString()}`, sourceProjectIds, JSON.stringify(params)],
+  );
+  const runId = run.rows[0].id;
+  const summary = { source_projects: sourceProjectIds.length, source_images: rows.length, unique_images: byAsset.size, auto_resolved: 0, conflicts: 0, annotations_kept: 0, by_type: {} };
+  const logs = [];
+  for (const group of byAsset.values()) {
+    const analysis = analyzeImageGroup(group, params);
+    summary.annotations_kept += analysis.annotations.length;
+    if (analysis.conflictType) {
+      summary.conflicts += 1;
+      summary.by_type[analysis.conflictType] = (summary.by_type[analysis.conflictType] || 0) + 1;
+      await query(
+        `INSERT INTO baseline_conflicts (merge_run_id, image_asset_id, conflict_type, severity, preview_json)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [runId, group[0].image_asset_id, analysis.conflictType, analysis.severity, JSON.stringify({ sources: group.map((row) => ({ project_id: row.project_id, project_name: row.project_name, image_id: row.id, annotations: row.annotations.length })), log: analysis.log })],
+      );
+    } else {
+      summary.auto_resolved += 1;
+    }
+    logs.push(...analysis.log.slice(0, 5));
+  }
+  await query("UPDATE baseline_merge_runs SET summary_json=$1, log_json=$2 WHERE id=$3", [JSON.stringify(summary), JSON.stringify(logs.slice(0, 200)), runId]);
+  return { runId, summary, logs: logs.slice(0, 200) };
+}
+
+async function applyBaselineRun(runId, body = {}) {
+  const run = (await query("SELECT * FROM baseline_merge_runs WHERE id=$1", [runId])).rows[0];
+  if (!run) throw new Error("baseline run not found");
+  if (run.status === "applied") throw new Error("baseline run already applied");
+  const sourceProjectIds = run.source_project_ids;
+  const params = run.params_json || {};
+  const rows = await sourceImageRows(sourceProjectIds);
+  const byAsset = new Map();
+  for (const row of rows) {
+    const key = String(row.image_asset_id);
+    if (!byAsset.has(key)) byAsset.set(key, []);
+    byAsset.get(key).push(row);
+  }
+  return transaction(async (client) => {
+    const decisions = await client.query("SELECT * FROM baseline_conflicts WHERE merge_run_id=$1", [runId]);
+    const decisionByAsset = new Map(decisions.rows.map((row) => [String(row.image_asset_id), row]));
+    const project = (await client.query(
+      "INSERT INTO projects (name, description, project_type) VALUES ($1,$2,'baseline') RETURNING *",
+      [body.name || run.name, `Baseline generated from ${sourceProjectIds.length} projects`],
+    )).rows[0];
+    const version = (await client.query(
+      "INSERT INTO label_versions (project_id, name, target_type, status) VALUES ($1,$2,'image','active') RETURNING *",
+      [project.id, "baseline_v1"],
+    )).rows[0];
+    let imageCount = 0;
+    let annCount = 0;
+    for (const group of byAsset.values()) {
+      const analysis = applyConflictDecision(group, params, decisionByAsset.get(String(group[0].image_asset_id)));
+      const source = analysis.chosenRow;
+      const pi = (await client.query(
+        `INSERT INTO project_images (project_id, image_asset_id, display_name, scene, view, modality, keyword)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (project_id, image_asset_id, display_name) DO UPDATE SET deleted_at=NULL
+         RETURNING *`,
+        [project.id, source.image_asset_id, source.display_name, source.scene, source.view, source.modality, source.keyword],
+      )).rows[0];
+      imageCount += 1;
+      for (const ann of analysis.annotations) {
+        const saved = (await client.query(
+          `INSERT INTO image_annotations
+           (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          [version.id, pi.id, ann.normalized_label || ann.label || "unknown", ann.bbox_x, ann.bbox_y, ann.bbox_w, ann.bbox_h, ann.shape_type || "rectangle", Boolean(ann.difficult), ann.score, ann.attributes_json || {}],
+        )).rows[0];
+        await client.query(
+          `INSERT INTO baseline_annotation_sources
+           (merge_run_id, baseline_annotation_id, source_project_id, source_project_image_id, source_annotation_id, resolution_method, annotation_snapshot_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [runId, saved.id, ann.source_project_id, ann.source_project_image_id, ann.id, analysis.conflictType ? "source_priority" : "auto_consistent", ann],
+        );
+        annCount += 1;
+      }
+    }
+    await client.query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, project.id]);
+    await client.query("UPDATE baseline_merge_runs SET baseline_project_id=$1, status='applied', applied_at=now() WHERE id=$2", [project.id, runId]);
+    return { project, imageCount, annotationCount: annCount };
+  });
+}
+
+async function listMlModels() {
+  const rows = await query(
+    `SELECT m.*,
+      (SELECT count(*)::int FROM model_versions mv WHERE mv.model_id=m.id) AS version_count,
+      (SELECT max(mv.created_at) FROM model_versions mv WHERE mv.model_id=m.id) AS last_version_at
+     FROM ml_models m
+     WHERE m.deleted_at IS NULL
+     ORDER BY m.created_at DESC`,
+  );
+  return rows.rows;
+}
+
+async function createMlModel(body = {}) {
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("模型名称不能为空");
+  const taskType = String(body.taskType || body.task_type || "detect").trim() || "detect";
+  const framework = String(body.framework || "ultralytics").trim() || "ultralytics";
+  const description = String(body.description || "").trim();
+  const rows = await query(
+    `INSERT INTO ml_models (name, task_type, framework, description)
+     VALUES ($1,$2,$3,$4) RETURNING *`,
+    [name, taskType, framework, description],
+  );
+  return rows.rows[0];
+}
+
+function dateCode() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+async function nextModelVersionName(prefix, modelId) {
+  const base = cleanName(prefix, "version");
+  const like = `${base}_%`;
+  const rows = await query("SELECT count(*)::int AS count FROM model_versions WHERE model_id=$1 AND version_name LIKE $2", [modelId, like]);
+  return `${base}_${String((rows.rows[0]?.count || 0) + 1).padStart(3, "0")}`;
+}
+
+async function createModelVersion(body = {}) {
+  const modelId = body.modelId || body.model_id;
+  if (!modelId) throw new Error("请选择模型族");
+  const model = (await query("SELECT * FROM ml_models WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
+  if (!model) throw new Error("模型族不存在");
+  const stage = String(body.stage || "pretrained").trim();
+  const sourcePath = String(body.sourcePath || body.source_path || "").trim();
+  const params = body.params || {};
+  const defaultPrefix = `${stage === "pretrained" ? "pretrain" : stage}_${model.name}_${dateCode()}`;
+  const versionName = String(body.versionName || body.version_name || await nextModelVersionName(defaultPrefix, model.id)).trim();
+  const artifactRoot = path.join(storageRoot, "runtime", "models", model.id, versionName);
+  fs.mkdirSync(artifactRoot, { recursive: true });
+  const version = (await query(
+    `INSERT INTO model_versions (model_id, version_name, stage, params_json, artifact_root)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
+  )).rows[0];
+  if (sourcePath) {
+    if (!fs.existsSync(sourcePath)) throw new Error("权重文件不存在");
+    const ext = path.extname(sourcePath).toLowerCase() || ".pt";
+    const target = path.join(artifactRoot, `weights${ext}`);
+    fs.copyFileSync(sourcePath, target);
+    const objectKey = `ml/artifacts/models/${model.id}/${version.id}/weights${ext}`;
+    await store.putFile(objectKey, target);
+    const stat = fs.statSync(target);
+    const sha = await hashFile(target).catch(() => null);
+    await query(
+      `INSERT INTO model_artifacts (model_version_id, artifact_type, path, size, sha256, metadata_json)
+       VALUES ($1,'weights',$2,$3,$4,$5)`,
+      [version.id, objectKey, stat.size, sha, JSON.stringify({ localPath: target, sourcePath })],
+    );
+  }
+  return version;
+}
+
+async function renameModelVersion(versionId, body = {}) {
+  const name = String(body.versionName || body.version_name || "").trim();
+  if (!name) throw new Error("版本名不能为空");
+  const rows = await query("UPDATE model_versions SET version_name=$1 WHERE id=$2 RETURNING *", [name, versionId]);
+  if (!rows.rows[0]) throw new Error("模型版本不存在");
+  return rows.rows[0];
+}
+
+async function listDatasetSnapshots() {
+  const rows = await query(
+    `SELECT ds.*, p.name AS source_project_name
+     FROM dataset_snapshots ds
+     LEFT JOIN projects p ON p.id=ds.source_project_id
+     ORDER BY ds.created_at DESC
+     LIMIT 200`,
+  );
+  return rows.rows;
+}
+
+async function listTrainingTemplates() {
+  return (await query("SELECT * FROM training_templates ORDER BY created_at DESC")).rows;
+}
+
+function templateCapabilities(body = {}) {
+  const raw = body.capabilities || body.capabilities_json || {};
+  if (Array.isArray(raw.tasks) && raw.tasks.length) {
+    return { ...raw, tasks: raw.tasks.filter((task) => ["detect", "segment", "classify"].includes(task)) };
+  }
+  const key = String(body.templateKey || body.template_key || "").toLowerCase();
+  const framework = String(body.framework || "").toLowerCase();
+  if (framework === "ultralytics" || key.includes("ultralytics") || key.includes("yolo")) {
+    return { tasks: ["detect", "segment", "classify"], autoDetected: true };
+  }
+  return { tasks: [body.taskType || body.task_type || "detect"], autoDetected: false };
+}
+
+async function createTrainingTemplate(body = {}) {
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("模板名称不能为空");
+  const capabilities = templateCapabilities(body);
+  const taskType = capabilities.tasks?.[0] || body.taskType || body.task_type || "detect";
+  const rows = await query(
+    `INSERT INTO training_templates (name, template_key, framework, task_type, command_json, default_params_json, capabilities_json, description)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [
+      name,
+      body.templateKey || body.template_key || "ultralytics_yolo",
+      body.framework || "ultralytics",
+      taskType,
+      JSON.stringify(body.command || body.command_json || {}),
+      JSON.stringify(body.defaultParams || body.default_params_json || {}),
+      JSON.stringify(capabilities),
+      body.description || "",
+    ],
+  );
+  return rows.rows[0];
+}
+
+async function listPythonEnvs() {
+  return (await query("SELECT * FROM python_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
+}
+
+async function createPythonEnv(body = {}) {
+  const pythonPath = path.resolve(String(body.pythonPath || body.python_path || "").trim());
+  if (!pythonPath || !fs.existsSync(pythonPath)) throw new Error("Python 解释器路径不存在");
+  const info = inspectPythonEnv(pythonPath);
+  const envType = ["conda", "miniforge"].includes(body.envType || body.env_type) ? (body.envType || body.env_type) : inferEnvType(pythonPath);
+  const osType = ["windows", "linux"].includes(body.osType || body.os_type) ? (body.osType || body.os_type) : info.platform.osType;
+  const arch = ["x86_64", "arm64"].includes(body.arch) ? body.arch : info.platform.arch;
+  const accelerator = ["cpu", "cuda"].includes(body.accelerator) ? body.accelerator : info.accelerator;
+  const rows = await query(
+    `INSERT INTO python_envs (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version, packages_json, capabilities_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [
+      body.name || info.version || path.basename(pythonPath),
+      pythonPath,
+      envType,
+      osType,
+      arch,
+      accelerator,
+      info.status,
+      info.version,
+      info.packages.torch_version || "",
+      Boolean(info.packages.cuda_available),
+      info.packages.cuda_version || "",
+      JSON.stringify(info.packages),
+      JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
+    ],
+  );
+  return rows.rows[0];
+}
+
+async function listModelVersions(modelId) {
+  const params = [];
+  const where = [];
+  if (modelId) {
+    params.push(modelId);
+    where.push(`mv.model_id=$${params.length}`);
+  }
+  const rows = await query(
+    `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name
+     FROM model_versions mv
+     JOIN ml_models m ON m.id=mv.model_id
+     LEFT JOIN projects p ON p.id=mv.dataset_project_id
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY mv.created_at DESC
+     LIMIT 200`,
+    params,
+  );
+  return rows.rows;
+}
+
+async function findWeightArtifact(modelVersionId) {
+  if (!modelVersionId) return null;
+  const rows = await query(
+    `SELECT ma.*
+     FROM model_artifacts ma
+     WHERE ma.model_version_id=$1 AND ma.artifact_type='weights'
+     ORDER BY
+       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
+       ma.created_at DESC
+     LIMIT 1`,
+    [modelVersionId],
+  );
+  const artifact = rows.rows[0];
+  if (!artifact) return null;
+  const meta = artifact.metadata_json || {};
+  if (meta.localPath && fs.existsSync(meta.localPath)) return meta.localPath;
+  const fallback = store.localFallbackPath(artifact.path);
+  if (fs.existsSync(fallback)) return fallback;
+  return null;
+}
+
+async function streamModelArtifact(res, modelVersionId, artifactId) {
+  const params = [modelVersionId];
+  let where = "ma.model_version_id=$1";
+  if (artifactId) {
+    params.push(artifactId);
+    where += ` AND ma.id=$${params.length}`;
+  } else {
+    where += " AND ma.artifact_type='weights'";
+  }
+  const rows = await query(
+    `SELECT ma.*, mv.version_name, m.name AS model_name
+     FROM model_artifacts ma
+     JOIN model_versions mv ON mv.id=ma.model_version_id
+     JOIN ml_models m ON m.id=mv.model_id
+     WHERE ${where}
+     ORDER BY
+       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
+       ma.created_at DESC
+     LIMIT 1`,
+    params,
+  );
+  const artifact = rows.rows[0];
+  if (!artifact) return sendError(res, 404, "model artifact not found");
+  const ext = path.extname(artifact.path || "") || ".bin";
+  const fileName = `${cleanName(artifact.model_name, "model")}_${cleanName(artifact.version_name, "version")}_${path.basename(artifact.path || `artifact${ext}`)}`;
+  const meta = artifact.metadata_json || {};
+  const localPath = meta.localPath && fs.existsSync(meta.localPath) ? meta.localPath : store.localFallbackPath(artifact.path);
+  if (fs.existsSync(localPath)) {
+    res.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+    });
+    fs.createReadStream(localPath).pipe(res);
+    return;
+  }
+  const stream = await store.getStream(artifact.path);
+  res.writeHead(200, {
+    "content-type": "application/octet-stream",
+    "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+  });
+  stream.pipe(res);
+}
+
+async function listTrainingJobs() {
+  const rows = await query(
+    `SELECT tj.*, p.name AS dataset_project_name, m.name AS model_name, ds.name AS dataset_snapshot_name
+     FROM training_jobs tj
+     LEFT JOIN projects p ON p.id=tj.dataset_project_id
+     LEFT JOIN ml_models m ON m.id=tj.model_id
+     LEFT JOIN dataset_snapshots ds ON ds.id=tj.dataset_snapshot_id
+     ORDER BY tj.created_at DESC
+     LIMIT 200`,
+  );
+  return rows.rows;
+}
+
+async function createTrainingJob(body = {}) {
+  const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
+  if (!datasetProjectId) throw new Error("请选择训练数据集项目");
+  const project = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
+  if (!project) throw new Error("训练数据集项目不存在");
+  const modelId = body.modelId || body.model_id || null;
+  if (modelId) {
+    const model = (await query("SELECT id FROM ml_models WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
+    if (!model) throw new Error("模型不存在");
+  }
+  const params = { ...(body.params || {}) };
+  if (body.templateId || body.template_id) {
+    const template = (await query("SELECT * FROM training_templates WHERE id=$1", [body.templateId || body.template_id])).rows[0];
+    if (!template) throw new Error("训练模板不存在");
+    Object.assign(params, template.default_params_json || {}, params);
+    const requestedTask = String(body.taskType || body.task_type || params.taskType || template.task_type || "detect");
+    const supportedTasks = template.capabilities_json?.tasks || [template.task_type || "detect"];
+    if (!supportedTasks.includes(requestedTask)) throw new Error(`训练模板不支持 ${requestedTask} 任务`);
+    params.templateId = template.id;
+    params.templateKey = template.template_key;
+    params.taskType = requestedTask;
+  }
+  if (body.pythonEnvId || body.python_env_id) {
+    const env = (await query("SELECT * FROM python_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
+    if (!env) throw new Error("Python 环境不存在");
+    params.pythonEnvId = env.id;
+    params.python = env.python_path;
+  }
+  if (body.initialModelVersionId || body.initial_model_version_id) params.initialModelVersionId = body.initialModelVersionId || body.initial_model_version_id;
+  const totalEpochs = Number(params.epochs || body.totalEpochs || 0) || 0;
+  const name = String(body.name || `${project.name}_train_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
+  const template = String(body.template || "ultralytics_yolo_detect");
+  const inserted = await query(
+    `INSERT INTO training_jobs (name, template, dataset_project_id, model_id, params_json, total_epochs, message)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [name, template, datasetProjectId, modelId, JSON.stringify(params), totalEpochs, "已进入训练队列，等待训练 worker 接管"],
+  );
+  const job = inserted.rows[0];
+  const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
+  fs.mkdirSync(outputRoot, { recursive: true });
+  const updated = await query("UPDATE training_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
+  await query("INSERT INTO training_job_logs (job_id, stream, line) VALUES ($1,$2,$3)", [job.id, "system", `queued: ${template}; dataset=${project.name}`]);
+  return updated.rows[0];
+}
+
+async function requeueTrainingJob(jobId, body = {}) {
+  const job = (await query("SELECT * FROM training_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw new Error("训练任务不存在");
+  const params = { ...(job.params_json || {}), ...(body.params || {}) };
+  const totalEpochs = Number(params.epochs || job.total_epochs || 0) || 0;
+  const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
+  fs.mkdirSync(outputRoot, { recursive: true });
+  const updated = await query(
+    `UPDATE training_jobs
+     SET status='pending', params_json=$1, progress=0, current_epoch=0, total_epochs=$2,
+         worker_id='', process_pid=NULL, heartbeat_at=NULL, started_at=NULL, finished_at=NULL,
+         output_root=$3, message=$4
+     WHERE id=$5 RETURNING *`,
+    [JSON.stringify(params), totalEpochs, outputRoot, "已重新进入训练队列", jobId],
+  );
+  await appendTrainingLog(jobId, "system", "job requeued");
+  return updated.rows[0];
+}
+
+async function listInferenceJobs() {
+  const rows = await query(
+    `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
+     FROM inference_jobs ij
+     LEFT JOIN model_versions mv ON mv.id=ij.model_version_id
+     LEFT JOIN ml_models m ON m.id=mv.model_id
+     LEFT JOIN projects p ON p.id=ij.dataset_project_id
+     ORDER BY ij.created_at DESC
+     LIMIT 200`,
+  );
+  return rows.rows;
+}
+
+async function createInferenceJob(body = {}) {
+  const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
+  if (!datasetProjectId) throw new Error("请选择推理数据集项目");
+  const project = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
+  if (!project) throw new Error("推理数据集项目不存在");
+  const modelVersionId = body.modelVersionId || body.model_version_id || null;
+  if (modelVersionId) {
+    const version = (await query("SELECT id FROM model_versions WHERE id=$1", [modelVersionId])).rows[0];
+    if (!version) throw new Error("模型版本不存在");
+  }
+  const params = body.params || {};
+  const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
+  const inserted = await query(
+    `INSERT INTO inference_jobs (name, model_version_id, dataset_project_id, params_json, message)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [name, modelVersionId, datasetProjectId, JSON.stringify(params), "已进入推理队列，等待推理 worker 接管"],
+  );
+  const job = inserted.rows[0];
+  const outputRoot = path.join(storageRoot, "runtime", "inference", job.id);
+  fs.mkdirSync(outputRoot, { recursive: true });
+  const updated = await query("UPDATE inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
+  return updated.rows[0];
+}
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value ?? ""));
+}
+
+function yoloClassLine(ann, width, height, labelIndex) {
+  const x = Number(ann.bbox_x || 0);
+  const y = Number(ann.bbox_y || 0);
+  const w = Number(ann.bbox_w || 0);
+  const h = Number(ann.bbox_h || 0);
+  const cx = (x + w / 2) / Math.max(1, Number(width || 1));
+  const cy = (y + h / 2) / Math.max(1, Number(height || 1));
+  return [
+    labelIndex,
+    Math.max(0, Math.min(1, cx)).toFixed(8),
+    Math.max(0, Math.min(1, cy)).toFixed(8),
+    Math.max(0, Math.min(1, w / Math.max(1, Number(width || 1)))).toFixed(8),
+    Math.max(0, Math.min(1, h / Math.max(1, Number(height || 1)))).toFixed(8),
+  ].join(" ");
+}
+
+async function writeObjectToFile(objectKey, targetPath) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const stream = await store.getStream(objectKey);
+  await new Promise((resolve, reject) => {
+    const write = fs.createWriteStream(targetPath);
+    stream.pipe(write);
+    write.on("finish", resolve);
+    write.on("error", reject);
+    stream.on("error", reject);
+  });
+}
+
+async function appendTrainingLog(jobId, stream, line) {
+  const text = String(line || "").slice(0, 4000);
+  if (!text) return;
+  await query("INSERT INTO training_job_logs (job_id, stream, line) VALUES ($1,$2,$3)", [jobId, stream, text]).catch(() => {});
+}
+
+async function createDatasetSnapshotForTraining(job) {
+  const existingId = job.dataset_snapshot_id;
+  if (existingId) {
+    const existing = (await query("SELECT * FROM dataset_snapshots WHERE id=$1", [existingId])).rows[0];
+    if (existing) return existing;
+  }
+  const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [job.dataset_project_id])).rows[0];
+  if (!project) throw new Error("训练数据集项目不存在");
+  if (!project.active_label_version_id) throw new Error("项目没有 active_label_version_id，无法生成训练快照");
+
+  const rows = (await query(
+    `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
+     FROM project_images pi
+     JOIN image_assets ia ON ia.id=pi.image_asset_id
+     LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
+     WHERE pi.project_id=$1 AND pi.deleted_at IS NULL AND (ib.id IS NULL OR ib.deleted_at IS NULL)
+     ORDER BY pi.created_at, pi.id`,
+    [project.id],
+  )).rows;
+  if (!rows.length) throw new Error("项目没有可训练图片");
+
+  const annRows = (await query(
+    `SELECT a.*
+     FROM image_annotations a
+     WHERE a.label_version_id=$1 AND a.project_image_id = ANY($2::uuid[])
+     ORDER BY a.label, a.id`,
+    [project.active_label_version_id, rows.map((row) => row.id)],
+  )).rows;
+  const labels = Array.from(new Set(annRows.map((ann) => String(ann.label || "unknown")))).sort((a, b) => a.localeCompare(b));
+  if (!labels.length) throw new Error("项目没有标注类别，无法生成 YOLO 快照");
+  const labelToIndex = new Map(labels.map((label, index) => [label, index]));
+  const annsByImage = new Map();
+  for (const ann of annRows) {
+    const key = String(ann.project_image_id);
+    if (!annsByImage.has(key)) annsByImage.set(key, []);
+    annsByImage.get(key).push(ann);
+  }
+
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
+  const snapshotName = `${cleanName(project.name, "dataset")}_${stamp}`;
+  const snapshotRoot = path.join(storageRoot, "runtime", "snapshots", snapshotName);
+  const splitRatio = 0.9;
+  const split = { train: 0, val: 0, ratio: splitRatio };
+  fs.mkdirSync(snapshotRoot, { recursive: true });
+  for (const part of ["train", "val"]) {
+    fs.mkdirSync(path.join(snapshotRoot, "images", part), { recursive: true });
+    fs.mkdirSync(path.join(snapshotRoot, "labels", part), { recursive: true });
+  }
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const item = rows[i];
+    const part = rows.length < 5 || i < Math.ceil(rows.length * splitRatio) ? "train" : "val";
+    split[part] += 1;
+    const ext = item.original_ext || ".jpg";
+    const base = exportBaseName(item, i + 1);
+    const imageName = `${base}${ext}`;
+    const labelName = `${base}.txt`;
+    await writeObjectToFile(item.object_key, path.join(snapshotRoot, "images", part, imageName));
+    const lines = (annsByImage.get(String(item.id)) || []).map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
+    fs.writeFileSync(path.join(snapshotRoot, "labels", part, labelName), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
+  }
+
+  const dataYaml = [
+    `path: ${yamlScalar(snapshotRoot.replace(/\\/g, "/"))}`,
+    "train: images/train",
+    "val: images/val",
+    `nc: ${labels.length}`,
+    "names:",
+    ...labels.map((label, index) => `  ${index}: ${yamlScalar(label)}`),
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(snapshotRoot, "data.yaml"), dataYaml, "utf8");
+  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: project.id, labelVersionId: project.active_label_version_id, labels, split, imageCount: rows.length, annotationCount: annRows.length }, null, 2), "utf8");
+
+  const snapshot = (await query(
+    `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
+     VALUES ($1,$2,$3,'yolo',$4,$5,$6,$7,$8) RETURNING *`,
+    [snapshotName, project.id, project.active_label_version_id, JSON.stringify(split), snapshotRoot, rows.length, annRows.length, JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml") })],
+  )).rows[0];
+  await query("UPDATE training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
+  await appendTrainingLog(job.id, "system", `dataset snapshot created: ${snapshotRoot}`);
+  return snapshot;
+}
+
+function buildTrainingCommand(job, snapshot) {
+  const params = job.params_json || {};
+  if (Array.isArray(params.command) && params.command.length) {
+    return { command: params.command[0], args: params.command.slice(1) };
+  }
+  const python = params.python || process.env.PYTHON || "python";
+  const model = params.resolvedWeights || params.weights || params.model || "yolov8n.pt";
+  const taskType = ["detect", "segment", "classify"].includes(params.taskType) ? params.taskType : "detect";
+  const args = [
+    "-c", "from ultralytics.cfg import entrypoint; entrypoint()",
+    taskType, "train",
+    `data=${path.join(snapshot.path, "data.yaml")}`,
+    `model=${model}`,
+    `epochs=${Number(params.epochs || job.total_epochs || 100)}`,
+    `imgsz=${Number(params.imgsz || 640)}`,
+    `batch=${Number(params.batch || 16)}`,
+    `project=${job.output_root}`,
+    "name=run",
+    "exist_ok=True",
+  ];
+  if (params.device !== "" && params.device != null) args.push(`device=${params.device}`);
+  return { command: python, args };
+}
+
+async function claimTrainingJob(workerId) {
+  return transaction(async (client) => {
+    const row = (await client.query(
+      `SELECT * FROM training_jobs
+       WHERE status='pending'
+       ORDER BY priority DESC, created_at
+       FOR UPDATE SKIP LOCKED
+       LIMIT 1`,
+    )).rows[0];
+    if (!row) return null;
+    const updated = (await client.query(
+      `UPDATE training_jobs
+       SET status='preparing', worker_id=$1, heartbeat_at=now(), started_at=COALESCE(started_at, now()), message=$2
+       WHERE id=$3 RETURNING *`,
+      [workerId, "正在生成数据集快照", row.id],
+    )).rows[0];
+    return updated;
+  });
+}
+
+async function scanArtifacts(job, modelVersionId) {
+  const root = job.output_root;
+  const files = walk(root).filter((file) => fs.statSync(file).isFile());
+  const saved = [];
+  for (const file of files) {
+    const rel = path.relative(root, file).replace(/\\/g, "/");
+    const ext = path.extname(file).toLowerCase();
+    const artifactType = ext === ".pt" || ext === ".onnx" ? "weights" : ext === ".png" || ext === ".jpg" ? "figure" : ext === ".yaml" || ext === ".json" ? "config" : "file";
+    const objectKey = `ml/artifacts/training/${job.id}/${rel}`;
+    await store.putFile(objectKey, file);
+    const stat = fs.statSync(file);
+    const sha = stat.size < 1024 * 1024 * 1024 ? await hashFile(file).catch(() => null) : null;
+    const row = (await query(
+      `INSERT INTO model_artifacts (model_version_id, training_job_id, artifact_type, path, size, sha256, metadata_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [modelVersionId, job.id, artifactType, objectKey, stat.size, sha, JSON.stringify({ localPath: file, relativePath: rel })],
+    )).rows[0];
+    saved.push(row);
+  }
+  return saved;
+}
+
+async function finishTrainingJob(job) {
+  const modelId = job.model_id || (await createMlModel({ name: `${job.name}_model`, taskType: "detect", framework: "ultralytics", description: "Auto-created from training job" })).id;
+  const project = (await query("SELECT name FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
+  const params = job.params_json || {};
+  const prefix = `detect_${project?.name || "dataset"}_yolo_ep${Number(params.epochs || job.total_epochs || 0) || "x"}_${dateCode()}`;
+  const versionName = await nextModelVersionName(prefix, modelId);
+  const version = (await query(
+    `INSERT INTO model_versions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
+     VALUES ($1,$2,$3,$4,$5,'candidate',$6,$7) RETURNING *`,
+    [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify(job.params_json || {}), job.output_root],
+  )).rows[0];
+  const artifacts = await scanArtifacts(job, version.id);
+  await query(
+    "UPDATE training_jobs SET model_id=$1, status='done', progress=100, message=$2, finished_at=now(), heartbeat_at=now() WHERE id=$3",
+    [modelId, `训练完成，生成模型版本 ${version.version_name}，登记 ${artifacts.length} 个 artifact`, job.id],
+  );
+  await appendTrainingLog(job.id, "system", `model version created: ${version.version_name}; artifacts=${artifacts.length}`);
+}
+
+function parseMetricLine(line) {
+  const metrics = [];
+  const patterns = [
+    ["box_loss", /box_loss[=: ]+([0-9.]+)/i],
+    ["cls_loss", /cls_loss[=: ]+([0-9.]+)/i],
+    ["dfl_loss", /dfl_loss[=: ]+([0-9.]+)/i],
+    ["map50", /mAP50(?:\S*)?[=: ]+([0-9.]+)/i],
+  ];
+  for (const [key, regex] of patterns) {
+    const match = String(line).match(regex);
+    if (match) metrics.push({ key, value: Number(match[1]) });
+  }
+  return metrics;
+}
+
+async function runTrainingJob(job, workerId) {
+  try {
+    fs.mkdirSync(job.output_root, { recursive: true });
+    const snapshot = await createDatasetSnapshotForTraining(job);
+    job = (await query("SELECT * FROM training_jobs WHERE id=$1", [job.id])).rows[0];
+    if (job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
+      const weightPath = await findWeightArtifact(job.params_json.initialModelVersionId);
+      if (!weightPath) throw new Error("选择的初始化模型版本没有可用权重 artifact");
+      job.params_json = { ...(job.params_json || {}), resolvedWeights: weightPath };
+      await query("UPDATE training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
+      await appendTrainingLog(job.id, "system", `resolved initial weights: ${weightPath}`);
+    }
+    const { command, args } = buildTrainingCommand(job, snapshot);
+    await query("UPDATE training_jobs SET status='running', message=$1, heartbeat_at=now() WHERE id=$2", [`正在执行: ${command} ${args.join(" ")}`, job.id]);
+    await appendTrainingLog(job.id, "system", `command: ${command} ${args.join(" ")}`);
+    const child = spawn(command, args, { cwd: job.output_root, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    await query("UPDATE training_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]);
+    const onData = (stream) => async (chunk) => {
+      const text = chunk.toString("utf8");
+      for (const line of text.split(/\r?\n/).filter(Boolean)) {
+        await appendTrainingLog(job.id, stream, line);
+        for (const metric of parseMetricLine(line)) {
+          await query("INSERT INTO training_metrics (job_id, key, value) VALUES ($1,$2,$3)", [job.id, metric.key, metric.value]).catch(() => {});
+        }
+      }
+      await query("UPDATE training_jobs SET heartbeat_at=now(), message=$1 WHERE id=$2", [text.split(/\r?\n/).filter(Boolean).slice(-1)[0]?.slice(0, 500) || "训练中", job.id]).catch(() => {});
+    };
+    child.stdout.on("data", onData("stdout"));
+    child.stderr.on("data", onData("stderr"));
+    const exitCode = await new Promise((resolve) => child.on("close", resolve));
+    job = (await query("SELECT * FROM training_jobs WHERE id=$1", [job.id])).rows[0];
+    if (exitCode !== 0) throw new Error(`训练命令退出码 ${exitCode}`);
+    await finishTrainingJob(job);
+  } catch (error) {
+    await appendTrainingLog(job.id, "error", error.stack || error.message);
+    await query("UPDATE training_jobs SET status='failed', message=$1, finished_at=now(), heartbeat_at=now() WHERE id=$2", [error.message || "训练失败", job.id]).catch(() => {});
+  }
+}
+
+function startTrainingWorker() {
+  if (String(process.env.TRAINING_WORKER_ENABLED || "true").toLowerCase() === "false") return;
+  const workerId = `local-${process.pid}`;
+  let busy = false;
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const job = await claimTrainingJob(workerId);
+      if (job) await runTrainingJob(job, workerId);
+    } catch (error) {
+      console.error("training worker error:", error);
+    } finally {
+      busy = false;
+    }
+  }, Number(process.env.TRAINING_WORKER_INTERVAL_MS || 3000));
+}
+
+async function saveImageAnnotations(projectImageId, body = {}) {
+  const image = (await query(
+    `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, p.active_label_version_id, p.id AS project_id
+     FROM project_images pi
+     JOIN image_assets ia ON ia.id = pi.image_asset_id
+     JOIN projects p ON p.id = pi.project_id
+     WHERE pi.id=$1 AND pi.deleted_at IS NULL AND p.deleted_at IS NULL`,
+    [projectImageId],
+  )).rows[0];
+  if (!image) throw new Error("image not found");
+
+  let labelVersionId = image.active_label_version_id;
+  if (!labelVersionId) {
+    const version = (await query(
+      `INSERT INTO label_versions (project_id, name, target_type, status)
+       VALUES ($1,$2,'image','active') RETURNING *`,
+      [image.project_id, `manual_${new Date().toISOString()}`],
+    )).rows[0];
+    labelVersionId = version.id;
+    await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [labelVersionId, image.project_id]);
+  }
+
+  const maxW = Number(image.image_width || 1);
+  const maxH = Number(image.image_height || 1);
+  const annotations = Array.isArray(body.annotations) ? body.annotations : [];
+  const clean = annotations.map((ann) => {
+    const x = Math.max(0, Math.min(maxW - 1, Number(ann.bbox_x || 0)));
+    const y = Math.max(0, Math.min(maxH - 1, Number(ann.bbox_y || 0)));
+    const w = Math.max(1, Math.min(maxW - x, Number(ann.bbox_w || 1)));
+    const h = Math.max(1, Math.min(maxH - y, Number(ann.bbox_h || 1)));
+    return {
+      label: String(ann.label || "").trim() || "unknown",
+      bbox_x: x,
+      bbox_y: y,
+      bbox_w: w,
+      bbox_h: h,
+      shape_type: ann.shape_type || "rectangle",
+      difficult: Boolean(ann.difficult),
+      score: ann.score == null ? null : Number(ann.score),
+      attributes_json: ann.attributes_json || ann.attributes || {},
+    };
+  });
+
+  return transaction(async (client) => {
+    await client.query("DELETE FROM image_annotations WHERE label_version_id=$1 AND project_image_id=$2", [labelVersionId, projectImageId]);
+    const saved = [];
+    for (const ann of clean) {
+      const row = (await client.query(
+        `INSERT INTO image_annotations
+         (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [labelVersionId, projectImageId, ann.label, ann.bbox_x, ann.bbox_y, ann.bbox_w, ann.bbox_h, ann.shape_type, ann.difficult, ann.score, ann.attributes_json],
+      )).rows[0];
+      saved.push(row);
+    }
+    await client.query("UPDATE projects SET updated_at=now() WHERE id=$1", [image.project_id]);
+    return { annotations: saved };
+  });
+}
+
+async function listProjectImages(projectId, queryParams) {
+  const page = Math.max(1, Number(queryParams.page || 1));
+  const pageSize = Math.min(200, Math.max(12, Number(queryParams.pageSize || 48)));
+  const offset = (page - 1) * pageSize;
+  const params = [projectId];
+  const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
+
+  const listParam = (...keys) => {
+    for (const key of keys) {
+      const raw = queryParams[key];
+      if (!raw || raw === "all") continue;
+      const values = String(raw).split(",").map((item) => item.trim()).filter(Boolean);
+      if (values.length) return values;
+    }
+    return [];
+  };
+
+  const sceneValues = listParam("scenes", "scene");
+  const viewValues = listParam("views", "view");
+  const modalityValues = listParam("modalities", "modality");
+  const labelValues = listParam("labels", "label");
+  const importValues = listParam("importBatchIds", "importBatchId");
+  const q = String(queryParams.q || "").trim();
+
+  if (sceneValues.length) {
+    params.push(sceneValues);
+    where.push(`pi.scene = ANY($${params.length})`);
+  }
+  if (viewValues.length) {
+    params.push(viewValues);
+    where.push(`pi.view = ANY($${params.length})`);
+  }
+  if (modalityValues.length) {
+    params.push(modalityValues);
+    where.push(`pi.modality = ANY($${params.length})`);
+  }
+  if (importValues.length) {
+    params.push(importValues);
+    where.push(`pi.import_batch_id = ANY($${params.length}::uuid[])`);
+  }
+  if (q) {
+    params.push(`%${q}%`);
+    where.push(`(pi.display_name ILIKE $${params.length} OR pi.scene ILIKE $${params.length} OR pi.view ILIKE $${params.length} OR pi.keyword ILIKE $${params.length})`);
+  }
+  if (labelValues.length) {
+    params.push(labelValues);
+    where.push(`EXISTS (
+      SELECT 1 FROM image_annotations a
+      JOIN projects p ON p.active_label_version_id = a.label_version_id
+      WHERE p.id = pi.project_id AND a.project_image_id = pi.id AND a.label = ANY($${params.length})
+    )`);
+  }
+  params.push(pageSize, offset);
+  const rows = await query(
+    `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, ia.object_key,
+      (SELECT count(*)::int FROM image_annotations a
+       JOIN projects p ON p.active_label_version_id = a.label_version_id
+       WHERE p.id = pi.project_id AND a.project_image_id = pi.id) AS annotation_count
+     FROM project_images pi
+     JOIN image_assets ia ON ia.id = pi.image_asset_id
+     LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+     WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
+     ORDER BY pi.created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  const count = await query(
+    `SELECT count(*)::int AS count
+     FROM project_images pi
+     LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+     WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)`,
+    params.slice(0, -2),
+  );
+
+  const items = rows.rows;
+  if (!items.length) return { page, pageSize, total: count.rows[0].count, items };
+
+  const annParams = [projectId, items.map((item) => item.id)];
+  const annWhere = ["p.id=$1", "a.project_image_id = ANY($2::uuid[])"];
+  if (labelValues.length) {
+    annParams.push(labelValues);
+    annWhere.push(`a.label = ANY($${annParams.length})`);
+  }
+  const annotations = await query(
+    `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h, a.shape_type, a.difficult, a.score
+     FROM image_annotations a
+     JOIN projects p ON p.active_label_version_id = a.label_version_id
+     WHERE ${annWhere.join(" AND ")}
+     ORDER BY a.id`,
+    annParams,
+  );
+  const byImage = new Map();
+  for (const ann of annotations.rows) {
+    const key = String(ann.project_image_id);
+    if (!byImage.has(key)) byImage.set(key, []);
+    byImage.get(key).push(ann);
+  }
+  return { page, pageSize, total: count.rows[0].count, items: items.map((item) => ({ ...item, annotations: byImage.get(String(item.id)) || [] })) };
+}
+
+async function projectSummary(projectId) {
+  const rows = await query(
+    `SELECT
+      (SELECT count(*)::int FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS image_count,
+      (SELECT count(*)::int FROM project_videos WHERE project_id=$1 AND deleted_at IS NULL) AS video_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS annotation_count,
+      (SELECT json_agg(DISTINCT scene) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS scenes,
+      (SELECT json_agg(DISTINCT view) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS views,
+      (SELECT json_agg(DISTINCT modality) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS modalities,
+      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS labels`,
+    [projectId],
+  );
+  return rows.rows[0];
+}
+
+async function streamProjectImage(res, projectImageId, thumb) {
+  const result = await query(
+    `SELECT pi.id AS project_image_id, ia.*
+     FROM project_images pi JOIN image_assets ia ON ia.id=pi.image_asset_id
+     WHERE pi.id=$1 AND pi.deleted_at IS NULL`,
+    [projectImageId],
+  );
+  const row = result.rows[0];
+  if (!row) return sendError(res, 404, "image not found");
+  if (!thumb) {
+    const stream = await store.getStream(row.object_key);
+    res.writeHead(200, { "content-type": "application/octet-stream" });
+    stream.pipe(res);
+    return;
+  }
+  const thumbKey = `cache/thumbs/images/${row.id}.webp`;
+  if (!(await store.objectExists(thumbKey))) {
+    const tempDir = path.join(storageRoot, "tmp");
+    fs.mkdirSync(tempDir, { recursive: true });
+    const src = path.join(tempDir, `${row.id}${row.original_ext || ".jpg"}`);
+    const out = path.join(tempDir, `${row.id}.webp`);
+    await new Promise(async (resolve, reject) => {
+      const stream = await store.getStream(row.object_key);
+      const write = fs.createWriteStream(src);
+      stream.pipe(write);
+      write.on("finish", resolve);
+      write.on("error", reject);
+    });
+    await sharp(src).resize({ width: 420, height: 236, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toFile(out);
+    await store.putFile(thumbKey, out);
+  }
+  const stream = await store.getStream(thumbKey);
+  res.writeHead(200, { "content-type": "image/webp", "cache-control": "public, max-age=604800" });
+  stream.pipe(res);
+}
+
+function labelmeJson(meta, shapes, exportImageName) {
+  return {
+    version: "3.2.3",
+    flags: {},
+    shapes,
+    imagePath: `../images/${exportImageName}`,
+    imageData: null,
+    imageHeight: meta.height || 1,
+    imageWidth: meta.width || 1,
+    description: "",
+    view: meta.view || "",
+    scene: meta.scene || "",
+    keyword: meta.keyword || "",
+  };
+}
+
+async function exportProject(projectId, options = {}) {
+  const outputPath = options.outputPath ? path.resolve(options.outputPath) : "";
+  if (outputPath) fs.mkdirSync(outputPath, { recursive: true });
+  const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,'姝ｅ湪瀵煎嚭',now()) RETURNING *", [{ projectId, outputPath }])).rows[0];
+  const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
+  if (!project) throw new Error("project not found");
+  const rows = (await query(
+    `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
+     FROM project_images pi JOIN image_assets ia ON ia.id=pi.image_asset_id
+     WHERE pi.project_id=$1 AND pi.deleted_at IS NULL ORDER BY pi.created_at`,
+    [projectId],
+  )).rows;
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
+  const exportPrefix = `exports/${project.id}/export_${stamp}`;
+  const localRoot = outputPath ? path.join(outputPath, `${cleanName(project.name, "dataset")}_${stamp}`) : "";
+  const localImagesDir = localRoot ? path.join(localRoot, "images") : "";
+  const localJsonsDir = localRoot ? path.join(localRoot, "jsons") : "";
+  if (localRoot) {
+    fs.mkdirSync(localImagesDir, { recursive: true });
+    fs.mkdirSync(localJsonsDir, { recursive: true });
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const item = rows[i];
+    const base = exportBaseName(item, i + 1);
+    const ext = item.original_ext || ".jpg";
+    const exportImageName = `${base}${ext}`;
+    const exportJsonName = `${base}.json`;
+    const imageStream = await store.getStream(item.object_key);
+    const tempDir = path.join(storageRoot, "tmp", job.id);
+    fs.mkdirSync(tempDir, { recursive: true });
+    const tempImage = path.join(tempDir, exportImageName);
+    await new Promise((resolve, reject) => {
+      const write = fs.createWriteStream(tempImage);
+      imageStream.pipe(write);
+      write.on("finish", resolve);
+      write.on("error", reject);
+    });
+    await store.putFile(`${exportPrefix}/images/${exportImageName}`, tempImage);
+    if (localRoot) fs.copyFileSync(tempImage, path.join(localImagesDir, exportImageName));
+    const anns = (await query(
+      "SELECT * FROM image_annotations WHERE label_version_id=$1 AND project_image_id=$2 ORDER BY id",
+      [project.active_label_version_id, item.id],
+    )).rows;
+    const shapes = anns.map((ann) => ({
+      label: ann.label,
+      score: ann.score,
+      points: [
+        [Number(ann.bbox_x), Number(ann.bbox_y)],
+        [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y)],
+        [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y) + Number(ann.bbox_h)],
+        [Number(ann.bbox_x), Number(ann.bbox_y) + Number(ann.bbox_h)],
+      ],
+      group_id: null,
+      description: "",
+      difficult: ann.difficult,
+      shape_type: ann.shape_type,
+      flags: {},
+      attributes: ann.attributes_json || {},
+      kie_linking: [],
+    }));
+    const exportJson = labelmeJson(item, shapes, exportImageName);
+    await store.putJson(`${exportPrefix}/jsons/${exportJsonName}`, exportJson);
+    if (localRoot) fs.writeFileSync(path.join(localJsonsDir, exportJsonName), JSON.stringify(exportJson, null, 2), "utf8");
+    await query("INSERT INTO export_items (job_id, project_image_id, export_image_name, export_json_name) VALUES ($1,$2,$3,$4)", [job.id, item.id, exportImageName, exportJsonName]);
+    await query("UPDATE jobs SET progress=$1, message=$2 WHERE id=$3", [Math.round(((i + 1) / Math.max(1, rows.length)) * 100), `瀵煎嚭 ${i + 1}/${rows.length}`, job.id]);
+  }
+  const message = localRoot ? `瀵煎嚭瀹屾垚锛?{localRoot}` : `瀵煎嚭瀹屾垚锛歴3://${store.bucket}/${exportPrefix}`;
+  await query("UPDATE jobs SET status='done', progress=100, message=$1, finished_at=now() WHERE id=$2", [message, job.id]);
+  return { jobId: job.id, exportPrefix, outputDir: localRoot };
+}
+
+async function route(req, res) {
+  const parsed = url.parse(req.url, true);
+  const method = req.method;
+  if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
+    return sendJson(res, {
+      selectedPath: "",
+      error: "Windows folder dialog is disabled because it can block the local API. Please enter the folder path manually.",
+    });
+  }
+  if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await listProjects(false) });
+  if (method === "GET" && parsed.pathname === "/api/projects/trash") return sendJson(res, { projects: await listProjects(true) });
+  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") return sendJson(res, await emptyProjectTrash());
+  if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req)) });
+  const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (method === "DELETE" && deleteProject) {
+    await query("UPDATE projects SET deleted_at=now() WHERE id=$1", [deleteProject[1]]);
+    return sendJson(res, { ok: true });
+  }
+  const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
+  if (method === "POST" && restoreProject) {
+    await query("UPDATE projects SET deleted_at=NULL WHERE id=$1", [restoreProject[1]]);
+    return sendJson(res, { ok: true });
+  }
+  if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req)));
+  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await listMlModels() });
+  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id) });
+  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates() });
+  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs() });
+  if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await createPythonEnv(await readBody(req)) });
+  const renameModelVersionMatch = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
+  if (method === "PATCH" && renameModelVersionMatch) return sendJson(res, { version: await renameModelVersion(renameModelVersionMatch[1], await readBody(req)) });
+  const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
+  if (method === "GET" && modelVersionDownload) return streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id);
+  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots() });
+  if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs() });
+  if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req)) });
+  const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
+  if (method === "POST" && requeueTrainingMatch) return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) });
+  const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
+  if (method === "GET" && trainingLogsMatch) {
+    const rows = await query("SELECT * FROM training_job_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
+    return sendJson(res, { logs: rows.rows.reverse() });
+  }
+  const trainingMetricsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/metrics$/);
+  if (method === "GET" && trainingMetricsMatch) {
+    const rows = await query("SELECT * FROM training_metrics WHERE job_id=$1 ORDER BY id DESC LIMIT 500", [trainingMetricsMatch[1]]);
+    return sendJson(res, { metrics: rows.rows.reverse() });
+  }
+  if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
+  if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
+  if (method === "POST" && parsed.pathname === "/api/baselines/preview") return sendJson(res, await createBaselinePreview(await readBody(req)));
+  const baselineConflicts = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/conflicts$/);
+  if (method === "GET" && baselineConflicts) return sendJson(res, { conflicts: await listBaselineConflicts(baselineConflicts[1]) });
+  if (method === "POST" && baselineConflicts) return sendJson(res, await resolveBaselineConflicts(baselineConflicts[1], await readBody(req)));
+  const applyBaseline = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/apply$/);
+  if (method === "POST" && applyBaseline) return sendJson(res, await applyBaselineRun(applyBaseline[1], await readBody(req)));
+  const imports = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports$/);
+  if (method === "GET" && imports) return sendJson(res, { imports: await listImports(imports[1], parsed.query.trash === "1") });
+  const emptyImportsTrash = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports\/trash\/empty$/);
+  if (method === "DELETE" && emptyImportsTrash) return sendJson(res, await emptyImportTrash(emptyImportsTrash[1]));
+  const deleteImport = parsed.pathname.match(/^\/api\/imports\/([^/]+)$/);
+  if (method === "DELETE" && deleteImport) {
+    await softDeleteImport(deleteImport[1]);
+    return sendJson(res, { ok: true });
+  }
+  const cancelImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/cancel$/);
+  if (method === "POST" && cancelImportMatch) {
+    await cancelImport(cancelImportMatch[1]);
+    return sendJson(res, { ok: true });
+  }
+  const restoreImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/restore$/);
+  if (method === "POST" && restoreImportMatch) {
+    await restoreImport(restoreImportMatch[1]);
+    return sendJson(res, { ok: true });
+  }
+  const summary = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/summary$/);
+  if (method === "GET" && summary) return sendJson(res, { summary: await projectSummary(summary[1]) });
+  const imageList = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images$/);
+  if (method === "GET" && imageList) return sendJson(res, await listProjectImages(imageList[1], parsed.query));
+  const deleteImagesMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images\/delete$/);
+  if (method === "POST" && deleteImagesMatch) {
+    return sendJson(res, await softDeleteProjectImages(deleteImagesMatch[1], (await readBody(req)).ids));
+  }
+  const exportMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
+  if (method === "POST" && exportMatch) return sendJson(res, await exportProject(exportMatch[1], await readBody(req)));
+  const thumb = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/thumb$/);
+  if (method === "GET" && thumb) return streamProjectImage(res, thumb[1], true);
+  const full = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/full$/);
+  if (method === "GET" && full) return streamProjectImage(res, full[1], false);
+  const saveAnnotationsMatch = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/annotations\/save$/);
+  if (method === "POST" && saveAnnotationsMatch) return sendJson(res, await saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req)));
+  if (method === "GET" && parsed.pathname === "/api/jobs") {
+    const rows = await query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50");
+    return sendJson(res, { jobs: rows.rows });
+  }
+  if (method === "GET" && parsed.pathname === "/api/imports/latest") {
+    const projectId = parsed.query.projectId || parsed.query.project_id;
+    const params = [];
+    const where = ["deleted_at IS NULL"];
+    if (projectId) {
+      params.push(projectId);
+      where.push(`project_id=$${params.length}`);
+    }
+    const rows = await query(
+      `SELECT *, CASE WHEN total_files > 0 THEN round((processed_files::numeric / total_files::numeric) * 100)::int ELSE 0 END AS progress
+       FROM import_batches WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 1`,
+      params,
+    );
+    return sendJson(res, { importBatch: rows.rows[0] || null });
+  }
+
+  // Serve static files from dist/
+  if (method === "GET") {
+    // Try dist/ for frontend
+    let filePath = path.join(__dirname, "..", "dist", parsed.pathname === "/" ? "index.html" : parsed.pathname);
+    try {
+      if (fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const mimeTypes = {
+          ".html": "text/html; charset=utf-8",
+          ".js": "application/javascript; charset=utf-8",
+          ".css": "text/css; charset=utf-8",
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".webp": "image/webp",
+          ".svg": "image/svg+xml",
+          ".ico": "image/x-icon",
+          ".json": "application/json",
+          ".woff2": "font/woff2",
+          ".map": "application/json",
+        };
+        const contentType = mimeTypes[ext] || "application/octet-stream";
+        const content = fs.readFileSync(filePath);
+        const cacheControl = ext === ".html" || ext === ".js" || ext === ".css" ? "no-store" : "public, max-age=3600";
+        res.writeHead(200, { "content-type": contentType, "cache-control": cacheControl });
+        res.end(content);
+        return;
+      }
+    } catch {
+      // File not found, fall through to 404
+    }
+    // SPA fallback: serve index.html for non-API, non-file routes
+    if (!parsed.pathname.startsWith("/api/")) {
+      try {
+        const indexHtml = fs.readFileSync(path.join(__dirname, "..", "dist", "index.html"));
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        res.end(indexHtml);
+        return;
+      } catch {}
+    }
+  }
+  sendError(res, 404, "not found");
+}
+
+async function main() {
+  await ensureRuntimeSchema();
+  await store.ensureBucketSafe();
+  const server = http.createServer((req, res) => {
+    route(req, res).catch((error) => {
+      console.error(error);
+      sendError(res, 500, error.message);
+    });
+  });
+  globalThis.detDashboardServer = server;
+  server.on("error", (error) => console.error("HTTP server error:", error));
+  server.on("close", () => console.error("HTTP server closed"));
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`PostgreSQL + MinIO API: http://localhost:${port}`);
+    console.log(`DATA_ROOT=${dataRoot}`);
+    console.log(`STORAGE_ROOT=${storageRoot}`);
+  });
+  startTrainingWorker();
+}
+
+process.on("beforeExit", (code) => console.error(`Process beforeExit: ${code}`));
+process.on("exit", (code) => console.error(`Process exit: ${code}`));
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+
+
+

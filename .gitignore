@@ -1,0 +1,25 @@
+node_modules/
+
+# Build output
+dist/
+
+# Local environment
+.env
+.env.*
+!.env.example
+.conda-det-dashboard/
+.conda-pkgs/
+
+# Runtime data and generated assets
+runtime/
+tmp/
+object-store-fallback/
+
+# Logs
+*.log
+*.err.log
+*.out.log
+
+# OS/editor noise
+.DS_Store
+.vscode/

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>目标检测数据集工作台 - 静态预览</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <style>
+      .preview-icon { width: 16px; height: 16px; display: inline-block; border: 2px solid currentColor; border-radius: 4px; }
+      .preview-brand-icon { width: 20px; height: 20px; border: 2px solid #061014; border-radius: 50%; position: relative; }
+      .preview-brand-icon:after { content: ""; position: absolute; width: 9px; height: 2px; background: #061014; right: -6px; bottom: 0; transform: rotate(45deg); }
+      .preview-dots { display: grid; grid-template-columns: repeat(2, 5px); gap: 3px; }
+      .preview-dots i { width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark"><span class="preview-brand-icon"></span></div>
+          <div>
+            <h1>目标检测数据集工作台</h1>
+            <p>场景预览 · 类别统计 · 目标裁剪审查</p>
+          </div>
+        </div>
+        <label class="load-button"><span class="preview-icon"></span>加载数据集</label>
+        <div class="segment">
+          <button class="active">全部</button><button>红外</button><button>可见光</button>
+        </div>
+        <div class="search"><span class="preview-icon"></span><input placeholder="搜索文件名 / 场景 / 类别" /></div>
+        <div class="metric"><span class="preview-icon"></span><span>图片数</span><b>1280</b></div>
+        <div class="metric"><span class="preview-icon"></span><span>标注框</span><b>4627</b></div>
+        <div class="metric"><span class="preview-icon"></span><span>类别</span><b>8</b></div>
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="panel-title"><span class="preview-icon"></span><span>筛选条件</span></div>
+          <section class="filter-group">
+            <h3>场景</h3>
+            <button class="chip active"><span>全部场景</span><em>4</em></button>
+            <button class="chip"><span>Grassland</span></button>
+            <button class="chip"><span>Urban</span></button>
+            <button class="chip"><span>Desert</span></button>
+            <button class="chip"><span>Forest</span></button>
+          </section>
+          <section class="filter-group">
+            <h3>目标类别</h3>
+            <button class="class-chip active"><i style="background:#31d0aa"></i><span>gaoshepao</span><em>724</em></button>
+            <button class="class-chip"><i style="background:#72a7ff"></i><span>tank</span><em>511</em></button>
+            <button class="class-chip"><i style="background:#ffcc66"></i><span>truck</span><em>486</em></button>
+            <button class="class-chip"><i style="background:#ff7c7c"></i><span>radar</span><em>362</em></button>
+            <button class="class-chip"><i style="background:#b48cff"></i><span>missile</span><em>298</em></button>
+          </section>
+          <section class="filter-group">
+            <h3>数据状态</h3>
+            <div class="status-line"><span class="preview-icon"></span><span>有标注</span><b>4627</b></div>
+            <div class="status-line"><span class="preview-icon"></span><span>可见光</span><b>746</b></div>
+            <div class="status-line"><span class="preview-icon"></span><span>红外</span><b>534</b></div>
+          </section>
+        </aside>
+        <main class="workspace">
+          <div class="tabs">
+            <button class="active"><span class="preview-icon"></span>按场景预览</button>
+            <button><span class="preview-icon"></span>按类别预览</button>
+            <button><span class="preview-icon"></span>统计分析</button>
+          </div>
+          <div class="scene-grid">
+            <section class="scene-card">
+              <div class="scene-head"><div><h2>Grassland</h2><p>图片数 358 · 标注框 1260</p></div><span>88% 类别覆盖率</span></div>
+              <div class="thumb-grid">
+                <button class="image-tile visible active"><div class="synthetic visible"><span></span></div><div class="box-layer"><i class="bbox" style="left:50%;top:35%;width:9%;height:6%;border-color:#31d0aa"></i><i class="bbox" style="left:22%;top:52%;width:6%;height:6%;border-color:#72a7ff"></i></div><span class="modality-badge">VIS</span><strong>DJI_20260606104326_0001_V_00000.jpg</strong></button>
+                <button class="image-tile infrared"><div class="synthetic infrared"><span></span></div><div class="box-layer"><i class="bbox" style="left:44%;top:43%;width:7%;height:7%;border-color:#31d0aa"></i></div><span class="modality-badge">IR</span><strong>IR_Grassland_00021.jpg</strong></button>
+                <button class="image-tile visible"><div class="synthetic visible"><span></span></div><div class="box-layer"><i class="bbox" style="left:64%;top:49%;width:8%;height:6%;border-color:#ffcc66"></i></div><span class="modality-badge">VIS</span><strong>VIS_Grassland_00112.jpg</strong></button>
+              </div>
+            </section>
+            <section class="scene-card">
+              <div class="scene-head"><div><h2>Urban</h2><p>图片数 312 · 标注框 1064</p></div><span>75% 类别覆盖率</span></div>
+              <div class="thumb-grid">
+                <button class="image-tile visible"><div class="synthetic visible"><span></span></div><div class="box-layer"><i class="bbox" style="left:34%;top:33%;width:8%;height:7%;border-color:#ffcc66"></i><i class="bbox" style="left:61%;top:52%;width:5%;height:8%;border-color:#ff7c7c"></i></div><span class="modality-badge">VIS</span><strong>VIS_Urban_00103.jpg</strong></button>
+                <button class="image-tile infrared"><div class="synthetic infrared"><span></span></div><div class="box-layer"><i class="bbox" style="left:55%;top:44%;width:7%;height:6%;border-color:#b48cff"></i></div><span class="modality-badge">IR</span><strong>IR_Urban_00089.jpg</strong></button>
+                <button class="image-tile visible"><div class="synthetic visible"><span></span></div><div class="box-layer"><i class="bbox" style="left:27%;top:60%;width:7%;height:5%;border-color:#72a7ff"></i></div><span class="modality-badge">VIS</span><strong>VIS_Urban_00142.jpg</strong></button>
+              </div>
+            </section>
+            <section class="crop-section" style="grid-column:1 / -1">
+              <div class="crop-title"><i style="background:#31d0aa"></i><h2>gaoshepao</h2><span>类别目标裁剪预览</span></div>
+              <div class="crop-grid">
+                <button class="crop-card visible"><div class="synthetic visible"><span></span></div><span>Grassland</span><em>337 x 133</em></button>
+                <button class="crop-card infrared"><div class="synthetic infrared"><span></span></div><span>Grassland</span><em>260 x 140</em></button>
+                <button class="crop-card visible"><div class="synthetic visible"><span></span></div><span>Urban</span><em>221 x 118</em></button>
+                <button class="crop-card infrared"><div class="synthetic infrared"><span></span></div><span>Desert</span><em>192 x 101</em></button>
+                <button class="crop-card visible"><div class="synthetic visible"><span></span></div><span>Forest</span><em>240 x 124</em></button>
+                <button class="crop-card visible"><div class="synthetic visible"><span></span></div><span>Waterfront</span><em>318 x 152</em></button>
+              </div>
+            </section>
+          </div>
+        </main>
+        <aside class="inspector">
+          <div class="panel-title"><span class="preview-icon"></span><span>当前图片</span></div>
+          <button class="image-tile visible active"><div class="synthetic visible"><span></span></div><div class="box-layer"><i class="bbox" style="left:50%;top:35%;width:9%;height:6%;border-color:#31d0aa"></i></div><span class="modality-badge">VIS</span><strong>DJI_20260606104326_0001_V_00000.jpg</strong></button>
+          <div class="kv"><span>文件名</span><b>DJI_20260606104326_0001_V_00000.jpg</b></div>
+          <div class="kv"><span>场景</span><b>Grassland</b></div>
+          <div class="kv"><span>视角</span><b>Aerial View</b></div>
+          <div class="kv"><span>尺寸</span><b>3840 x 2160</b></div>
+          <div class="kv"><span>模态</span><b>可见光</b></div>
+          <div class="panel-title"><span class="preview-icon"></span><span>标注详情</span></div>
+          <div class="annotation-list">
+            <div class="annotation"><i style="background:#31d0aa"></i><div><b>gaoshepao</b><span>x 1914, y 770, w 337, h 133</span></div></div>
+            <div class="annotation"><i style="background:#72a7ff"></i><div><b>tank</b><span>x 860, y 1030, w 200, h 130</span></div></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
