@@ -1516,6 +1516,12 @@ async function listInferenceResults(jobId) {
   return rows.rows;
 }
 
+async function deleteInferenceJob(jobId) {
+  const deleted = await query("DELETE FROM inference_jobs WHERE id=$1 RETURNING id", [jobId]);
+  if (!deleted.rows[0]) throw new Error("推理任务不存在");
+  return { deleted: true, id: deleted.rows[0].id };
+}
+
 async function createInferenceJob(body = {}) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
   if (!datasetProjectId) throw new Error("请选择推理数据集项目");
@@ -2470,6 +2476,8 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
+  const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
+  if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
   const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
   if (method === "GET" && inferenceResultsMatch) return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) });
   if (method === "POST" && parsed.pathname === "/api/baselines/preview") return sendJson(res, await createBaselinePreview(await readBody(req)));

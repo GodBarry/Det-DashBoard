@@ -99,6 +99,7 @@ function App() {
   const [envForm, setEnvForm] = useState({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
+  const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
   useEffect(() => {
     refreshHome();
@@ -281,7 +282,7 @@ function App() {
         datasetProjectId: inferenceForm.datasetProjectId,
         modelVersionId: inferenceForm.modelVersionId || null,
         params: {
-          modelId: inferenceForm.modelId || null,
+          modelId: null,
           templateId: inferenceForm.templateId || null,
           taskType: inferenceForm.taskType,
           pythonEnvId: inferenceForm.pythonEnvId || null,
@@ -301,8 +302,8 @@ function App() {
               labels: inferenceForm.inputLabels.split(",").map((item) => item.trim()).filter(Boolean),
               q: inferenceForm.inputQuery,
             },
-            limit: Number(inferenceForm.inputLimit || 0),
-            cachePolicy: inferenceForm.cachePolicy,
+            limit: 0,
+            cachePolicy: "reuse_asset_cache",
           },
           output: {
             saveJson: Boolean(inferenceForm.saveJson),
@@ -319,6 +320,32 @@ function App() {
         loadMlPlatform();
       })
       .catch((err) => setError(err.message));
+  }
+
+  function deleteInferenceJob(jobId) {
+    if (!window.confirm("确认删除这个推理任务？")) return;
+    fetch(`/api/ml/inference-jobs/${jobId}`, { method: "DELETE" })
+      .then((r) => Promise.all([r.status, r.json()]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "删除推理任务失败");
+        loadMlPlatform();
+      })
+      .catch((err) => setError(err.message));
+  }
+
+  function viewInferenceResults(job) {
+    setError(null);
+    setActiveInferenceResult({ job, results: [], loading: true });
+    fetch(`/api/ml/inference-jobs/${job.id}/results`)
+      .then((r) => Promise.all([r.status, r.json()]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "读取推理结果失败");
+        setActiveInferenceResult({ job, results: data.results || [], loading: false });
+      })
+      .catch((err) => {
+        setActiveInferenceResult(null);
+        setError(err.message);
+      });
   }
 
   function loadWorkspace(projectId) {
@@ -681,6 +708,10 @@ function App() {
         renameModelVersion={renameModelVersion}
         submitTrainingJob={submitTrainingJob}
         submitInferenceJob={submitInferenceJob}
+        deleteInferenceJob={deleteInferenceJob}
+        activeInferenceResult={activeInferenceResult}
+        setActiveInferenceResult={setActiveInferenceResult}
+        viewInferenceResults={viewInferenceResults}
         error={error}
         setError={setError}
         openPlatform={openPlatform}
@@ -847,6 +878,10 @@ function PlatformPage({
   renameModelVersion,
   submitTrainingJob,
   submitInferenceJob,
+  deleteInferenceJob,
+  activeInferenceResult,
+  setActiveInferenceResult,
+  viewInferenceResults,
   error,
   setError,
   openPlatform,
@@ -854,9 +889,10 @@ function PlatformPage({
   const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "模型管理";
   const selectedTemplate = trainingTemplates.find((tpl) => tpl.id === trainingForm.templateId);
   const supportedTasks = selectedTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
-  const selectedInferenceTemplate = trainingTemplates.find((tpl) => tpl.id === inferenceForm.templateId);
-  const inferenceTasks = selectedInferenceTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
-  const inferenceVersions = inferenceForm.modelId ? modelVersions.filter((version) => version.model_id === inferenceForm.modelId) : modelVersions;
+  const inferenceVersions = modelVersions.filter((version) => {
+    const model = mlModels.find((item) => item.id === version.model_id);
+    return !model?.task_type || model.task_type === inferenceForm.taskType;
+  });
   const selectedInferenceEnv = pythonEnvs.find((env) => env.id === inferenceForm.pythonEnvId);
   return (
     <div className="app-shell">
@@ -930,28 +966,25 @@ function PlatformPage({
                 <option value="">请选择</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select></label>
-              <label>模型簇<select value={inferenceForm.modelId} onChange={(e) => {
-                const modelId = e.target.value;
+              <label>模型簇<select value={inferenceForm.taskType} onChange={(e) => {
+                const taskType = e.target.value;
                 const currentVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
-                setInferenceForm({ ...inferenceForm, modelId, modelVersionId: currentVersion?.model_id === modelId ? inferenceForm.modelVersionId : "" });
+                const currentModel = mlModels.find((model) => model.id === currentVersion?.model_id);
+                setInferenceForm({ ...inferenceForm, taskType, modelVersionId: !currentModel?.task_type || currentModel.task_type === taskType ? inferenceForm.modelVersionId : "" });
               }}>
-                <option value="">全部模型簇</option>
-                {mlModels.map((model) => <option key={model.id} value={model.id}>{model.name} · {taskLabel(model.task_type)}</option>)}
+                {["detect", "segment", "classify"].map((task) => <option key={task} value={task}>{taskLabel(task)}</option>)}
               </select></label>
-              <label>推理模型入口<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
+              <label>加载权重<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
                 <option value="">暂不指定版本</option>
                 {inferenceVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
               </select></label>
-              <label>推理模板 / 算法入口<select value={inferenceForm.templateId} onChange={(e) => {
+              <label>算法名称<select value={inferenceForm.templateId} onChange={(e) => {
                 const tpl = trainingTemplates.find((item) => item.id === e.target.value);
                 const tasks = tpl?.capabilities_json?.tasks || ["detect", "segment", "classify"];
                 setInferenceForm({ ...inferenceForm, templateId: e.target.value, taskType: tasks.includes(inferenceForm.taskType) ? inferenceForm.taskType : tasks[0] || "detect" });
               }}>
                 <option value="">默认 Ultralytics YOLO 推理</option>
                 {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
-              </select></label>
-              <label>任务类型<select value={inferenceForm.taskType} onChange={(e) => setInferenceForm({ ...inferenceForm, taskType: e.target.value })}>
-                {inferenceTasks.map((task) => <option key={task} value={task}>{taskLabel(task)}</option>)}
               </select></label>
               <label>运行环境资产<select value={inferenceForm.pythonEnvId} onChange={(e) => setInferenceForm({ ...inferenceForm, pythonEnvId: e.target.value })}>
                 <option value="">由推理 worker 默认选择</option>
@@ -979,13 +1012,6 @@ function PlatformPage({
                 </>
               )}
               <div className="form-row">
-                <label>最大图片数<input type="number" value={inferenceForm.inputLimit} onChange={(e) => setInferenceForm({ ...inferenceForm, inputLimit: e.target.value })} /></label>
-                <label>缓存策略<select value={inferenceForm.cachePolicy} onChange={(e) => setInferenceForm({ ...inferenceForm, cachePolicy: e.target.value })}>
-                  <option value="reuse_asset_cache">复用资产缓存</option>
-                  <option value="job_copy">任务独立副本</option>
-                </select></label>
-              </div>
-              <div className="form-row">
                 <label>Conf<input type="number" step="0.01" value={inferenceForm.conf} onChange={(e) => setInferenceForm({ ...inferenceForm, conf: e.target.value })} /></label>
                 <label>IoU<input type="number" step="0.01" value={inferenceForm.iou} onChange={(e) => setInferenceForm({ ...inferenceForm, iou: e.target.value })} /></label>
               </div>
@@ -994,7 +1020,7 @@ function PlatformPage({
                 <label>Batch<input type="number" value={inferenceForm.batch} onChange={(e) => setInferenceForm({ ...inferenceForm, batch: e.target.value })} /></label>
               </div>
               <label>Device<input value={inferenceForm.device} onChange={(e) => setInferenceForm({ ...inferenceForm, device: e.target.value })} placeholder="0 / cpu / 0,1" /></label>
-              <h2>输出策略</h2>
+              <h2>输入策略</h2>
               <div className="check-list compact">
                 <label className="check-row"><input type="checkbox" checked={inferenceForm.saveJson} onChange={() => setInferenceForm({ ...inferenceForm, saveJson: !inferenceForm.saveJson })} /><span>保存预测 JSON</span></label>
                 <label className="check-row"><input type="checkbox" checked={inferenceForm.saveVisualization} onChange={() => setInferenceForm({ ...inferenceForm, saveVisualization: !inferenceForm.saveVisualization })} /><span>保存可视化结果</span></label>
@@ -1009,7 +1035,7 @@ function PlatformPage({
                 <div><b>{trainingTemplates.length}</b><span>算法入口</span></div>
                 <div><b>{pythonEnvs.length}</b><span>环境资产</span></div>
               </div>
-              <JobList title="推理队列" jobs={inferenceJobs} kind="inference" bare resultReserved />
+              <JobList title="推理队列" jobs={inferenceJobs} kind="inference" bare resultReserved onViewResults={viewInferenceResults} onDelete={deleteInferenceJob} />
             </section>
           </div>
         )}
@@ -1162,6 +1188,12 @@ function PlatformPage({
             </section>
           </div>
         )}
+        {activeInferenceResult && (
+          <InferenceResultDialog
+            resultState={activeInferenceResult}
+            onClose={() => setActiveInferenceResult(null)}
+          />
+        )}
       </main>
     </div>
   );
@@ -1183,7 +1215,7 @@ function MainNav({ view, goHome, openPlatform }) {
   );
 }
 
-function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = false, resultReserved = false }) {
+function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, onViewResults, onDelete, bare = false, resultReserved = false }) {
   const Tag = bare ? "div" : "section";
   return (
     <Tag className={bare ? "job-panel" : "platform-card wide job-panel"}>
@@ -1203,8 +1235,18 @@ function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = f
               {onRequeue && !["pending", "preparing", "running"].includes(job.status) && (
                 <button onClick={(event) => { event.stopPropagation(); onRequeue(job.id); }}>重新入队</button>
               )}
-              {resultReserved && (
-                <button disabled title="后续接入测试评估平台">查看结果</button>
+              {resultReserved && onViewResults && (
+                <button
+                  className={job.status === "done" ? "result-ready" : ""}
+                  disabled={job.status !== "done"}
+                  title={job.status === "done" ? "查看推理结果" : "任务完成后可查看结果"}
+                  onClick={(event) => { event.stopPropagation(); onViewResults(job); }}
+                >
+                  查看结果
+                </button>
+              )}
+              {onDelete && (
+                <button className="danger-icon" title="删除任务" onClick={(event) => { event.stopPropagation(); onDelete(job.id); }}><Trash2 size={14} />删除</button>
               )}
             </div>
           </article>
@@ -1212,6 +1254,96 @@ function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = f
         {!jobs.length && <div className="empty-state">队列为空。</div>}
       </div>
     </Tag>
+  );
+}
+
+function predictionItems(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value.predictions) ? value.predictions : [];
+}
+
+function parseMaybeJson(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+function metricValue(metrics, keys) {
+  for (const key of keys) {
+    const value = metrics?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  if (number >= 0 && number <= 1) return `${(number * 100).toFixed(2)}%`;
+  return number.toFixed(2);
+}
+
+function InferenceResultDialog({ resultState, onClose }) {
+  const { job, results, loading } = resultState;
+  const rows = results || [];
+  const totalPredictions = rows.reduce((sum, row) => sum + predictionItems(row.predictions_json).length, 0);
+  const params = parseMaybeJson(job.params_json);
+  const output = params.output || {};
+  const metrics = output.metrics || params.metrics || {};
+  const outputPath = output.predictionsPath || rows.find((row) => row.artifact_path)?.artifact_path || job.output_root || "";
+  const metricCards = [
+    ["Precision", ["precision", "Precision", "p", "P"]],
+    ["Recall", ["recall", "Recall", "r", "R"]],
+    ["mAP50", ["map50", "mAP50", "map_50", "mAP_50"]],
+    ["mAP50-95", ["map", "mAP", "map5095", "mAP50-95", "map_50_95"]],
+  ];
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="result-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="section-title-row">
+          <div>
+            <h2>推理结果</h2>
+            <p className="muted">{job.name} · {job.dataset_project_name || "未绑定数据集"}</p>
+          </div>
+          <button onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="result-summary">
+          <div><span>任务状态</span><b>{job.status}</b></div>
+          <div><span>图片结果</span><b>{loading ? "..." : rows.length}</b></div>
+          <div><span>预测数量</span><b>{loading ? "..." : totalPredictions}</b></div>
+        </div>
+        <div className="metric-summary">
+          {metricCards.map(([label, keys]) => (
+            <div key={label}><span>{label}</span><b>{loading ? "..." : formatMetric(metricValue(metrics, keys))}</b></div>
+          ))}
+        </div>
+        <div className="result-path">
+          <span>输出文件路径</span>
+          <b>{outputPath || "暂无输出文件路径"}</b>
+        </div>
+        {loading ? (
+          <div className="empty-state">正在读取结果...</div>
+        ) : !rows.length && (
+          <div className="muted">暂无图片级结果明细。</div>
+        )}
+      </div>
+    </div>
   );
 }
 
