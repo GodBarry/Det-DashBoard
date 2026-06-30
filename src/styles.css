@@ -217,6 +217,47 @@ button {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+.hint-box {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(94, 234, 212, .2);
+  background: rgba(20, 83, 76, .14);
+}
+.hint-box b {
+  font-size: 12px;
+  color: #dffcf7;
+}
+.hint-box span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #8fa3ae;
+  font-size: 12px;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.metric-grid div {
+  min-height: 76px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 31, .78);
+  border: 1px solid rgba(148, 163, 184, .12);
+}
+.metric-grid b {
+  font-size: 22px;
+  color: #5eead4;
+}
+.metric-grid span {
+  color: #8fa3ae;
+  font-size: 12px;
+}
 .job-list,
 .model-list {
   display: grid;
@@ -297,6 +338,10 @@ button {
   color: #8fa3ae;
   font-style: normal;
   font-size: 11px;
+}
+.job-status button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 .job-panel {
   display: grid;

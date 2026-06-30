@@ -22,6 +22,13 @@ import "./styles.css";
 
 const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
 
+function taskLabel(task) {
+  if (task === "detect") return "目标检测";
+  if (task === "segment") return "实例分割";
+  if (task === "classify") return "图像分类";
+  return task || "未知任务";
+}
+
 function App() {
   const [view, setView] = useState("home");
   const [projects, setProjects] = useState([]);
@@ -61,10 +68,35 @@ function App() {
   const [pythonEnvs, setPythonEnvs] = useState([]);
   const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
   const [trainingForm, setTrainingForm] = useState({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0" });
-  const [inferenceForm, setInferenceForm] = useState({ name: "", datasetProjectId: "", modelVersionId: "", conf: 0.25, iou: 0.7, imgsz: 640 });
+  const [inferenceForm, setInferenceForm] = useState({
+    name: "",
+    datasetProjectId: "",
+    modelId: "",
+    modelVersionId: "",
+    templateId: "",
+    taskType: "detect",
+    pythonEnvId: "",
+    conf: 0.25,
+    iou: 0.7,
+    imgsz: 640,
+    batch: 16,
+    device: "0",
+    inputScope: "project",
+    inputScenes: "",
+    inputViews: "",
+    inputModalities: "",
+    inputImportBatchIds: "",
+    inputLabels: "",
+    inputQuery: "",
+    inputLimit: 0,
+    cachePolicy: "reuse_asset_cache",
+    saveJson: true,
+    saveVisualization: true,
+    createLabelVersion: false,
+  });
   const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
   const [templateForm, setTemplateForm] = useState({ name: "", templateKey: "ultralytics_yolo", framework: "ultralytics", tasks: ["detect", "segment", "classify"], description: "" });
-  const [envForm, setEnvForm] = useState({ name: "", pythonPath: "", envType: "miniforge", osType: "windows", arch: "x86_64", accelerator: "cpu" });
+  const [envForm, setEnvForm] = useState({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
 
@@ -91,7 +123,7 @@ function App() {
   }, [activeProject]);
 
   useEffect(() => {
-    if (!["training", "inference", "models"].includes(view)) return;
+    if (!["training", "inference", "models", "evaluation"].includes(view)) return;
     const timer = window.setInterval(() => loadMlPlatform(), 2500);
     return () => window.clearInterval(timer);
   }, [view]);
@@ -219,7 +251,7 @@ function App() {
     }).then((r) => Promise.all([r.status, r.json()]))
       .then(([status, data]) => {
         if (status >= 400) throw new Error(data.error || "登记环境失败");
-        setEnvForm({ name: "", pythonPath: "", envType: "miniforge", osType: "windows", arch: "x86_64", accelerator: "cpu" });
+        setEnvForm({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
         loadMlPlatform();
       }).catch((err) => setError(err.message));
   }
@@ -248,7 +280,36 @@ function App() {
         name: inferenceForm.name,
         datasetProjectId: inferenceForm.datasetProjectId,
         modelVersionId: inferenceForm.modelVersionId || null,
-        params: { conf: Number(inferenceForm.conf), iou: Number(inferenceForm.iou), imgsz: Number(inferenceForm.imgsz) },
+        params: {
+          modelId: inferenceForm.modelId || null,
+          templateId: inferenceForm.templateId || null,
+          taskType: inferenceForm.taskType,
+          pythonEnvId: inferenceForm.pythonEnvId || null,
+          conf: Number(inferenceForm.conf),
+          iou: Number(inferenceForm.iou),
+          imgsz: Number(inferenceForm.imgsz),
+          batch: Number(inferenceForm.batch),
+          device: inferenceForm.device,
+          input: {
+            sourceType: "project_images",
+            scope: inferenceForm.inputScope,
+            filters: inferenceForm.inputScope === "project" ? {} : {
+              scenes: inferenceForm.inputScenes.split(",").map((item) => item.trim()).filter(Boolean),
+              views: inferenceForm.inputViews.split(",").map((item) => item.trim()).filter(Boolean),
+              modalities: inferenceForm.inputModalities.split(",").map((item) => item.trim()).filter(Boolean),
+              importBatchIds: inferenceForm.inputImportBatchIds.split(",").map((item) => item.trim()).filter(Boolean),
+              labels: inferenceForm.inputLabels.split(",").map((item) => item.trim()).filter(Boolean),
+              q: inferenceForm.inputQuery,
+            },
+            limit: Number(inferenceForm.inputLimit || 0),
+            cachePolicy: inferenceForm.cachePolicy,
+          },
+          output: {
+            saveJson: Boolean(inferenceForm.saveJson),
+            saveVisualization: Boolean(inferenceForm.saveVisualization),
+            createLabelVersion: Boolean(inferenceForm.createLabelVersion),
+          },
+        },
       }),
     })
       .then((r) => Promise.all([r.status, r.json()]))
@@ -428,11 +489,11 @@ function App() {
       .then((r) => r.json())
       .then((d) => {
         if (d.selectedPath) setImportPath(d.selectedPath);
-        else setError("当前运行方式不支持稳定弹出系统文件夹选择器。请直接输入路径，例如 /home/barry/图片/最新统计/统计用/山地");
+        else setError("当前运行方式不支持稳定弹出系统文件夹选择器。请直接输入路径，例如 F:\\ZBH\\统计用\\山地");
       })
       .catch((err) => {
         const reason = err.name === "AbortError" ? "打开超时" : err.message;
-        setError("文件夹选择器失败: " + reason + "。请直接输入路径，例如 /home/barry/图片/最新统计/统计用/山地");
+        setError("文件夹选择器失败: " + reason + "。请直接输入路径，例如 F:\\ZBH\\统计用\\山地");
       })
       .finally(() => {
         window.clearTimeout(timer);
@@ -585,7 +646,7 @@ function App() {
     );
   }
 
-  if (view === "training" || view === "inference" || view === "models") {
+  if (view === "training" || view === "inference" || view === "models" || view === "evaluation") {
     return (
       <PlatformPage
         view={view}
@@ -666,7 +727,7 @@ function App() {
             <h2>导入数据</h2>
             <p className="muted">输入或选择要导入的数据文件夹路径（图片 + JSON 标注）</p>
             <div className="import-path-row">
-              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="例如: /home/barry/图片/最新统计/统计用/山地" />
+              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder='例如: F:\ZBH\统计用\山地' />
               <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
             </div>
             {error && <div className="error-msg">{error}</div>}
@@ -790,9 +851,13 @@ function PlatformPage({
   setError,
   openPlatform,
 }) {
-  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : "模型管理";
+  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "模型管理";
   const selectedTemplate = trainingTemplates.find((tpl) => tpl.id === trainingForm.templateId);
   const supportedTasks = selectedTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+  const selectedInferenceTemplate = trainingTemplates.find((tpl) => tpl.id === inferenceForm.templateId);
+  const inferenceTasks = selectedInferenceTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+  const inferenceVersions = inferenceForm.modelId ? modelVersions.filter((version) => version.model_id === inferenceForm.modelId) : modelVersions;
+  const selectedInferenceEnv = pythonEnvs.find((env) => env.id === inferenceForm.pythonEnvId);
   return (
     <div className="app-shell">
       <MainNav view={view} goHome={() => { setView("home"); setError(null); }} openPlatform={openPlatform} />
@@ -865,18 +930,103 @@ function PlatformPage({
                 <option value="">请选择</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select></label>
-              <label>模型版本<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
-                <option value="">暂不指定版本</option>
-                {modelVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
+              <label>模型簇<select value={inferenceForm.modelId} onChange={(e) => {
+                const modelId = e.target.value;
+                const currentVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
+                setInferenceForm({ ...inferenceForm, modelId, modelVersionId: currentVersion?.model_id === modelId ? inferenceForm.modelVersionId : "" });
+              }}>
+                <option value="">全部模型簇</option>
+                {mlModels.map((model) => <option key={model.id} value={model.id}>{model.name} · {taskLabel(model.task_type)}</option>)}
               </select></label>
+              <label>推理模型入口<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
+                <option value="">暂不指定版本</option>
+                {inferenceVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
+              </select></label>
+              <label>推理模板 / 算法入口<select value={inferenceForm.templateId} onChange={(e) => {
+                const tpl = trainingTemplates.find((item) => item.id === e.target.value);
+                const tasks = tpl?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+                setInferenceForm({ ...inferenceForm, templateId: e.target.value, taskType: tasks.includes(inferenceForm.taskType) ? inferenceForm.taskType : tasks[0] || "detect" });
+              }}>
+                <option value="">默认 Ultralytics YOLO 推理</option>
+                {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
+              </select></label>
+              <label>任务类型<select value={inferenceForm.taskType} onChange={(e) => setInferenceForm({ ...inferenceForm, taskType: e.target.value })}>
+                {inferenceTasks.map((task) => <option key={task} value={task}>{taskLabel(task)}</option>)}
+              </select></label>
+              <label>运行环境资产<select value={inferenceForm.pythonEnvId} onChange={(e) => setInferenceForm({ ...inferenceForm, pythonEnvId: e.target.value })}>
+                <option value="">由推理 worker 默认选择</option>
+                {pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.source_type === "conda_pack" ? "conda-pack" : env.env_type} · {env.os_type}/{env.arch} · {env.accelerator?.toUpperCase()} · {env.status}</option>)}
+              </select></label>
+              {selectedInferenceEnv && (
+                <div className="hint-box">
+                  <b>{selectedInferenceEnv.source_type === "conda_pack" ? "云端环境包" : "服务器 Python"}</b>
+                  <span>{selectedInferenceEnv.artifact_key || selectedInferenceEnv.python_path}</span>
+                </div>
+              )}
+              <h2>输入范围</h2>
+              <label>数据选择<select value={inferenceForm.inputScope} onChange={(e) => setInferenceForm({ ...inferenceForm, inputScope: e.target.value })}>
+                <option value="project">全项目</option>
+                <option value="filters">按筛选条件</option>
+              </select></label>
+              {inferenceForm.inputScope === "filters" && (
+                <>
+                  <label>场景<input value={inferenceForm.inputScenes} onChange={(e) => setInferenceForm({ ...inferenceForm, inputScenes: e.target.value })} placeholder="逗号分隔，例如 Grassland,Urban" /></label>
+                  <label>视角<input value={inferenceForm.inputViews} onChange={(e) => setInferenceForm({ ...inferenceForm, inputViews: e.target.value })} placeholder="逗号分隔，例如 Aerial View" /></label>
+                  <label>模态<input value={inferenceForm.inputModalities} onChange={(e) => setInferenceForm({ ...inferenceForm, inputModalities: e.target.value })} placeholder="visible,infrared" /></label>
+                  <label>导入批次 ID<input value={inferenceForm.inputImportBatchIds} onChange={(e) => setInferenceForm({ ...inferenceForm, inputImportBatchIds: e.target.value })} placeholder="逗号分隔，可留空" /></label>
+                  <label>类别<input value={inferenceForm.inputLabels} onChange={(e) => setInferenceForm({ ...inferenceForm, inputLabels: e.target.value })} placeholder="逗号分隔，可留空" /></label>
+                  <label>关键词<input value={inferenceForm.inputQuery} onChange={(e) => setInferenceForm({ ...inferenceForm, inputQuery: e.target.value })} placeholder="文件名 / 场景 / 视角 / 关键字" /></label>
+                </>
+              )}
+              <div className="form-row">
+                <label>最大图片数<input type="number" value={inferenceForm.inputLimit} onChange={(e) => setInferenceForm({ ...inferenceForm, inputLimit: e.target.value })} /></label>
+                <label>缓存策略<select value={inferenceForm.cachePolicy} onChange={(e) => setInferenceForm({ ...inferenceForm, cachePolicy: e.target.value })}>
+                  <option value="reuse_asset_cache">复用资产缓存</option>
+                  <option value="job_copy">任务独立副本</option>
+                </select></label>
+              </div>
               <div className="form-row">
                 <label>Conf<input type="number" step="0.01" value={inferenceForm.conf} onChange={(e) => setInferenceForm({ ...inferenceForm, conf: e.target.value })} /></label>
                 <label>IoU<input type="number" step="0.01" value={inferenceForm.iou} onChange={(e) => setInferenceForm({ ...inferenceForm, iou: e.target.value })} /></label>
               </div>
-              <label>ImgSz<input type="number" value={inferenceForm.imgsz} onChange={(e) => setInferenceForm({ ...inferenceForm, imgsz: e.target.value })} /></label>
+              <div className="form-row">
+                <label>ImgSz<input type="number" value={inferenceForm.imgsz} onChange={(e) => setInferenceForm({ ...inferenceForm, imgsz: e.target.value })} /></label>
+                <label>Batch<input type="number" value={inferenceForm.batch} onChange={(e) => setInferenceForm({ ...inferenceForm, batch: e.target.value })} /></label>
+              </div>
+              <label>Device<input value={inferenceForm.device} onChange={(e) => setInferenceForm({ ...inferenceForm, device: e.target.value })} placeholder="0 / cpu / 0,1" /></label>
+              <h2>输出策略</h2>
+              <div className="check-list compact">
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.saveJson} onChange={() => setInferenceForm({ ...inferenceForm, saveJson: !inferenceForm.saveJson })} /><span>保存预测 JSON</span></label>
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.saveVisualization} onChange={() => setInferenceForm({ ...inferenceForm, saveVisualization: !inferenceForm.saveVisualization })} /><span>保存可视化结果</span></label>
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.createLabelVersion} onChange={() => setInferenceForm({ ...inferenceForm, createLabelVersion: !inferenceForm.createLabelVersion })} /><span>生成候选标注版本</span></label>
+              </div>
               <button className="primary" onClick={submitInferenceJob}>提交到推理队列</button>
             </section>
-            <JobList title="推理队列" jobs={inferenceJobs} kind="inference" />
+            <section className="platform-card wide">
+              <div className="metric-grid">
+                <div><b>{mlModels.length}</b><span>模型簇</span></div>
+                <div><b>{modelVersions.length}</b><span>模型版本</span></div>
+                <div><b>{trainingTemplates.length}</b><span>算法入口</span></div>
+                <div><b>{pythonEnvs.length}</b><span>环境资产</span></div>
+              </div>
+              <JobList title="推理队列" jobs={inferenceJobs} kind="inference" bare resultReserved />
+            </section>
+          </div>
+        )}
+        {view === "evaluation" && (
+          <div className="platform-grid">
+            <section className="platform-card">
+              <h2>测试评估入口</h2>
+              <div className="empty-state">已预留推理结果评估入口。后续会从推理任务进入，按人工标注或基线标注计算 Precision、Recall、mAP、混淆矩阵，并支持 TP / FP / FN 可视化审阅。</div>
+            </section>
+            <section className="platform-card wide">
+              <h2>待接入能力</h2>
+              <div className="model-list">
+                {["推理结果浏览", "按类别/场景/视角/模态统计", "预测框与标注框对比", "评估报告导出", "高置信预测导入为候选标注版本"].map((item) => (
+                  <article className="model-row" key={item}><div><b>{item}</b><span>预留</span></div></article>
+                ))}
+              </div>
+            </section>
           </div>
         )}
         {view === "models" && (
@@ -923,11 +1073,16 @@ function PlatformPage({
               </div>
               <label>说明<textarea value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
               <button onClick={createTrainingTemplate}>创建训练模板</button>
-              <h2>运行环境</h2>
-              <label>环境名<input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="例如 miniforge-ultralytics" /></label>
-              <label>运行方式<select value={envForm.envType} onChange={(e) => setEnvForm({ ...envForm, envType: e.target.value })}>
+              <h2>运行环境资产</h2>
+              <label>环境名<input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="例如 linux-yolo-cuda" /></label>
+              <label>来源类型<select value={envForm.sourceType} onChange={(e) => setEnvForm({ ...envForm, sourceType: e.target.value })}>
+                <option value="server_python">服务器 Python 路径</option>
+                <option value="conda_pack">导入 conda-pack 包到云端</option>
+              </select></label>
+              <label>环境类型<select value={envForm.envType} onChange={(e) => setEnvForm({ ...envForm, envType: e.target.value })}>
                 <option value="miniforge">Miniforge</option>
                 <option value="conda">Conda</option>
+                <option value="conda-pack">Conda Pack</option>
               </select></label>
               <label>平台分类<select value={`${envForm.osType}:${envForm.arch}`} onChange={(e) => {
                 const [osType, arch] = e.target.value.split(":");
@@ -941,8 +1096,17 @@ function PlatformPage({
                 <option value="cpu">CPU</option>
                 <option value="cuda">CUDA</option>
               </select></label>
-              <label>Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="D:\ProgramData\miniforge3\python.exe" /></label>
-              <button onClick={createPythonEnv}>登记运行环境</button>
+              {envForm.sourceType === "server_python" && (
+                <label>服务器 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="/home/administrator/miniforge3/envs/yolo/bin/python" /></label>
+              )}
+              {envForm.sourceType === "conda_pack" && (
+                <>
+                  <label>conda-pack 包路径<input value={envForm.condaPackPath} onChange={(e) => setEnvForm({ ...envForm, condaPackPath: e.target.value })} placeholder="/home/administrator/Projects/det-dashboard/runtime/datasets/envs/yolo.tar.gz" /></label>
+                  <label>云端解包路径<input value={envForm.unpackPath} onChange={(e) => setEnvForm({ ...envForm, unpackPath: e.target.value })} placeholder="留空则自动生成 runtime/python-envs/..." /></label>
+                  <label>解包后 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="留空则使用 解包路径/bin/python" /></label>
+                </>
+              )}
+              <button onClick={createPythonEnv}>{envForm.sourceType === "conda_pack" ? "导入环境包到 MinIO" : "登记运行环境"}</button>
             </section>
             <section className="platform-card wide">
               <h2>模型列表</h2>
@@ -980,15 +1144,16 @@ function PlatformPage({
                 ))}
                 {!trainingTemplates.length && <div className="empty-state">还没有训练模板。</div>}
               </div>
-              <h2>运行环境</h2>
+              <h2>运行环境资产</h2>
               <div className="model-list">
                 {pythonEnvs.map((env) => (
                   <article className="model-row" key={env.id}>
                     <div>
                       <b>{env.name}</b>
-                      <span>{env.os_type} {env.arch} · {env.env_type} · {env.accelerator?.toUpperCase()} · {env.status}</span>
+                      <span>{env.os_type} {env.arch} · {env.source_type === "conda_pack" ? "conda-pack 云端包" : env.env_type} · {env.accelerator?.toUpperCase()} · {env.status}</span>
                       <span>{env.python_version || "未知 Python"} · Torch {env.torch_version || "未检测"} · {env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU only"}</span>
-                      <span>{env.python_path}</span>
+                      <span>{env.artifact_key || env.python_path}</span>
+                      {env.unpack_path && <span>解包路径：{env.unpack_path}</span>}
                     </div>
                   </article>
                 ))}
@@ -1012,12 +1177,13 @@ function MainNav({ view, goHome, openPlatform }) {
       <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据集管理</button>
       <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练平台</button>
       <button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理平台</button>
+      <button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />测试评估</button>
       <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />模型管理</button>
     </nav>
   );
 }
 
-function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = false }) {
+function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = false, resultReserved = false }) {
   const Tag = bare ? "div" : "section";
   return (
     <Tag className={bare ? "job-panel" : "platform-card wide job-panel"}>
@@ -1036,6 +1202,9 @@ function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = f
               <em>{new Date(job.created_at).toLocaleString()}</em>
               {onRequeue && !["pending", "preparing", "running"].includes(job.status) && (
                 <button onClick={(event) => { event.stopPropagation(); onRequeue(job.id); }}>重新入队</button>
+              )}
+              {resultReserved && (
+                <button disabled title="后续接入测试评估平台">查看结果</button>
               )}
             </div>
           </article>
