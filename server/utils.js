@@ -4,6 +4,66 @@ const path = require("path");
 
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".bmp", ".webp"]);
 const VIDEO_EXTS = new Set([".mp4", ".avi", ".mov", ".mkv", ".wmv"]);
+const STRUCTURAL_DATA_DIRS = new Set([
+  "image", "images", "img", "imgs", "jpegimage", "jpegimages",
+  "json", "jsons", "annotation", "annotations", "label", "labels",
+  "train", "training", "val", "valid", "validation", "test", "testing",
+  "rgb", "visible", "visiblelight", "infrared", "ir", "thermal",
+  "可见光", "红外", "图像", "图片", "标注",
+  "data", "dataset", "datasets",
+]);
+
+function normalizedDirName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s_.-]+/g, "");
+}
+
+function meaningfulSceneName(value) {
+  const text = String(value || "").trim();
+  const normalized = normalizedDirName(text);
+  if (!text || !normalized || normalized === "unknownscene" || STRUCTURAL_DATA_DIRS.has(normalized)) return "";
+  return text;
+}
+
+function inferSceneFromPath(meta, filePath, sourceRoot) {
+  const explicit = meaningfulSceneName(meta?.scene);
+  if (explicit) return explicit;
+
+  const root = path.resolve(sourceRoot || path.dirname(filePath));
+  let current = path.dirname(path.resolve(filePath));
+  const relative = path.relative(root, current);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return "UnknownScene";
+
+  while (true) {
+    const inferred = meaningfulSceneName(path.basename(current));
+    if (inferred) return inferred;
+    if (current === root) break;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return "UnknownScene";
+}
+
+async function inferSceneFromImportRoot(sourceRoot, depth = 0) {
+  const inferred = meaningfulSceneName(path.basename(path.resolve(sourceRoot || "")));
+  let entries;
+  try {
+    entries = await fs.promises.readdir(sourceRoot, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+  const hasDirectImage = entries.some((entry) => entry.isFile() && IMAGE_EXTS.has(path.extname(entry.name).toLowerCase()));
+  const hasStructuralChild = entries.some((entry) => entry.isDirectory() && STRUCTURAL_DATA_DIRS.has(normalizedDirName(entry.name)));
+  if ((hasDirectImage || hasStructuralChild) && inferred) return inferred;
+
+  const meaningfulChildren = entries
+    .filter((entry) => entry.isDirectory() && meaningfulSceneName(entry.name))
+    .map((entry) => path.join(sourceRoot, entry.name));
+  if (depth < 8 && meaningfulChildren.length === 1) {
+    return inferSceneFromImportRoot(meaningfulChildren[0], depth + 1);
+  }
+  return "";
+}
 
 function walk(dir, out = []) {
   let entries = [];
@@ -18,6 +78,31 @@ function walk(dir, out = []) {
     else out.push(full);
   }
   return out;
+}
+
+async function walkAsync(root, options = {}) {
+  const files = [];
+  const pending = [root];
+  while (pending.length) {
+    if (options.shouldStop && await options.shouldStop()) {
+      const error = new Error("directory scan cancelled");
+      error.code = "SCAN_CANCELLED";
+      throw error;
+    }
+    const dir = pending.pop();
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) pending.push(full);
+      else if (entry.isFile()) files.push(full);
+    }
+  }
+  return files;
 }
 
 function hashFile(filePath, algorithm = "sha256") {
@@ -97,6 +182,7 @@ module.exports = {
   IMAGE_EXTS,
   VIDEO_EXTS,
   walk,
+  walkAsync,
   hashFile,
   quickHash,
   safeReadJson,
@@ -105,4 +191,6 @@ module.exports = {
   bboxFromPoints,
   inferModality,
   exportBaseName,
+  inferSceneFromPath,
+  inferSceneFromImportRoot,
 };

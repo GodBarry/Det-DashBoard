@@ -2,7 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const { PassThrough } = require("stream");
 const Minio = require("minio");
-const { minio, storageRoot } = require("./config");
+const { minio, storageRoot, fallbackStorageRoot } = require("./config");
 
 const client = new Minio.Client({
   endPoint: minio.endPoint,
@@ -21,6 +21,10 @@ async function ensureBucket() {
 
 function fallbackPath(objectKey) {
   return path.join(storageRoot, "object-store-fallback", ...String(objectKey || "").split(/[\\/]+/).filter(Boolean));
+}
+
+function secondaryFallbackPath(objectKey) {
+  return path.join(fallbackStorageRoot, "object-store-fallback", ...String(objectKey || "").split(/[\\/]+/).filter(Boolean));
 }
 
 function legacyFallbackPath(objectKey) {
@@ -53,7 +57,7 @@ function minioPartFiles(objectKey) {
 }
 
 function localObjectFiles(objectKey) {
-  const candidates = [fallbackPath(objectKey), legacyFallbackPath(objectKey)];
+  const candidates = [fallbackPath(objectKey), secondaryFallbackPath(objectKey), legacyFallbackPath(objectKey)];
   for (const filePath of candidates) {
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return [filePath];
   }
@@ -81,7 +85,7 @@ function localFallbackPath(objectKey) {
 }
 
 function writeFallbackFile(objectKey, filePath) {
-  const target = fallbackPath(objectKey);
+  const target = writableFallbackPath(objectKey);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const sourceSize = fs.statSync(filePath).size;
   if (fs.existsSync(target)) {
@@ -101,9 +105,22 @@ function writeFallbackFile(objectKey, filePath) {
 }
 
 function writeFallbackBuffer(objectKey, data) {
-  const target = fallbackPath(objectKey);
+  const target = writableFallbackPath(objectKey);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, data);
+}
+
+function writableFallbackPath(objectKey) {
+  for (const target of [fallbackPath(objectKey), secondaryFallbackPath(objectKey)]) {
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      return target;
+    } catch (error) {
+      if (!["EACCES", "EPERM", "EROFS"].includes(error.code)) throw error;
+      console.error(`Fallback storage is not writable: ${path.dirname(target)} (${error.code})`);
+    }
+  }
+  return fallbackPath(objectKey);
 }
 
 async function ensureBucketSafe() {
@@ -187,6 +204,7 @@ async function removeObject(objectKey) {
     await client.removeObject(minio.bucket, objectKey).catch(() => {});
   }
   fs.rmSync(fallbackPath(objectKey), { force: true });
+  fs.rmSync(secondaryFallbackPath(objectKey), { force: true });
 }
 
 function extOf(filePath) {

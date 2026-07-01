@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.git/
+.env
+.env.*
+runtime/
+tmp/
+portable-data/
+datasets/
+exports/
+object-store-fallback/
+*.log
+*.err.log
+*.out.log

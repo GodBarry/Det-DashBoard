@@ -38,6 +38,7 @@ function App() {
   const [page, setPage] = useState(1);
   const pageSize = 48;
   const [error, setError] = useState(null);
+  const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", hostDialogUrl: "", nativeDialogMode: "server" });
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showBaselineDialog, setShowBaselineDialog] = useState(false);
   const [baselineName, setBaselineName] = useState("");
@@ -50,6 +51,8 @@ function App() {
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [importPath, setImportPath] = useState("");
   const [browseBusy, setBrowseBusy] = useState(false);
+  const [dirPicker, setDirPicker] = useState(null);
+  const [dirPickerBusy, setDirPickerBusy] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
   const [checkedIds, setCheckedIds] = useState([]);
   const [lastCheckedId, setLastCheckedId] = useState(null);
@@ -70,6 +73,7 @@ function App() {
 
   useEffect(() => {
     refreshHome();
+    fetch("/api/config").then((r) => r.json()).then((d) => setAppConfig(d)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -283,7 +287,7 @@ function App() {
     fetch(`/api/projects/${projectId}/imports`).then((r) => r.json()).then((d) => {
       const rows = d.imports || [];
       setImports(rows);
-      const running = rows.find((row) => ["scanning", "running", "cancel_requested", "failed"].includes(row.status));
+      const running = rows.find((row) => ["scanning", "running", "cancel_requested"].includes(row.status));
       setLatestImport(running || null);
     }).catch(() => {});
     fetch(`/api/projects/${projectId}/imports?trash=1`).then((r) => r.json()).then((d) => setTrashImports(d.imports || [])).catch(() => {});
@@ -419,25 +423,52 @@ function App() {
     setShowImportDialog(true);
   }
 
-  function browseFolder() {
+  async function browseFolder() {
     setError(null);
+    if (appConfig.nativeDialogMode === "disabled") {
+      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      return;
+    }
     setBrowseBusy(true);
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 8000);
-    fetch("/api/dialog/folder?purpose=import", { signal: controller.signal })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.selectedPath) setImportPath(d.selectedPath);
-        else setError("当前运行方式不支持稳定弹出系统文件夹选择器。请直接输入路径，例如 /home/barry/图片/最新统计/统计用/山地");
-      })
-      .catch((err) => {
-        const reason = err.name === "AbortError" ? "打开超时" : err.message;
-        setError("文件夹选择器失败: " + reason + "。请直接输入路径，例如 /home/barry/图片/最新统计/统计用/山地");
-      })
-      .finally(() => {
-        window.clearTimeout(timer);
-        setBrowseBusy(false);
-      });
+    const timer = window.setTimeout(() => controller.abort(), 120000);
+    const dialogBase = String(appConfig.hostDialogUrl || "").replace(/\/$/, "");
+    const dialogUrl = dialogBase ? `${dialogBase}/api/dialog/folder` : "/api/dialog/folder?purpose=import";
+    try {
+      const response = await fetch(dialogUrl, { signal: controller.signal, cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "系统文件夹选择器不可用");
+      if (result.status === "selected" && result.selectedPath) {
+        setImportPath(result.selectedPath);
+      } else if (result.status !== "cancelled") {
+        throw new Error(result.error || "系统文件夹选择器不可用");
+      }
+    } catch (err) {
+      const reason = err.name === "AbortError" ? "打开超时" : err.message;
+      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      setError(`系统文件夹选择器失败，已切换到网页选择器：${reason}`);
+    } finally {
+      window.clearTimeout(timer);
+      setBrowseBusy(false);
+    }
+  }
+
+  function openDataRootPicker(pathValue) {
+    setError(null);
+    setDirPickerBusy(true);
+    fetch(`/api/fs/dirs?path=${encodeURIComponent(pathValue || appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot)}`)
+      .then((r) => r.json().then((d) => {
+        if (!r.ok) throw new Error(d.error || "读取目录失败");
+        setDirPicker(d);
+      }))
+      .catch((err) => setError(`读取数据根目录失败: ${err.message}`))
+      .finally(() => setDirPickerBusy(false));
+  }
+
+  function chooseDir(pathValue) {
+    setImportPath(pathValue);
+    setDirPicker(null);
+    setError(null);
   }
 
   function confirmImport() {
@@ -495,20 +526,16 @@ function App() {
   function exportProject() {
     if (!activeProject) return;
     setError(null);
-    fetch("/api/dialog/folder?purpose=export")
-      .then((r) => r.json())
-      .then((dialog) => {
-        const outputPath = dialog.selectedPath;
-        if (!outputPath) {
-          setError("导出文件夹选择器未能弹出，暂不支持手动输入导出路径");
-          return;
-        }
-        fetch(`/api/projects/${activeProject.id}/export`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ outputPath }),
-        }).catch((err) => setError("导出失败: " + err.message));
-      }).catch((err) => setError("导出文件夹选择失败: " + err.message));
+    fetch(`/api/projects/${activeProject.id}/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })
+      .then((r) => r.json().then((data) => {
+        if (!r.ok) throw new Error(data.error || "导出失败");
+        return data;
+      }))
+      .catch((err) => setError("导出失败: " + err.message));
   }
 
   function deleteCheckedImages() {
@@ -664,7 +691,7 @@ function App() {
         <div className="overlay" onClick={() => setShowImportDialog(false)}>
           <div className="import-dialog" onClick={(e) => e.stopPropagation()}>
             <h2>导入数据</h2>
-            <p className="muted">输入或选择要导入的数据文件夹路径（图片 + JSON 标注）</p>
+            <p className="muted">输入或选择要导入的数据文件夹路径（浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}）</p>
             <div className="import-path-row">
               <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="例如: /home/barry/图片/最新统计/统计用/山地" />
               <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
@@ -673,6 +700,31 @@ function App() {
             <div className="dialog-actions">
               <button onClick={() => { setShowImportDialog(false); setError(null); }}>取消</button>
               <button className="primary" onClick={confirmImport}>开始导入</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {dirPicker && (
+        <div className="overlay" onClick={() => setDirPicker(null)}>
+          <div className="dir-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="section-title-row">
+              <h2>选择数据文件夹</h2>
+              <button onClick={() => setDirPicker(null)}><X size={14} /></button>
+            </div>
+            <div className="dir-current">{dirPicker.current}</div>
+            <div className="dir-actions">
+              <button onClick={() => openDataRootPicker(dirPicker.parent)} disabled={!dirPicker.parent || dirPickerBusy}><ArrowLeft size={14} />上一级</button>
+              <button className="primary" onClick={() => chooseDir(dirPicker.current)} disabled={dirPickerBusy}><FolderOpen size={14} />选择当前文件夹</button>
+            </div>
+            {error && <div className="error-msg">{error}</div>}
+            <div className="dir-list">
+              {dirPicker.dirs.map((dir) => (
+                <button key={dir.path} onClick={() => openDataRootPicker(dir.path)} disabled={dirPickerBusy}>
+                  <Folder size={15} />
+                  <span>{dir.name}</span>
+                </button>
+              ))}
+              {!dirPicker.dirs.length && <div className="muted">当前目录下没有子文件夹</div>}
             </div>
           </div>
         </div>

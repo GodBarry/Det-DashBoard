@@ -1,0 +1,119 @@
+services:
+  app:
+    build: .
+    image: ${APP_IMAGE:-det-dashboard:local}
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      permissions:
+        condition: service_completed_successfully
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4177
+      DATA_ROOT: /data/datasets
+      DATA_ROOT_DISPLAY: ${DATA_ROOT_DISPLAY:-/data/datasets}
+      BROWSE_ROOT: /host/browse
+      BROWSE_ROOT_DISPLAY: ${BROWSE_ROOT_DISPLAY:-/}
+      HOST_DIALOG_URL: ${HOST_DIALOG_URL:-}
+      NATIVE_DIALOG_MODE: ${NATIVE_DIALOG_MODE:-disabled}
+      STORAGE_ROOT: /data/storage
+      FALLBACK_STORAGE_ROOT: /data/storage
+      EXPORT_ROOT: /data/exports
+      EXPORT_ROOT_DISPLAY: ${EXPORT_ROOT_DISPLAY:-./exports}
+      DATABASE_URL: postgres://${POSTGRES_USER:-det}:${POSTGRES_PASSWORD:-det_password}@postgres:5432/${POSTGRES_DB:-det_dashboard}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-zbh-datasets}
+      OBJECT_STORE_WRITE_FALLBACK: ${OBJECT_STORE_WRITE_FALLBACK:-false}
+      TRAINING_WORKER_ENABLED: "false"
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-5173}:4177"
+    volumes:
+      - ${DATASETS_DIR:-./datasets}:/data/datasets:ro
+      - ${HOST_BROWSE_ROOT:-/}:/host/browse:ro
+      - ${APP_STORAGE_DIR:-./portable-data/storage}:/data/storage
+      - ${EXPORTS_DIR:-./exports}:/data/exports
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  permissions:
+    image: ${APP_IMAGE:-det-dashboard:local}
+    user: "0:0"
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - >-
+        storage_marker=/data/storage/.owner-${LOCAL_UID:-1000}-${LOCAL_GID:-1000};
+        export_marker=/data/exports/.owner-${LOCAL_UID:-1000}-${LOCAL_GID:-1000};
+        if [ ! -e "$$storage_marker" ]; then
+          chown -R ${LOCAL_UID:-1000}:${LOCAL_GID:-1000} /data/storage && touch "$$storage_marker";
+        fi;
+        if [ ! -e "$$export_marker" ]; then
+          chown -R ${LOCAL_UID:-1000}:${LOCAL_GID:-1000} /data/exports && touch "$$export_marker";
+        fi
+    volumes:
+      - ${APP_STORAGE_DIR:-./portable-data/storage}:/data/storage
+      - ${EXPORTS_DIR:-./exports}:/data/exports
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  postgres:
+    image: postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-det_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-det}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-det_password}
+    ports:
+      - "${DB_BIND_ADDRESS:-127.0.0.1}:${DB_PORT:-55432}:5432"
+    volumes:
+      - ${POSTGRES_DATA_DIR:-./portable-data/postgres}:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_HOST_PORT:-59000}:9000"
+      - "${MINIO_CONSOLE_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-59001}:9001"
+    volumes:
+      - ${MINIO_DATA_DIR:-./portable-data/minio}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped

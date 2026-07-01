@@ -781,6 +781,56 @@ button {
   box-shadow: 0 24px 56px rgba(0, 0, 0, .5);
 }
 .import-dialog h2 { font-size: 17px; margin-bottom: 6px; }
+.dir-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: grid;
+  gap: 12px;
+  background: #0f1a22;
+  border: 1px solid rgba(148, 163, 184, .22);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, .5);
+}
+.dir-current {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(6, 12, 18, .7);
+  color: #cfe3ea;
+  font-size: 12px;
+  word-break: break-all;
+}
+.dir-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.dir-actions button,
+.dir-list button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+}
+.dir-list {
+  max-height: min(420px, calc(100vh - 260px));
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+}
+.dir-list button {
+  justify-content: flex-start;
+  text-align: left;
+}
+.dir-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .baseline-dialog {
   width: min(980px, calc(100vw - 36px));
   max-height: calc(100vh - 48px);

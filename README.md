@@ -123,6 +123,70 @@ npm run dev
 
 Vite 已把 `/api` 代理到 `http://localhost:4177`。
 
+## 便携 Docker 一体启动
+
+如果希望把项目复制到 U 盘，再放到另一台 Ubuntu 机器运行，推荐使用便携 Compose 配置。核心功能只要求目标机器安装 Docker 和 Docker Compose 插件。
+
+目录约定：
+
+```text
+Det-DashBoard/
+  datasets/          # 要导入的数据集目录，复制或挂载到这里
+  portable-data/     # PostgreSQL、MinIO 和对象 fallback 数据
+```
+
+启动：
+
+```bash
+cd /path/to/Det-DashBoard
+cp .env.portable.example .env.portable
+# 首次运行前修改 .env.portable 中的数据库与 MinIO 密码
+bash scripts/portable-start.sh
+```
+
+访问：
+
+```text
+http://localhost:5173
+```
+
+便携模式下，容器内的数据根目录是：
+
+```text
+/data/datasets
+```
+
+如果宿主机同时具备 Node.js、`zenity` 和图形会话，启动脚本会启动一个仅监听 `127.0.0.1:4178` 的文件夹选择桥接服务。“浏览”会优先调用宿主机原生选择器；桥接不可用时直接使用网页目录选择器，因此 Docker 核心功能不依赖宿主机 Node.js。取消原生选择不会触发回退。
+
+便携模式默认将宿主机 `/` 以只读方式挂载到容器 `/host/browse`，所以网页目录选择器可以浏览整个 Ubuntu 文件系统，页面上仍显示宿主机原始路径。数据集目录另行只读挂载到 `/data/datasets`；PostgreSQL、MinIO 和应用持久数据保存在 `portable-data/`。默认导入会把对象写入 MinIO，移动源文件后仍可使用；只有明确设置 `OBJECT_STORE_WRITE_FALLBACK=true` 时才启用本地链接/回退模式。
+
+导出不向只读的宿主机根挂载写数据，而是统一写入项目的 `exports/` 目录。可通过 `.env.portable` 的 `EXPORTS_DIR` 把该目录映射到其他宿主机位置。导出任务在后台执行，页面的任务进度不会被长时间 HTTP 请求阻塞。
+
+所有端口默认仅绑定 `127.0.0.1`。本应用目前没有用户认证，不应直接暴露到公网或不可信局域网。如需收窄文件浏览范围，在 `.env.portable` 设置 `HOST_BROWSE_ROOT` 和 `BROWSE_ROOT_DISPLAY`。
+
+构建并发布镜像：
+
+```bash
+docker build -t ghcr.io/<owner>/det-dashboard:<version> .
+docker push ghcr.io/<owner>/det-dashboard:<version>
+```
+
+使用已发布镜像而不在目标机器重新构建：
+
+```bash
+APP_IMAGE=ghcr.io/<owner>/det-dashboard:<version> \
+BUILD_LOCAL_IMAGE=false \
+bash scripts/portable-start.sh
+```
+
+仓库内的 GitHub Actions 会在 `main`、`ZBH` 和 Pull Request 上执行前端与 Docker 多架构构建验证；推送 `v*` 标签时会把 `linux/amd64`、`linux/arm64` 镜像发布到当前仓库的 GHCR Package。
+
+停止：
+
+```bash
+bash scripts/portable-stop.sh
+```
+
 ## 使用 Docker 访问复制来的真实数据
 
 如果要访问从另一台机器完整复制来的真实数据，使用专门的 compose 文件：
@@ -310,7 +374,9 @@ runtime/minio/zbh-datasets/<object_key>
 3. 输入服务端可访问的目录，例如 `F:\ZBH\统计用\山地` 或 Linux 下的 `$DATA_ROOT/统计用/山地`。
 4. 后端递归扫描图片、JSON 和视频。
 5. JSON 优先按 `imagePath`、同名文件、`images/` 子目录等规则匹配图片。
-6. 每次导入生成新的 `label_versions`，并设置为项目 active label version。
+6. 场景属性优先使用 JSON 的 `scene`；缺失时从图片目录向上推断，自动跳过 `images`、`jsons`、`annotations`、`train`、`val`、`visible`、`infrared` 等结构目录，采用最近的场景/日期分类目录。
+7. 启动时会对结构明确的历史 `UnknownScene` 批次做保守回填；多场景且无法无歧义定位的旧批次不会被猜测性覆盖。
+8. 每次导入生成新的 `label_versions`，并设置为项目 active label version。
 
 支持的 LabelMe JSON 关键字段：
 
@@ -351,8 +417,9 @@ TRAINING_WORKER_ENABLED=false npm run api:pg
 ## 已知接手风险
 
 - `README` 旧版描述的是 `server.js` 原型，不是当前正式主线；本文件已按当前代码更新。
-- `.git` 目录在当前拷贝中不是有效 Git 仓库，不能依赖版本历史。
 - `db/schema.sql` 不是完整迁移系统，很多新表由后端启动时动态创建。
+- 当前没有认证、租户隔离和 TLS，发布配置因此默认只监听 `127.0.0.1`；公网部署前必须增加反向代理认证与授权。
+- 导入、导出和训练仍由 API 进程内后台任务执行；本次已支持重启失败收敛，但尚不是可跨节点恢复的持久任务队列。
 - 当前日志里出现过 MinIO `NoSuchKey` 和 `XMinioStorageFull`，需要检查对象存储是否缺对象或底层磁盘是否已满。
 - `server/postgres-app.js` 很大，聚合了导入、导出、基线、训练、推理和静态文件服务，后续建议拆分模块。
 - `docker-compose.yml` 默认使用本仓库下的 `runtime/minio`；生产或大数据集场景应改到容量充足的磁盘。
