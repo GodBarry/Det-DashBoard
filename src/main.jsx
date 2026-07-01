@@ -22,11 +22,39 @@ import "./styles.css";
 
 const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
 
+const evaluationClusterLabels = { detect: "目标检测", segment: "实例分割", classify: "图像分类" };
+const evaluationTypeLabels = { training: "训练模型", inference: "推理模型" };
+const completedEvaluationStatuses = new Set(["done", "completed", "succeeded", "success"]);
+
 function taskLabel(task) {
   if (task === "detect") return "目标检测";
   if (task === "segment") return "实例分割";
   if (task === "classify") return "图像分类";
   return task || "未知任务";
+}
+
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString() : "--";
+}
+
+function formatDuration(start, end) {
+  if (!start || !end) return "--";
+  const durationMs = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "--";
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+}
+
+function runStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (completedEvaluationStatuses.has(normalized)) return "运行完成";
+  if (["pending", "preparing"].includes(normalized)) return "运行待处理";
+  if (normalized === "running") return "运行中";
+  if (normalized === "failed") return "运行失败";
+  if (normalized === "cancelled") return "已取消";
+  return status || "未知状态";
 }
 
 function App() {
@@ -889,6 +917,33 @@ function PlatformPage({
   const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "模型管理";
   const selectedTemplate = trainingTemplates.find((tpl) => tpl.id === trainingForm.templateId);
   const supportedTasks = selectedTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+  const [evaluationCluster, setEvaluationCluster] = useState("all");
+  const [evaluationType, setEvaluationType] = useState("all");
+  const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState([]);
+  const [activeEvaluationTask, setActiveEvaluationTask] = useState(null);
+  const [activeEvaluationReportTask, setActiveEvaluationReportTask] = useState(null);
+  const evaluationTasks = inferenceJobs
+    .filter((job) => completedEvaluationStatuses.has(String(job.status || "").toLowerCase()))
+    .filter((job) => !hiddenEvaluationJobIds.includes(job.id))
+    .map((job) => {
+      const cluster = job.task_type || job.taskType || "detect";
+      const modelText = job.model_name ? `${job.model_name}/${job.version_name || "版本"}` : "未指定模型版本";
+      return {
+        id: job.id,
+        name: job.name || `推理任务 ${job.id}`,
+        cluster,
+        type: "inference",
+        description: job.message || `${job.dataset_project_name || "未绑定数据集"} · ${modelText} · 已完成推理任务，可进入评估`,
+        creator: job.created_by || job.creator || "admin",
+        createdAt: formatDateTime(job.created_at),
+        sourceJob: job,
+      };
+    });
+  const filteredEvaluationTasks = evaluationTasks.filter((task) => {
+    const clusterMatch = evaluationCluster === "all" || task.cluster === evaluationCluster;
+    const typeMatch = evaluationType === "all" || task.type === evaluationType;
+    return clusterMatch && typeMatch;
+  });
   const inferenceVersions = modelVersions.filter((version) => {
     const model = mlModels.find((item) => item.id === version.model_id);
     return !model?.task_type || model.task_type === inferenceForm.taskType;
@@ -1039,22 +1094,29 @@ function PlatformPage({
             </section>
           </div>
         )}
-        {view === "evaluation" && (
-          <div className="platform-grid">
-            <section className="platform-card">
-              <h2>测试评估入口</h2>
-              <div className="empty-state">已预留推理结果评估入口。后续会从推理任务进入，按人工标注或基线标注计算 Precision、Recall、mAP、混淆矩阵，并支持 TP / FP / FN 可视化审阅。</div>
-            </section>
-            <section className="platform-card wide">
-              <h2>待接入能力</h2>
-              <div className="model-list">
-                {["推理结果浏览", "按类别/场景/视角/模态统计", "预测框与标注框对比", "评估报告导出", "高置信预测导入为候选标注版本"].map((item) => (
-                  <article className="model-row" key={item}><div><b>{item}</b><span>预留</span></div></article>
-                ))}
-              </div>
-            </section>
-          </div>
-        )}
+        {view === "evaluation" && (activeEvaluationReportTask ? (
+          <EvaluationReportPage
+            task={activeEvaluationReportTask}
+            onBack={() => setActiveEvaluationReportTask(null)}
+          />
+        ) : activeEvaluationTask ? (
+          <EvaluationDetailPage
+            task={activeEvaluationTask}
+            onBack={() => setActiveEvaluationTask(null)}
+            onRunDetail={(task) => viewInferenceResults(task.sourceJob)}
+            onReport={setActiveEvaluationReportTask}
+          />
+        ) : (
+          <EvaluationPage
+            cluster={evaluationCluster}
+            setCluster={setEvaluationCluster}
+            type={evaluationType}
+            setType={setEvaluationType}
+            tasks={filteredEvaluationTasks}
+            onDetail={setActiveEvaluationTask}
+            onDelete={(taskId) => setHiddenEvaluationJobIds((ids) => Array.from(new Set([...ids, taskId])))}
+          />
+        ))}
         {view === "models" && (
           <div className="platform-grid">
             <section className="platform-card">
@@ -1199,12 +1261,316 @@ function PlatformPage({
   );
 }
 
+function EvaluationPage({ cluster, setCluster, type, setType, tasks, onDetail, onDelete }) {
+  const flowSteps = [
+    { title: "数据准备", description: "在“数据集管理”模块上传或标注原始数据（图像/文本/结构化数据）。" },
+    { title: "模型训练", description: "选择预训练基座模型，配置SFT（全量/LoRA/Prompt Tuning）或全参训练参数，提交训练任务。" },
+    { title: "模型推理", description: "从“模型管理”选择已训练好的版本，部署为在线服务或离线批量推理任务。" },
+    { title: "效果评估", description: "进入“测试评估入口”，加载推理结果，执行人工标注或基线模型比对。" },
+  ];
+
+  return (
+    <div className="evaluation-page">
+      <section className="evaluation-flow">
+        <div className="evaluation-flow-grid">
+          {flowSteps.map((step, index) => (
+            <article className="evaluation-flow-card" key={step.title}>
+              <div className="flow-step-head">
+                <span>{index + 1}</span>
+                <b>{step.title}</b>
+              </div>
+              <p>{step.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="evaluation-tasks platform-card">
+        <div className="evaluation-filters">
+          <label>模型簇
+            <select value={cluster} onChange={(event) => setCluster(event.target.value)}>
+              <option value="all">全部</option>
+              <option value="detect">目标检测</option>
+              <option value="segment">实例分割</option>
+              <option value="classify">图像分类</option>
+            </select>
+          </label>
+          <label>评估类型
+            <select value={type} onChange={(event) => setType(event.target.value)}>
+              <option value="all">全部</option>
+              <option value="training">训练模型</option>
+              <option value="inference">推理模型</option>
+            </select>
+          </label>
+        </div>
+        <div className="evaluation-table-wrap">
+          <table className="evaluation-table">
+            <thead>
+              <tr>
+                <th>任务名称</th>
+                <th>任务ID</th>
+                <th>模型簇</th>
+                <th>任务描述</th>
+                <th>创建人</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={task.id}>
+                  <td><b>{task.name}</b></td>
+                  <td>{task.id}</td>
+                  <td>{evaluationClusterLabels[task.cluster]}</td>
+                  <td>{task.description}</td>
+                  <td>{task.creator}</td>
+                  <td>{task.createdAt}</td>
+                  <td>
+                    <div className="evaluation-actions">
+                      <button type="button" onClick={() => onDetail(task)}>详情</button>
+                      <button
+                        type="button"
+                        className="danger-action"
+                        onClick={() => {
+                          if (window.confirm(`确认删除评估任务“${task.name}”？`)) onDelete(task.id);
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!tasks.length && (
+                <tr>
+                  <td colSpan="7">
+                    <div className="empty-state">当前筛选条件下没有评估任务。</div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EvaluationDetailPage({ task, onBack, onRunDetail, onReport }) {
+  const job = task.sourceJob || {};
+  const params = parseMaybeJson(job.params_json);
+  const modelText = job.model_name ? `${job.model_name}/${job.version_name || "版本"}` : "未指定模型版本";
+  const algorithmText = job.template_name || params.templateName || params.template_id || job.template_id || "默认推理算法";
+  const runRows = [
+    {
+      name: job.name || task.name,
+      status: runStatusLabel(job.status),
+      duration: formatDuration(job.created_at, job.finished_at || params.completedAt),
+      createdAt: formatDateTime(job.created_at),
+    },
+  ];
+
+  const detailItems = [
+    ["任务名称", task.name],
+    ["任务ID", task.id],
+    ["创建人", task.creator],
+    ["创建时间", task.createdAt],
+    ["任务描述", task.description],
+    ["模型簇", evaluationClusterLabels[task.cluster] || task.cluster],
+    ["算法名称", algorithmText],
+    ["加载权重", modelText],
+  ];
+
+  return (
+    <div className="evaluation-detail-page">
+      <div className="evaluation-detail-toolbar">
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />返回测试评估</button>
+      </div>
+      <section className="evaluation-detail-card platform-card">
+        <div className="section-title-row">
+          <h2>任务详情</h2>
+        </div>
+        <div className="evaluation-detail-grid">
+          {detailItems.map(([label, value]) => (
+            <div className="evaluation-detail-item" key={label}>
+              <span>{label}</span>
+              <b>{value || "--"}</b>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="evaluation-run-card platform-card">
+        <div className="evaluation-table-wrap">
+          <table className="evaluation-table evaluation-run-table">
+            <thead>
+              <tr>
+                <th>运行名称</th>
+                <th>运行状态</th>
+                <th>运行时长</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runRows.map((run) => (
+                <tr key={run.name}>
+                  <td><b>{run.name}</b></td>
+                  <td>{run.status}</td>
+                  <td>{run.duration}</td>
+                  <td>{run.createdAt}</td>
+                  <td>
+                    <div className="evaluation-run-actions">
+                      <button type="button" onClick={() => onRunDetail(task)}>详情</button>
+                      <button type="button">发布</button>
+                      <button type="button" onClick={() => onReport(task)}>评估报告</button>
+                      <button type="button">训练测试</button>
+                      <button type="button">测试追踪</button>
+                      <button type="button">启动测试</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EvaluationReportPage({ task, onBack }) {
+  const [expandedAp, setExpandedAp] = useState("类别");
+  const classes = ["车辆", "人员", "设备", "背景"];
+  const matrix = [
+    [96, 4, 2, 1],
+    [5, 88, 6, 3],
+    [1, 7, 91, 4],
+    [2, 3, 5, 84],
+  ];
+  const maxValue = Math.max(...matrix.flat());
+  const metrics = [
+    ["mAP@0.5", "92.6%"],
+    ["mAP@0.5:0.95", "76.4%"],
+    ["Precision", "90.8%"],
+    ["Recall", "88.7%"],
+  ];
+  const apGroups = [
+    { name: "类别", items: [["车辆", 0.94], ["人员", 0.89], ["设备", 0.86], ["背景", 0.81]] },
+    { name: "场景", items: [["城区", 0.91], ["道路", 0.88], ["园区", 0.85], ["夜间", 0.79]] },
+    { name: "视角", items: [["俯视", 0.9], ["平视", 0.87], ["侧视", 0.84], ["远景", 0.78]] },
+    { name: "模态", items: [["RGB", 0.9], ["IR", 0.83], ["融合", 0.92], ["低照度", 0.77]] },
+  ];
+  const activeGroup = apGroups.find((group) => group.name === expandedAp) || apGroups[0];
+  const reportTitle = `${task.name} 评估报告`;
+
+  return (
+    <div className="evaluation-report-page">
+      <div className="evaluation-detail-toolbar">
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />返回任务详情</button>
+      </div>
+      <div className="report-top-grid">
+        <section className="platform-card report-metrics-card">
+          <h2>概览指标</h2>
+          <p>{reportTitle}</p>
+          <div className="report-metric-grid">
+            {metrics.map(([label, value]) => (
+              <div className="report-metric" key={label}>
+                <span>{label}</span>
+                <b>{value}</b>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="platform-card confusion-card">
+          <h2>混淆矩阵热力图</h2>
+          <div className="confusion-axis-label predicted">预测类别（Predicted）</div>
+          <div className="confusion-layout">
+            <div className="confusion-axis-label ground">真实类别（Ground Truth）</div>
+            <div className="confusion-grid" style={{ gridTemplateColumns: `72px repeat(${classes.length}, minmax(58px, 1fr))` }}>
+              <div />
+              {classes.map((label) => <b className="confusion-label" key={label}>{label}</b>)}
+              {classes.map((truth, rowIndex) => (
+                <React.Fragment key={truth}>
+                  <b className="confusion-label">{truth}</b>
+                  {classes.map((predicted, colIndex) => {
+                    const value = matrix[rowIndex][colIndex];
+                    const ratio = value / maxValue;
+                    const background = rowIndex === colIndex
+                      ? `rgba(255, ${Math.round(245 - ratio * 80)}, ${Math.round(155 - ratio * 80)}, .96)`
+                      : `rgba(${Math.round(95 + ratio * 155)}, ${Math.round(180 - ratio * 120)}, ${Math.round(220 - ratio * 170)}, .9)`;
+                    return (
+                      <div
+                        className="confusion-cell"
+                        key={`${truth}-${predicted}`}
+                        style={{ background }}
+                        title={`真实类别：${truth}；预测类别：${predicted}；数量：${value}`}
+                      >
+                        {value}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+      <section className="platform-card report-ap-card">
+        <h2>AP 值</h2>
+        <div className="ap-card-strip">
+          {apGroups.map((group) => (
+            <button
+              type="button"
+              className={expandedAp === group.name ? "ap-dimension-card active" : "ap-dimension-card"}
+              key={group.name}
+              onClick={() => setExpandedAp(group.name)}
+            >
+              <span>{group.name}统计</span>
+              <b>{(group.items.reduce((sum, item) => sum + item[1], 0) / group.items.length * 100).toFixed(1)}%</b>
+            </button>
+          ))}
+        </div>
+        <div className="pr-curve-panel">
+          <div>
+            <h3>{activeGroup.name}维度 PR 曲线</h3>
+            <p>点击上方维度卡片可切换展开内容。</p>
+          </div>
+          <div className="pr-bars">
+            {activeGroup.items.map(([label, value]) => (
+              <div className="pr-row" key={label}>
+                <span>{label}</span>
+                <i><em style={{ width: `${value * 100}%` }} /></i>
+                <b>{(value * 100).toFixed(1)}%</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className="platform-card bbox-compare-card">
+        <h2>预测框与标注框对比</h2>
+        <div className="bbox-compare-stage">
+          <div className="bbox-image">
+            <div className="bbox gt one"><span>GT: 车辆</span></div>
+            <div className="bbox pred one"><span>Pred: 车辆 0.94</span></div>
+            <div className="bbox gt two"><span>GT: 人员</span></div>
+            <div className="bbox pred two"><span>Pred: 人员 0.87</span></div>
+          </div>
+          <div className="bbox-legend">
+            <span><i className="gt-color" />标注框</span>
+            <span><i className="pred-color" />预测框</span>
+            <p>用于快速检查预测框与人工标注框的重合程度、漏检与误检位置。</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function MainNav({ view, goHome, openPlatform }) {
   return (
     <nav className="main-nav">
       <div className="brand-mark">
         <Boxes size={18} />
-        <span>209所AI集成化平台</span>
+        <span>AI集成化平台</span>
       </div>
       <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据集管理</button>
       <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练平台</button>
