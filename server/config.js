@@ -41,7 +41,7 @@ module.exports = {
   fallbackStorageRoot: path.resolve(process.env.FALLBACK_STORAGE_ROOT || path.join(projectRoot, "tmp", "local-storage")),
   exportRoot: path.resolve(process.env.EXPORT_ROOT || path.join(projectRoot, "exports")),
   exportRootDisplay: path.resolve(process.env.EXPORT_ROOT_DISPLAY || process.env.EXPORT_ROOT || path.join(projectRoot, "exports")),
-  databaseUrl: process.env.DATABASE_URL || "postgres://det:det_password@127.0.0.1:55434/det_dashboard",
+  databaseUrl: process.env.DATABASE_URL || "postgres://det:det_password@localhost:5432/det_dashboard",
   minio: {
     endPoint: process.env.MINIO_ENDPOINT || "localhost",
     port: Number(process.env.MINIO_PORT || 9000),

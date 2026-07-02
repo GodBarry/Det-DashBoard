@@ -1,8 +1,18 @@
 @echo off
+setlocal
 cd /d E:\projects\det-dashboard
-set "PORT=5173"
-set "DATABASE_URL=postgres://det:det_password@127.0.0.1:5432/det_dashboard"
-set "STORAGE_ROOT=F:\ZBH\zhuji"
-set "DATA_ROOT=F:\ZBH"
+
+set "CONFIG_FILE=det-dashboard.env"
+if not exist "%CONFIG_FILE%" (
+  echo Missing %CONFIG_FILE%. Please create it from .env.example.
+  pause
+  exit /b 1
+)
+
+for /f "usebackq tokens=1,* delims==" %%a in (`findstr /r /v "^[ ]*$ ^[ ]*#" "%CONFIG_FILE%"`) do (
+  set "%%a=%%b"
+)
+
 node server\postgres-app.js
 pause
+endlocal

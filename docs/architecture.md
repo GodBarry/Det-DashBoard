@@ -129,3 +129,25 @@ bash scripts/portable-start.sh
 ```
 
 完整运行、配置、备份和排错说明见仓库根目录 `README.md`。
+
+## Asset Management Notes
+
+The platform separates assets into three layers:
+
+- PostgreSQL stores structured indexes and relationships.
+- MinIO stores formal object assets such as images, labels, model weights, conda-pack archives, and algorithm code assets.
+- `STORAGE_ROOT` is treated as a local cache root for runtime files, exports, fallback objects, model copies, and unpacked Python environments.
+
+Algorithm methods are managed as code assets. Built-in and registered algorithms should use MinIO prefixes such as:
+
+```text
+code-assets/algorithms/<algorithm_key>/<version>/manifest.json
+code-assets/algorithms/<algorithm_key>/<version>/adapter.py
+code-assets/algorithms/<algorithm_key>/<version>/source/
+```
+
+Runtime environments are indexed in PostgreSQL. Server Python paths are quick registrations; conda-pack archives are the recommended portable assets and are stored under:
+
+```text
+envs/python/conda-pack/<sha_prefix>/<sha256>/<package_name>.tar.gz
+```
