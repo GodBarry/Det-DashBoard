@@ -1,15 +1,41 @@
-# 数据集资产管理正式架构
+# 数据集资产管理架构
 
-## 目标
+## 运行边界
 
-系统同时支持图片、JSON 标注和视频。导入来源是服务端指定路径，后端递归遍历其中全部数据。内部采用 PostgreSQL + MinIO 管理，导出仍然生成标准 `dataset/images` 和 `dataset/jsons` 结构。
+正式发布形态是单机 Docker Compose：浏览器访问 Node.js API 和 React 静态页面，业务元数据写入 PostgreSQL，二进制对象写入 MinIO。Ubuntu 宿主文件系统仅通过只读挂载提供浏览和导入；应用只写专用 storage 与 exports 挂载。
+
+```text
+Browser :5173
+    │
+    ▼
+Node.js API + React static files (uid/gid 1000, read-only rootfs)
+    ├── PostgreSQL: metadata and job state
+    ├── MinIO: imported objects and raw labels
+    ├── /host/browse: read-only Ubuntu source tree
+    ├── /data/storage: caches and local fallback
+    └── /data/exports: generated datasets
+```
+
+服务默认仅绑定 `127.0.0.1`，没有认证、租户隔离或 TLS，不能直接暴露到公网。
+
+## 代码分层
+
+- `src/`：项目工作台、目录浏览、筛选、标注编辑和任务状态界面。
+- `server/postgres-app.js`：HTTP 路由、导入/导出编排、项目与模型任务接口。
+- `server/dataset-formats.js`：LabelMe、COCO、YOLO 到统一图片标注模型的适配。
+- `server/export-formats.js`：统一标注模型到 LabelMe、COCO、YOLO 的序列化。
+- `server/db.js`：PostgreSQL 连接池。
+- `server/object-store.js`：MinIO、只读旧对象和可选本地 fallback。
+- `server/utils.js`：异步扫描、场景推断和通用文件工具。
+
+`postgres-app.js` 当前仍承担过多领域职责。后续拆分应按项目、资产、标注、导入、导出、基准集和模型任务划分，而不是按 HTTP 方法划分。
 
 ## 存储分工
 
-- PostgreSQL：项目、导入批次、图片/视频资产索引、项目引用、标注版本、标注框、导出任务。
-- MinIO：图片、视频、原始 JSON、缩略图、crop、抽帧、导出文件、模型权重、conda-pack 运行环境包。
-- 本地 `./runtime/minio`：Podman/MinIO 的底层对象数据目录。
-- 本地 `./runtime/storage`：Node 后端的临时文件、缓存和 MinIO 不可用时的 fallback 对象目录。
+- PostgreSQL：项目、导入批次、图片/视频资产索引、项目引用、标注版本、检测框、导出任务、基准集和模型任务状态。
+- MinIO：图片、视频、原始标注及其他不可变二进制对象。
+- `portable-data/storage`：缩略图、临时文件及显式启用时的 fallback 对象。
+- `exports`：给用户直接使用的 LabelMe、COCO、YOLO 导出目录。
 
 ## MinIO 对象 key
 
@@ -21,21 +47,30 @@ cache/thumbs/images/<image_asset_id>.webp
 cache/thumbs/videos/<video_asset_id>.webp
 cache/crops/<project_id>/<version_id>/<annotation_id>.webp
 cache/frames/<video_asset_id>/frame_000120.webp
-exports/<project_id>/export_20260627_001/images/AerialView_Grassland_VIS_000001.jpg
-exports/<project_id>/export_20260627_001/jsons/AerialView_Grassland_VIS_000001.json
-envs/python/conda-pack/<sha_prefix>/<sha256>/yolo-env.tar.gz
 ```
 
-## 导入策略
+## 导入流水线
 
-1. 用户指定服务端路径，例如 `/home/administrator/Projects/det-dashboard/runtime/datasets/demo`。
-2. 后端递归遍历图片、JSON、视频。
-3. 图片按 `imagePath`、同名文件、basename 匹配 JSON。
-4. 图片/视频计算 quick hash 与 SHA256。
-5. 相同 SHA256 的资产只在 MinIO 存一份。
-6. 项目通过 `project_images` / `project_videos` 引用全局资产。
-7. 每次导入 JSON 都生成新的 `label_versions`，不覆盖旧标注。
-8. 视频若无标注，进入 `project_videos.label_status = unlabeled`，后续人工补 `view / scene / keyword`。
+1. 用户用 Ubuntu 原生选择器或网页目录浏览器选择服务端可见目录。
+2. 后端异步递归扫描图片、视频、JSON、TXT、YAML 和 names 文件，并支持协作式取消。
+3. 格式适配器建立图片到 LabelMe、COCO 或 YOLO 标注的唯一匹配；优先级为 LabelMe、COCO、YOLO。
+4. 图片缺少尺寸元数据时由 Sharp 读取真实尺寸；无效框被拒绝，归一化框被缩放并裁剪到图片边界。
+5. 场景优先取标注明示字段，否则从图片上级语义目录推断，并跳过 `images/train/val` 等结构目录。
+6. 图片和视频按 SHA-256 全局去重，对象只存一次；项目通过引用表关联资产。
+7. 每次导入标注都生成不可覆盖的 `label_versions`，检测框写入统一内部模型。
+8. 导入批次保留进度、警告和失败状态；进程重启时遗留运行任务会被安全标记为失败。
+
+格式转换边界：内部模型目前是矩形检测框。LabelMe 点集、COCO segmentation 和 YOLO polygon 都取外接矩形，原始 COCO segmentation 作为属性保留，但导出不会重建原多边形。
+
+## 路径模型
+
+容器真实路径和页面显示路径必须成对配置：
+
+- 数据集挂载：`DATA_ROOT` / `DATA_ROOT_DISPLAY`
+- 全文件系统浏览：`BROWSE_ROOT` / `BROWSE_ROOT_DISPLAY`
+- 导出目录：`EXPORT_ROOT` / `EXPORT_ROOT_DISPLAY`
+
+每个入口使用自己的作用域映射，映射后还要通过 `path.relative` 校验不能越过对应根目录。即使两个 display root 相同，也不会把浏览请求错误映射到数据集挂载。
 
 ## 命名规则
 
@@ -45,71 +80,28 @@ envs/python/conda-pack/<sha_prefix>/<sha256>/yolo-env.tar.gz
 {view}_{scene}_{modality}_{index}.{ext}
 ```
 
-示例：
-
-```text
-AerialView_Grassland_VIS_000001.jpg
-AerialView_Grassland_VIS_000001.json
-```
-
-导出 JSON 的 `imagePath` 会写成：
+LabelMe 导出的 `imagePath` 写成相对图片路径，例如：
 
 ```json
 "imagePath": "../images/AerialView_Grassland_VIS_000001.jpg"
 ```
 
-## 启动
+## 导出流水线
 
-```bash
-cd /home/administrator/Projects/det-dashboard
-mkdir -p runtime/postgres runtime/minio runtime/storage runtime/datasets
-bash scripts/podman-up.sh
-npm install
-npm run api:pg
-```
+1. 一次查询加载项目图片和当前标注，避免逐图片 N+1 查询。
+2. 对象从 MinIO 或只读兼容存储流式复制到导出目录。
+3. 按用户选择生成 LabelMe、COCO 或 YOLO 文档。
+4. 后台任务记录状态、输出目录和错误；导出根目录是唯一可写边界。
 
 ## 推理平台流程
 
-推理平台按训练平台的 Run / Artifact / Model Version / Queue 思路组织，当前前端流程为：
+推理平台按训练平台的 Run / Artifact / Model Version / Queue 思路组织：
 
 ```text
 数据集项目 -> 模型簇 -> 推理模型版本 -> 推理模板/算法入口 -> 任务类型 -> 运行环境资产 -> 推理参数 -> 输出策略 -> 推理队列
 ```
 
-当前已支持：
-
-- 选择模型簇并过滤模型版本。
-- 选择推理模板/算法入口，现阶段复用训练模板表，后续可拆为独立 `inference_templates`。
-- 选择任务类型：目标检测、实例分割、图像分类。
-- 选择运行环境资产：服务器 Python 路径或导入到 MinIO 的 conda-pack 包。
-- 配置推理参数：`conf / iou / imgsz / batch / device`。
-- 配置输出策略：保存预测 JSON、保存可视化结果、生成候选标注版本。
-- 提交推理任务到 `inference_jobs`，推理结果入口暂时预留。
-
-后续待接：
-
-- 推理 worker 真正执行任务。
-- 独立推理模板表和算法命令配置。
-- 推理结果写入 `inference_results`。
-- 推理结果进入测试评估平台。
-
-## 推理输入缓存
-
-推理任务提交后，后端会先把本次任务选中的项目图片整理成任务级输入缓存，任务状态从 `preparing` 进入 `pending` 后再等待推理 worker 执行。
-
-目录结构：
-
-```text
-runtime/inference/<job_id>/input-cache/
-  images/
-    00000001.jpg
-    00000002.jpg
-  manifest.json
-  dataset_meta.json
-  source_filters.json
-```
-
-数据流：
+推理任务提交后，后端先把选中的项目图片整理成任务级输入缓存，再由推理 worker 消费。输入范围支持全项目，也支持按场景、视角、模态、导入批次、类别、关键词和最大图片数筛选。
 
 ```text
 PostgreSQL project_images/image_assets
@@ -118,93 +110,44 @@ PostgreSQL project_images/image_assets
   -> runtime/inference/<job_id>/input-cache/images/
 ```
 
-`manifest.json` 会记录缓存文件与平台资产的映射关系：
+运行环境采用 PostgreSQL 管元数据、MinIO 管制品的方式。现阶段支持登记服务器 Python 路径，也支持将服务器可访问的 conda-pack `.tar.gz` 环境包导入为运行环境资产。
 
-```json
-{
-  "jobId": "...",
-  "projectId": "...",
-  "imageCount": 944,
-  "images": [
-    {
-      "projectImageId": "...",
-      "imageAssetId": "...",
-      "objectKey": "objects/images/sha256/ab/abcdef.jpg",
-      "originalFileName": "DJI_001.jpg",
-      "cachedFileName": "00000001.jpg",
-      "localPath": "images/00000001.jpg",
-      "scene": "Grassland",
-      "view": "Aerial View",
-      "modality": "visible"
-    }
-  ]
-}
+## 测试与发布门禁
+
+- `npm test`：Node 内置测试运行器验证格式转换、错误输入、场景推断和取消扫描。
+- `npm run test:docker`：创建临时隔离目录和 Compose 项目，真实启动 PostgreSQL、MinIO、应用，执行 API 全流程与 Playwright 浏览器流程，结束后自动清理。
+- Dockerfile 的 `test` 阶段在产生运行镜像前执行单元测试；失败时镜像不能生成。
+- GitHub Actions 依次执行单元/构建验证、隔离集成测试和多架构镜像构建。
+
+当前集成测试覆盖项目生命周期、三种格式导入导出、目录上级导航、场景/类别筛选、标注保存、视频资产、导入删除恢复、基准集合并、模型元数据与任务排队、请求体上限和路径穿越拒绝。按产品约束，测试不会实际执行训练或推理进程。
+
+## 启动
+
+```bash
+cp .env.portable.example .env.portable
+bash scripts/portable-start.sh
 ```
 
-前端推理任务可配置输入范围：
+完整运行、配置、备份和排错说明见仓库根目录 `README.md`。
 
-- 全项目。
-- 按场景、视角、模态、导入批次、类别和关键词筛选。
-- 限制最大图片数。
-- 缓存策略：复用资产缓存或任务独立副本。
+## Asset Management Notes
 
-算法脚本不直接访问 PostgreSQL 或 MinIO，只读取：
+The platform separates assets into three layers:
+
+- PostgreSQL stores structured indexes and relationships.
+- MinIO stores formal object assets such as images, labels, model weights, conda-pack archives, and algorithm code assets.
+- `STORAGE_ROOT` is treated as a local cache root for runtime files, exports, fallback objects, model copies, and unpacked Python environments.
+
+Algorithm methods are managed as code assets. Built-in and registered algorithms should use MinIO prefixes such as:
 
 ```text
-runtime/inference/<job_id>/input-cache/images/
+code-assets/algorithms/<algorithm_key>/<version>/manifest.json
+code-assets/algorithms/<algorithm_key>/<version>/adapter.py
+code-assets/algorithms/<algorithm_key>/<version>/source/
 ```
 
-推理输出再通过 `manifest.json` 映射回 `project_image_id`，供 `inference_results` 和测试评估平台使用。
-
-## 运行环境资产
-
-运行环境采用 PostgreSQL 管元数据、MinIO 管制品的方式。现阶段支持两种来源：
-
-- 服务器 Python 路径：登记服务器上已有的 Python/Conda/Miniforge 解释器。
-- conda-pack 云端导入：将服务器可访问的 `.tar.gz` 环境包导入 MinIO，并记录 `artifact_key / sha256 / unpack_path`。
-
-conda-pack 导入要求环境包先放在 `DATA_ROOT` 或缓存区 `STORAGE_ROOT` 内，后端再上传到 MinIO：
+Runtime environments are indexed in PostgreSQL. Server Python paths are quick registrations; conda-pack archives are the recommended portable assets and are stored under:
 
 ```text
 envs/python/conda-pack/<sha_prefix>/<sha256>/<package_name>.tar.gz
-```
-
-推理任务只引用环境资产 ID，真正解包、激活和执行由后续推理 worker 完成。
-
-## 测试评估平台
-
-测试评估平台入口已预留，后续从推理任务进入。计划能力包括：
-
-- 浏览推理结果。
-- 与人工标注或基线标注对比。
-- 计算 Precision、Recall、mAP、混淆矩阵。
-- 按类别、场景、视角、模态统计。
-- 可视化 TP / FP / FN。
-- 将高置信预测导入为候选标注版本。
-
-前端：
-
-```bash
-npm run dev -- --host 0.0.0.0
-```
-
-Node 后端建议使用 `.env.podman.example` 里的 Linux 路径：
-
-```bash
-set -a
-. ./.env.podman.example
-set +a
-npm run api:pg
-```
-
-如果已经安装了 `podman compose` 或 `podman-compose`，也可以使用：
-
-```bash
-podman compose -f podman-compose.yml up -d
-```
-
-停止 PostgreSQL 和 MinIO：
-
-```bash
-bash scripts/podman-down.sh
 ```

@@ -5,25 +5,31 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { port, dataRoot, storageRoot } = require("./config");
-const { query, transaction } = require("./db");
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay } = require("./config");
+const { pool, query, transaction } = require("./db");
 const store = require("./object-store");
 const {
   IMAGE_EXTS,
   VIDEO_EXTS,
   walk,
+  walkAsync,
   hashFile,
   quickHash,
-  safeReadJson,
-  basenameNoExt,
-  bboxFromPoints,
   inferModality,
+  inferSceneFromPath,
+  inferSceneFromImportRoot,
   exportBaseName,
   cleanName,
 } = require("./utils");
+const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats");
+const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 
 function sendJson(res, data, code = 200) {
-  res.writeHead(code, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
+  res.writeHead(code, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -31,43 +37,97 @@ function sendError(res, code, message) {
   sendJson(res, { error: message }, code);
 }
 
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function psQuote(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
 }
 
-function selectFolder(defaultPath, description) {
-  try {
+function runFolderDialog(command, args, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const child = spawn(command, args, { windowsHide: true });
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish({ status: "failed", selectedPath: "", error: "系统文件夹选择器打开超时" });
+    }, timeoutMs);
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => finish({ status: "unavailable", selectedPath: "", error: error.message }));
+    child.on("close", (code) => {
+      if (code === 0 && stdout.trim()) return finish({ status: "selected", selectedPath: stdout.trim(), error: "" });
+      if (code === 1) return finish({ status: "cancelled", selectedPath: "", error: "" });
+      finish({ status: "failed", selectedPath: "", error: stderr.trim() || `文件夹选择器退出码：${code}` });
+    });
+  });
+}
+
+async function selectFolder(defaultPath, description) {
+  if (process.platform === "linux") {
+    const initialDir = fs.existsSync(defaultPath || "") ? defaultPath : dataRoot;
+    return runFolderDialog("zenity", [
+      "--file-selection",
+      "--directory",
+      "--title",
+      description || "选择数据文件夹",
+      "--filename",
+      path.join(initialDir, path.sep),
+    ]);
+  }
+
+  if (process.platform === "win32") {
     const script = [
       "Add-Type -AssemblyName System.Windows.Forms",
       "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
       "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
       `$dialog.Description = ${psQuote(description || "Select folder")}`,
       `$dialog.SelectedPath = ${psQuote(defaultPath || dataRoot)}`,
-      "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
+      "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath; exit 0 } else { exit 1 }",
     ].join("; ");
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { encoding: "utf8", timeout: 8000 });
-    if (result.status === null && result.signal) {
-      console.error("selectFolder timeout:", result.signal);
-      return "";
-    }
-    if (result.error) { console.error("selectFolder spawn error:", result.error); return ""; }
-    return String(result.stdout || "").trim();
-  } catch (error) {
-    console.error("selectFolder error:", error);
-    return "";
+    return runFolderDialog("powershell.exe", ["-NoProfile", "-STA", "-Command", script]);
   }
+
+  return { status: "unavailable", selectedPath: "", error: `暂不支持 ${process.platform} 系统文件夹选择器` };
 }
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (chunk) => {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > maxRequestBodyBytes) {
+        tooLarge = true;
+        const error = new Error(`请求体超过 ${maxRequestBodyBytes} 字节限制`);
+        error.statusCode = 413;
+        reject(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
       } catch (error) {
+        error.statusCode = 400;
         reject(error);
       }
     });
@@ -78,6 +138,74 @@ function readBody(req) {
 function isInsideRoot(root, target) {
   const relative = path.relative(root, target);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function pathMappings() {
+  return [
+    { internal: dataRoot, display: dataRootDisplay },
+    { internal: browseRoot, display: browseRootDisplay },
+  ];
+}
+
+function bestMappingFor(value, key) {
+  const resolved = path.resolve(value || "");
+  return pathMappings()
+    .filter((mapping) => isInsideRoot(mapping[key], resolved))
+    .sort((a, b) => b[key].length - a[key].length)[0] || null;
+}
+
+function toInternalDataPath(value) {
+  const resolved = path.resolve(value || dataRoot);
+  const internalMapping = bestMappingFor(resolved, "internal");
+  if (internalMapping) return resolved;
+  const displayMapping = bestMappingFor(resolved, "display");
+  if (displayMapping) {
+    const relative = path.relative(displayMapping.display, resolved);
+    return path.resolve(displayMapping.internal, relative);
+  }
+  return resolved;
+}
+
+function toDisplayDataPath(value) {
+  const resolved = path.resolve(value || dataRoot);
+  const internalMapping = bestMappingFor(resolved, "internal");
+  if (internalMapping) {
+    const relative = path.relative(internalMapping.internal, resolved);
+    return path.resolve(internalMapping.display, relative);
+  }
+  return resolved;
+}
+
+function toScopedInternalPath(value, internalRoot, displayRoot) {
+  const resolved = path.resolve(value || displayRoot);
+  if (isInsideRoot(internalRoot, resolved)) return resolved;
+  if (isInsideRoot(displayRoot, resolved)) {
+    return path.resolve(internalRoot, path.relative(displayRoot, resolved));
+  }
+  return resolved;
+}
+
+function listFolders(target, scope = "browse") {
+  const root = scope === "data" ? dataRoot : browseRoot;
+  const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
+  const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
+  if (!isInsideRoot(root, current)) throw httpError(403, `路径必须位于浏览根目录内：${displayRoot}`);
+  const stat = fs.statSync(current);
+  if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
+  const dirs = fs.readdirSync(current, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const fullPath = path.join(current, entry.name);
+      return { name: entry.name, path: toDisplayDataPath(fullPath) };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+  const parent = current === root ? "" : path.dirname(current);
+  return {
+    root: displayRoot,
+    current: toDisplayDataPath(current),
+    parent: current === root || !isInsideRoot(root, parent) ? "" : toDisplayDataPath(parent),
+    dirs,
+  };
 }
 
 function imageObjectKey(sha256, ext) {
@@ -396,6 +524,8 @@ async function ensureRuntimeSchema() {
   const statements = [
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
@@ -893,7 +1023,7 @@ async function ensureRuntimeSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`,
     ];
-    const enabledMlRuntimeStatements = process.env.RUN_ML_SCHEMA === "true" ? mlRuntimeStatements : assetRuntimeStatements.slice(0, 5);
+    const enabledMlRuntimeStatements = process.env.RUN_ML_SCHEMA === "true" ? mlRuntimeStatements : assetRuntimeStatements;
     for (let index = 0; index < enabledMlRuntimeStatements.length; index += 1) {
       const sql = enabledMlRuntimeStatements[index];
       try {
@@ -926,6 +1056,27 @@ async function ensureRuntimeSchema() {
     if (process.env.RUN_ML_SCHEMA === "true") await seedMlRuntimeConfig();
   }
   if (process.env.RUN_EXTENDED_SCHEMA === "true") await seedMlRuntimeConfig();
+
+}
+
+async function backfillUnknownScenes() {
+  const batches = (await query(
+    `SELECT DISTINCT ib.id, ib.source_path
+     FROM import_batches ib
+     JOIN project_images pi ON pi.import_batch_id=ib.id
+     WHERE pi.deleted_at IS NULL AND (pi.scene='' OR pi.scene='UnknownScene')`,
+  )).rows;
+  for (const batch of batches) {
+    const sourcePath = toInternalDataPath(batch.source_path);
+    const scene = await inferSceneFromImportRoot(sourcePath);
+    if (!scene) continue;
+    await query(
+      `UPDATE project_images
+       SET scene=$1
+       WHERE import_batch_id=$2 AND deleted_at IS NULL AND (scene='' OR scene='UnknownScene')`,
+      [scene, batch.id],
+    );
+  }
 }
 
 async function upsertImageAsset(client, filePath, meta = {}) {
@@ -933,14 +1084,34 @@ async function upsertImageAsset(client, filePath, meta = {}) {
   const qh = quickHash(filePath);
   const sha = await hashFile(filePath);
   const ext = path.extname(filePath).toLowerCase() || ".jpg";
+  let width = Number(meta.imageWidth) || null;
+  let height = Number(meta.imageHeight) || null;
+  if (!width || !height) {
+    try {
+      const imageMeta = await sharp(filePath).metadata();
+      width = width || Number(imageMeta.width) || null;
+      height = height || Number(imageMeta.height) || null;
+    } catch {}
+  }
   const existing = await client.query("SELECT * FROM image_assets WHERE sha256=$1", [sha]);
-  if (existing.rows[0]) return existing.rows[0];
+  if (existing.rows[0]) {
+    let row = existing.rows[0];
+    const storedSize = await store.objectSize(row.object_key);
+    if (storedSize !== Number(row.file_size || stat.size)) await store.putFile(row.object_key, filePath);
+    if ((!row.width && width) || (!row.height && height)) {
+      row = (await client.query(
+        "UPDATE image_assets SET width=COALESCE(width,$1), height=COALESCE(height,$2) WHERE id=$3 RETURNING *",
+        [width, height, row.id],
+      )).rows[0];
+    }
+    return row;
+  }
   const objectKey = imageObjectKey(sha, ext);
   await store.putFile(objectKey, filePath);
   const inserted = await client.query(
     `INSERT INTO image_assets (sha256, quick_hash, object_key, original_ext, width, height, file_size)
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [sha, qh, objectKey, ext, meta.imageWidth || null, meta.imageHeight || null, stat.size],
+    [sha, qh, objectKey, ext, width, height, stat.size],
   );
   return inserted.rows[0];
 }
@@ -962,40 +1133,92 @@ async function upsertVideoAsset(client, filePath) {
   return inserted.rows[0];
 }
 
-function buildJsonMatches(jsons, images) {
-  const imageByBase = new Map(images.map((file) => [basenameNoExt(file), file]));
-  const imageByName = new Map(images.map((file) => [path.basename(file).toLowerCase(), file]));
-  const matches = new Map();
-  const unresolvedJsons = [];
-  for (const jsonFile of jsons) {
-    const meta = safeReadJson(jsonFile);
-    if (!meta) {
-      unresolvedJsons.push({ jsonFile, reason: "invalid_json" });
-      continue;
+async function createProject(body) {
+  const rawName = String(body.name || `project_${Date.now()}`);
+  const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
+  if (!segments.length) throw httpError(400, "项目名称不能为空");
+  let parentId = body.parentId || body.parent_id || null;
+  const parentDepth = parentId ? await projectDepth(parentId) : 0;
+  if (parentDepth + segments.length > 3) throw httpError(400, "项目文件夹最多支持 3 级");
+  let project = null;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const shouldReuseFolder = segments.length > 1 && index < segments.length - 1;
+    const existing = shouldReuseFolder ? (await query(
+      "SELECT * FROM projects WHERE deleted_at IS NULL AND name=$1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY created_at DESC LIMIT 1",
+      [segment, parentId],
+    )).rows[0] : null;
+    if (existing) {
+      project = existing;
+    } else {
+      project = (await query(
+        "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,$3,$4) RETURNING *",
+        [segment, body.description || "", body.project_type || "normal", parentId],
+      )).rows[0];
     }
-    const jsonDir = path.dirname(jsonFile);
-    const candidates = [];
-    if (meta.imagePath) {
-      candidates.push(path.resolve(jsonDir, meta.imagePath));
-      candidates.push(path.resolve(jsonDir, "..", meta.imagePath));
-      candidates.push(path.resolve(jsonDir, "..", "images", path.basename(meta.imagePath)));
-      candidates.push(imageByName.get(path.basename(meta.imagePath).toLowerCase()));
-    }
-    candidates.push(imageByBase.get(basenameNoExt(jsonFile)));
-    const imageFile = candidates.filter(Boolean).find((file) => fs.existsSync(file));
-    if (!imageFile) {
-      unresolvedJsons.push({ jsonFile, reason: "image_not_found" });
-      continue;
-    }
-    matches.set(path.resolve(imageFile).toLowerCase(), { jsonFile, meta });
+    parentId = project.id;
   }
-  return { matches, unresolvedJsons };
+  return project;
 }
 
-async function createProject(body) {
-  const name = body.name || `project_${Date.now()}`;
-  const result = await query("INSERT INTO projects (name, description, project_type) VALUES ($1,$2,$3) RETURNING *", [name, body.description || "", body.project_type || "normal"]);
-  return result.rows[0];
+async function projectDepth(projectId) {
+  const result = await query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_id, 1 AS depth FROM projects WHERE id=$1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT p.id, p.parent_id, ancestors.depth + 1
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+       WHERE p.deleted_at IS NULL AND ancestors.depth < 3
+     )
+     SELECT count(*)::int AS depth FROM ancestors`,
+    [projectId],
+  );
+  const depth = result.rows[0]?.depth || 0;
+  if (!depth) throw httpError(400, "父级项目不存在");
+  return depth;
+}
+
+async function softDeleteProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     )
+     UPDATE projects SET deleted_at=now()
+     WHERE id IN (SELECT id FROM descendants)`,
+    [projectId],
+  );
+}
+
+async function restoreProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     ),
+     ancestors AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+     ),
+     affected AS (
+       SELECT id FROM descendants
+       UNION
+       SELECT id FROM ancestors
+     )
+     UPDATE projects SET deleted_at=NULL
+     WHERE id IN (SELECT id FROM affected)`,
+    [projectId],
+  );
 }
 
 async function listProjects(trash = false) {
@@ -1003,6 +1226,7 @@ async function listProjects(trash = false) {
     `SELECT p.*,
       (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
+      (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND c.deleted_at IS NULL) AS child_count,
       (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
      FROM projects p
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
@@ -1014,32 +1238,56 @@ async function listProjects(trash = false) {
 async function importPath(body) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
-  const sourcePath = path.resolve(body.sourcePath || "");
-  if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("sourcePath does not exist");
-  if (!isInsideRoot(dataRoot, sourcePath)) throw new Error(`sourcePath must be inside ${dataRoot}`);
-  const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
-  if (!project) throw new Error("project not found");
+  if (shuttingDown) {
+    const error = new Error("服务正在关闭，暂不接受新的导入任务");
+    error.statusCode = 503;
+    throw error;
+  }
+  const sourcePath = toInternalDataPath(body.sourcePath || "");
+  if (!sourcePath || !fs.existsSync(sourcePath)) throw httpError(400, "导入路径不存在");
+  if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "导入路径必须是文件夹");
+  if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(browseRoot, sourcePath)) {
+    throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
+  }
+  body.sourcePath = sourcePath;
 
-  const batch = (await query(
-    `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
-     VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
-    [projectId, sourcePath, "正在扫描文件"],
-  )).rows[0];
+  const { project, batch } = await transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [String(projectId)]);
+    const projectRow = (await client.query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
+    if (!projectRow) throw new Error("project not found");
+    const active = (await client.query(
+      "SELECT id FROM import_batches WHERE project_id=$1 AND deleted_at IS NULL AND status IN ('scanning','running','cancel_requested') LIMIT 1",
+      [projectId],
+    )).rows[0];
+    if (active) {
+      const error = new Error("该项目已有导入任务正在运行，请等待完成或先取消当前任务");
+      error.statusCode = 409;
+      throw error;
+    }
+    const batchRow = (await client.query(
+      `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
+       VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
+      [projectId, toDisplayDataPath(sourcePath), "正在扫描文件"],
+    )).rows[0];
+    return { project: projectRow, batch: batchRow };
+  });
 
   setImmediate(() => {
-    runImportBatch(batch.id, project, body).catch(async (error) => {
+    const task = runImportBatch(batch.id, project, body).catch(async (error) => {
       console.error("import failed", error);
       await query(
         "UPDATE import_batches SET status='failed', message=$1, finished_at=now() WHERE id=$2",
         [error.message || "导入失败", batch.id],
       ).catch(() => {});
-    });
+    }).finally(() => activeImportTasks.delete(task));
+    activeImportTasks.add(task);
   });
 
   return { project, batch };
 }
 
 async function importCancelled(batchId) {
+  if (shuttingDown) return true;
   const row = (await query("SELECT status FROM import_batches WHERE id=$1", [batchId])).rows[0];
   return !row || row.status === "cancel_requested" || row.status === "cancelled" || row.status === "deleted";
 }
@@ -1054,15 +1302,30 @@ async function cancelImport(importId) {
 async function runImportBatch(batchId, project, body) {
   const projectId = project.id;
   const sourcePath = path.resolve(body.sourcePath || "");
-  const files = walk(sourcePath);
+  let lastCancellationCheck = 0;
+  let files;
+  try {
+    files = await walkAsync(sourcePath, {
+      shouldStop: async () => {
+        if (shuttingDown) return true;
+        const now = Date.now();
+        if (now - lastCancellationCheck < 500) return false;
+        lastCancellationCheck = now;
+        return importCancelled(batchId);
+      },
+    });
+  } catch (error) {
+    if (error.code !== "SCAN_CANCELLED") throw error;
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
+    return;
+  }
   const images = files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
-  const jsons = files.filter((file) => path.extname(file).toLowerCase() === ".json");
   const videos = files.filter((file) => VIDEO_EXTS.has(path.extname(file).toLowerCase()));
-  const { matches, unresolvedJsons } = buildJsonMatches(jsons, images);
+  const { matches, unresolved, usedLabelFiles, formatCounts } = buildDatasetMatches({ files, images, sourceRoot: sourcePath });
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
-    [images.length + videos.length, `扫描完成，发现 ${images.length} 张图片、${videos.length} 个视频、${jsons.length} 个标注文件`, batchId],
+    [images.length + videos.length, `扫描完成：${images.length} 图片，${videos.length} 视频；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`, batchId],
   );
   if (await importCancelled(batchId)) {
     await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
@@ -1076,6 +1339,11 @@ async function runImportBatch(batchId, project, body) {
     [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
   )).rows[0];
 
+  for (const labelFile of usedLabelFiles) {
+    const relative = path.relative(sourcePath, labelFile).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
+    await store.putFile(rawLabelObjectKey(projectId, version.id, relative || path.basename(labelFile)), labelFile);
+  }
+
   let imageCount = 0;
   let annCount = 0;
   let unlabeledImageCount = 0;
@@ -1084,28 +1352,32 @@ async function runImportBatch(batchId, project, body) {
       await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [imageCount, "导入已取消", batchId]);
       return;
     }
-    const matched = matches.get(path.resolve(imageFile).toLowerCase());
+    const matched = matches.get(imageKey(imageFile));
     const meta = matched?.meta || {};
+    const scene = inferSceneFromPath(meta, imageFile, sourcePath);
     const asset = await upsertImageAsset(client, imageFile, meta);
     const modality = inferModality(meta, imageFile);
     const displayName = body.rename
-      ? `${cleanName(meta.view, "UnknownView")}_${cleanName(meta.scene, "UnknownScene")}_${modality === "infrared" ? "IR" : "VIS"}_${String(imageCount + 1).padStart(6, "0")}${path.extname(imageFile).toLowerCase()}`
+      ? `${cleanName(meta.view, "UnknownView")}_${cleanName(scene, "UnknownScene")}_${modality === "infrared" ? "IR" : "VIS"}_${String(imageCount + 1).padStart(6, "0")}${path.extname(imageFile).toLowerCase()}`
       : path.basename(imageFile);
     const projectImage = await upsertProjectImage(client, {
       projectId,
       imageAssetId: asset.id,
       importBatchId: batchId,
       displayName,
-      scene: meta.scene || "UnknownScene",
+      scene,
       view: meta.view || "UnknownView",
       modality,
       keyword: meta.keyword || "",
     });
-    if (matched?.jsonFile) await store.putJson(rawLabelObjectKey(projectId, version.id, path.basename(matched.jsonFile)), meta);
     const shapes = Array.isArray(meta.shapes) ? meta.shapes : [];
     if (!shapes.length) unlabeledImageCount += 1;
     for (const shape of shapes) {
-      const box = bboxFromPoints(shape.points || []);
+      const box = shapeToBox(shape, asset.width, asset.height);
+      if (!box) {
+        unresolved.push({ labelFile: matched?.labelFile || "", reason: "invalid_shape", imageFile });
+        continue;
+      }
       await client.query(
         `INSERT INTO image_annotations
          (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
@@ -1137,7 +1409,7 @@ async function runImportBatch(batchId, project, body) {
   }
 
   await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
-  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 未标注图片，${videoCount} 视频，${annCount} 标注，${unresolvedJsons.length} 未匹配JSON`;
+  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`;
   await query("UPDATE import_batches SET status='done', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videos.length, message, batchId]);
 }
 
@@ -1212,6 +1484,10 @@ async function restoreImport(importId) {
     await client.query("UPDATE label_versions SET deleted_at=NULL, status='active' WHERE import_batch_id=$1", [importId]);
   });
 }
+
+let shuttingDown = false;
+const activeImportTasks = new Set();
+const activeExportTasks = new Set();
 
 async function cleanupUnreferencedAssets(client) {
   const images = await client.query(
@@ -2946,100 +3222,158 @@ async function streamProjectImage(res, projectImageId, thumb) {
   stream.pipe(res);
 }
 
-function labelmeJson(meta, shapes, exportImageName) {
-  return {
-    version: "3.2.3",
-    flags: {},
-    shapes,
-    imagePath: `../images/${exportImageName}`,
-    imageData: null,
-    imageHeight: meta.height || 1,
-    imageWidth: meta.width || 1,
-    description: "",
-    view: meta.view || "",
-    scene: meta.scene || "",
-    keyword: meta.keyword || "",
-  };
-}
-
 async function exportProject(projectId, options = {}) {
-  const outputPath = options.outputPath ? path.resolve(options.outputPath) : "";
-  if (outputPath) fs.mkdirSync(outputPath, { recursive: true });
-  const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,'姝ｅ湪瀵煎嚭',now()) RETURNING *", [{ projectId, outputPath }])).rows[0];
+  if (shuttingDown) {
+    const error = new Error("服务正在关闭，暂不接受新的导出任务");
+    error.statusCode = 503;
+    throw error;
+  }
+  const format = normalizeExportFormat(options.format);
+  if (!format) {
+    const error = new Error("导出格式仅支持 labelme、coco 或 yolo");
+    error.statusCode = 400;
+    throw error;
+  }
   const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
   if (!project) throw new Error("project not found");
+  fs.mkdirSync(exportRoot, { recursive: true });
+  const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,$2,now()) RETURNING *", [{ projectId, outputPath: exportRootDisplay, format }, `正在导出 ${format.toUpperCase()}`])).rows[0];
+
+  setImmediate(() => {
+    const task = runExportProject(project, job, format).catch(async (error) => {
+      console.error("export failed", error);
+      await query(
+        "UPDATE jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+        [error.message || "导出失败", job.id],
+      ).catch(() => {});
+    }).finally(() => activeExportTasks.delete(task));
+    activeExportTasks.add(task);
+  });
+
+  return { jobId: job.id, status: job.status, outputRoot: exportRootDisplay, format };
+}
+
+async function runExportProject(project, job, format) {
+  const projectId = project.id;
   const rows = (await query(
     `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
      FROM project_images pi JOIN image_assets ia ON ia.id=pi.image_asset_id
      WHERE pi.project_id=$1 AND pi.deleted_at IS NULL ORDER BY pi.created_at`,
     [projectId],
   )).rows;
+  const annotationRows = project.active_label_version_id && rows.length
+    ? (await query(
+      "SELECT * FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) ORDER BY id",
+      [project.active_label_version_id, rows.map((row) => row.id)],
+    )).rows
+    : [];
+  const annotationsByImage = new Map();
+  for (const annotation of annotationRows) {
+    if (!annotationsByImage.has(annotation.project_image_id)) annotationsByImage.set(annotation.project_image_id, []);
+    annotationsByImage.get(annotation.project_image_id).push(annotation);
+  }
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
-  const exportPrefix = `exports/${project.id}/export_${stamp}`;
-  const localRoot = outputPath ? path.join(outputPath, `${cleanName(project.name, "dataset")}_${stamp}`) : "";
-  const localImagesDir = localRoot ? path.join(localRoot, "images") : "";
-  const localJsonsDir = localRoot ? path.join(localRoot, "jsons") : "";
-  if (localRoot) {
-    fs.mkdirSync(localImagesDir, { recursive: true });
-    fs.mkdirSync(localJsonsDir, { recursive: true });
+  const exportPrefix = `exports/${project.id}/${format}_${stamp}`;
+  const localRoot = path.join(exportRoot, `${cleanName(project.name, "dataset")}_${format}_${stamp}`);
+  const displayLocalRoot = path.join(exportRootDisplay, path.basename(localRoot));
+  const localImagesDir = path.join(localRoot, "images");
+  const localLabelsDir = path.join(localRoot, format === "labelme" ? "jsons" : format === "coco" ? "annotations" : "labels");
+  const tempDir = path.join(storageRoot, "tmp", job.id);
+  fs.mkdirSync(localImagesDir, { recursive: true });
+  fs.mkdirSync(localLabelsDir, { recursive: true });
+  fs.mkdirSync(tempDir, { recursive: true });
+  const entries = [];
+  try {
+    for (let i = 0; i < rows.length; i += 1) {
+      const item = rows[i];
+      const base = exportBaseName(item, i + 1);
+      const ext = item.original_ext || ".jpg";
+      const exportImageName = `${base}${ext}`;
+      const exportLabelName = format === "yolo" ? `${base}.txt` : format === "coco" ? "instances.json" : `${base}.json`;
+      const imageStream = await store.getStream(item.object_key);
+      const tempImage = path.join(tempDir, exportImageName);
+      await new Promise((resolve, reject) => {
+        const write = fs.createWriteStream(tempImage);
+        imageStream.pipe(write);
+        write.on("finish", resolve);
+        write.on("error", reject);
+      });
+      await store.putFile(`${exportPrefix}/images/${exportImageName}`, tempImage);
+      fs.copyFileSync(tempImage, path.join(localImagesDir, exportImageName));
+      const annotations = annotationsByImage.get(item.id) || [];
+      entries.push({ item, annotations, imageName: exportImageName, labelName: exportLabelName });
+      if (format === "labelme") {
+        const document = labelmeDocument(item, annotations, exportImageName);
+        await store.putJson(`${exportPrefix}/jsons/${exportLabelName}`, document);
+        fs.writeFileSync(path.join(localLabelsDir, exportLabelName), JSON.stringify(document, null, 2), "utf8");
+      }
+      await query("INSERT INTO export_items (job_id, project_image_id, export_image_name, export_json_name) VALUES ($1,$2,$3,$4)", [job.id, item.id, exportImageName, exportLabelName]);
+      await query("UPDATE jobs SET progress=$1, message=$2 WHERE id=$3", [Math.round(((i + 1) / Math.max(1, rows.length)) * 95), `导出 ${format.toUpperCase()} ${i + 1}/${rows.length}`, job.id]);
+    }
+
+    if (format === "coco") {
+      const document = cocoDocument(entries);
+      const target = path.join(localLabelsDir, "instances.json");
+      fs.writeFileSync(target, JSON.stringify(document, null, 2), "utf8");
+      await store.putJson(`${exportPrefix}/annotations/instances.json`, document);
+    } else if (format === "yolo") {
+      const documents = yoloDocuments(entries);
+      for (const [name, content] of documents.labelFiles) {
+        const target = path.join(localLabelsDir, name);
+        fs.writeFileSync(target, content, "utf8");
+        await store.putFile(`${exportPrefix}/labels/${name}`, target);
+      }
+      const yamlTarget = path.join(localRoot, "data.yaml");
+      fs.writeFileSync(yamlTarget, documents.dataYaml, "utf8");
+      await store.putFile(`${exportPrefix}/data.yaml`, yamlTarget);
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  for (let i = 0; i < rows.length; i += 1) {
-    const item = rows[i];
-    const base = exportBaseName(item, i + 1);
-    const ext = item.original_ext || ".jpg";
-    const exportImageName = `${base}${ext}`;
-    const exportJsonName = `${base}.json`;
-    const imageStream = await store.getStream(item.object_key);
-    const tempDir = path.join(storageRoot, "tmp", job.id);
-    fs.mkdirSync(tempDir, { recursive: true });
-    const tempImage = path.join(tempDir, exportImageName);
-    await new Promise((resolve, reject) => {
-      const write = fs.createWriteStream(tempImage);
-      imageStream.pipe(write);
-      write.on("finish", resolve);
-      write.on("error", reject);
-    });
-    await store.putFile(`${exportPrefix}/images/${exportImageName}`, tempImage);
-    if (localRoot) fs.copyFileSync(tempImage, path.join(localImagesDir, exportImageName));
-    const anns = (await query(
-      "SELECT * FROM image_annotations WHERE label_version_id=$1 AND project_image_id=$2 ORDER BY id",
-      [project.active_label_version_id, item.id],
-    )).rows;
-    const shapes = anns.map((ann) => ({
-      label: ann.label,
-      score: ann.score,
-      points: [
-        [Number(ann.bbox_x), Number(ann.bbox_y)],
-        [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y)],
-        [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y) + Number(ann.bbox_h)],
-        [Number(ann.bbox_x), Number(ann.bbox_y) + Number(ann.bbox_h)],
-      ],
-      group_id: null,
-      description: "",
-      difficult: ann.difficult,
-      shape_type: ann.shape_type,
-      flags: {},
-      attributes: ann.attributes_json || {},
-      kie_linking: [],
-    }));
-    const exportJson = labelmeJson(item, shapes, exportImageName);
-    await store.putJson(`${exportPrefix}/jsons/${exportJsonName}`, exportJson);
-    if (localRoot) fs.writeFileSync(path.join(localJsonsDir, exportJsonName), JSON.stringify(exportJson, null, 2), "utf8");
-    await query("INSERT INTO export_items (job_id, project_image_id, export_image_name, export_json_name) VALUES ($1,$2,$3,$4)", [job.id, item.id, exportImageName, exportJsonName]);
-    await query("UPDATE jobs SET progress=$1, message=$2 WHERE id=$3", [Math.round(((i + 1) / Math.max(1, rows.length)) * 100), `瀵煎嚭 ${i + 1}/${rows.length}`, job.id]);
-  }
-  const message = localRoot ? `瀵煎嚭瀹屾垚锛?{localRoot}` : `瀵煎嚭瀹屾垚锛歴3://${store.bucket}/${exportPrefix}`;
+  const message = `${format.toUpperCase()} 导出完成：${displayLocalRoot}`;
   await query("UPDATE jobs SET status='done', progress=100, message=$1, finished_at=now() WHERE id=$2", [message, job.id]);
-  return { jobId: job.id, exportPrefix, outputDir: localRoot };
+  return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
 }
 
 async function route(req, res) {
   const parsed = url.parse(req.url, true);
   const method = req.method;
-  if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
+  if (method === "GET" && parsed.pathname === "/api/health/live") {
+    return sendJson(res, { status: "ok" });
+  }
+  if (method === "GET" && parsed.pathname === "/api/health/ready") {
+    await query("SELECT 1");
+    return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
+  }
+  if (method === "GET" && parsed.pathname === "/api/config") {
     return sendJson(res, {
-      selectedPath: "",
-      error: "Windows folder dialog is disabled because it can block the local API. Please enter the folder path manually.",
+      dataRoot,
+      dataRootDisplay,
+      browseRoot,
+      browseRootDisplay,
+      hostDialogUrl,
+      nativeDialogMode,
+      storageRoot,
+      exportRoot: exportRootDisplay,
+      platform: process.platform,
+    });
+  }
+  if (method === "GET" && parsed.pathname === "/api/fs/dirs") {
+    return sendJson(res, listFolders(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse"));
+  }
+  if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
+    if (nativeDialogMode === "disabled") {
+      return sendJson(res, { status: "unavailable", selectedPath: "", error: "系统文件夹选择器未启用" }, 503);
+    }
+    const purpose = parsed.query.purpose || "import";
+    const defaultPath = purpose === "import" ? browseRoot : storageRoot;
+    const result = await selectFolder(defaultPath, purpose === "import" ? "选择要导入的数据文件夹" : "选择导出文件夹");
+    return sendJson(res, {
+      ...result,
+      selectedPath: result.selectedPath ? toDisplayDataPath(result.selectedPath) : "",
+      dataRoot: dataRootDisplay,
+      browseRoot: browseRootDisplay,
+      storageRoot,
     });
   }
   if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await listProjects(false) });
@@ -3048,12 +3382,12 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req)) });
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (method === "DELETE" && deleteProject) {
-    await query("UPDATE projects SET deleted_at=now() WHERE id=$1", [deleteProject[1]]);
+    await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
-    await query("UPDATE projects SET deleted_at=NULL WHERE id=$1", [restoreProject[1]]);
+    await restoreProjectTree(restoreProject[1]);
     return sendJson(res, { ok: true });
   }
   if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req)));
@@ -3154,8 +3488,17 @@ async function route(req, res) {
 
   // Serve static files from dist/
   if (method === "GET") {
-    // Try dist/ for frontend
-    let filePath = path.join(__dirname, "..", "dist", parsed.pathname === "/" ? "index.html" : parsed.pathname);
+    const distRoot = path.resolve(__dirname, "..", "dist");
+    let requestedPath;
+    try {
+      requestedPath = decodeURIComponent(parsed.pathname === "/" ? "/index.html" : parsed.pathname);
+    } catch {
+      return sendError(res, 400, "invalid path encoding");
+    }
+    const filePath = path.resolve(distRoot, `.${requestedPath}`);
+    if (filePath !== distRoot && !filePath.startsWith(`${distRoot}${path.sep}`)) {
+      return sendError(res, 403, "forbidden");
+    }
     try {
       if (fs.statSync(filePath).isFile()) {
         const ext = path.extname(filePath).toLowerCase();
@@ -3175,8 +3518,16 @@ async function route(req, res) {
         };
         const contentType = mimeTypes[ext] || "application/octet-stream";
         const content = fs.readFileSync(filePath);
-        const cacheControl = ext === ".html" || ext === ".js" || ext === ".css" ? "no-store" : "public, max-age=3600";
-        res.writeHead(200, { "content-type": contentType, "cache-control": cacheControl });
+        const cacheControl = requestedPath.startsWith("/assets/")
+          ? "public, max-age=31536000, immutable"
+          : ext === ".html" ? "no-store" : "public, max-age=3600";
+        res.writeHead(200, {
+          "content-type": contentType,
+          "cache-control": cacheControl,
+          "x-content-type-options": "nosniff",
+          "x-frame-options": "DENY",
+          "referrer-policy": "no-referrer",
+        });
         res.end(content);
         return;
       }
@@ -3187,7 +3538,13 @@ async function route(req, res) {
     if (!parsed.pathname.startsWith("/api/")) {
       try {
         const indexHtml = fs.readFileSync(path.join(__dirname, "..", "dist", "index.html"));
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-frame-options": "DENY",
+          "referrer-policy": "no-referrer",
+        });
         res.end(indexHtml);
         return;
       } catch {}
@@ -3200,37 +3557,64 @@ async function main() {
   console.log("Boot: ensureRuntimeSchema start");
   await ensureRuntimeSchema();
   console.log("Boot: ensureRuntimeSchema done");
+  await backfillUnknownScenes();
   console.log("Boot: ensureBucketSafe start");
+
   await store.ensureBucketSafe();
   console.log("Boot: ensureBucketSafe done");
   await ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
   const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {
       console.error(error);
-      sendError(res, 500, error.message);
+      if (!res.headersSent) sendError(res, error.statusCode || 500, error.message);
+      else res.end();
     });
   });
   globalThis.detDashboardServer = server;
   server.on("error", (error) => console.error("HTTP server error:", error));
   server.on("close", () => console.error("HTTP server closed"));
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`PostgreSQL + MinIO API: http://localhost:${port}`);
+  server.listen(port, host, () => {
+    console.log(`PostgreSQL + MinIO API: http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
     console.log(`DATA_ROOT=${dataRoot}`);
+    console.log(`DATA_ROOT_DISPLAY=${dataRootDisplay}`);
+    console.log(`BROWSE_ROOT=${browseRoot}`);
+    console.log(`BROWSE_ROOT_DISPLAY=${browseRootDisplay}`);
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
   if (process.env.RUN_EXTENDED_SCHEMA === "true") {
     startTrainingWorker();
     startInferenceWorker();
   }
+  return server;
 }
 
-process.on("beforeExit", (code) => console.error(`Process beforeExit: ${code}`));
-process.on("exit", (code) => console.error(`Process exit: ${code}`));
+let httpServer;
+let shutdownStarted = false;
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+async function shutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  shuttingDown = true;
+  console.log(`Received ${signal}; stopping gracefully`);
+  const serverClosed = new Promise((resolve) => {
+    if (!httpServer) return resolve();
+    httpServer.close(resolve);
+  });
+  const backgroundTasksStopped = Promise.allSettled([...activeImportTasks, ...activeExportTasks]);
+  const timeout = new Promise((resolve) => setTimeout(resolve, 25000));
+  await Promise.race([Promise.all([serverClosed, backgroundTasksStopped]), timeout]);
+  await pool.end().catch((error) => console.error("PostgreSQL shutdown error:", error.message));
+}
+
+process.on("SIGINT", () => shutdown("SIGINT").finally(() => process.exit(0)));
+process.on("SIGTERM", () => shutdown("SIGTERM").finally(() => process.exit(0)));
+
+main()
+  .then((server) => { httpServer = server; })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 
 
 

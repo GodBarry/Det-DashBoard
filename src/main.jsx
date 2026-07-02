@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft,
@@ -60,6 +60,7 @@ function runStatusLabel(status) {
 function App() {
   const [view, setView] = useState("home");
   const [projects, setProjects] = useState([]);
+  const [currentFolderId, setCurrentFolderId] = useState(null);
   const [trashProjects, setTrashProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -73,6 +74,7 @@ function App() {
   const [page, setPage] = useState(1);
   const pageSize = 48;
   const [error, setError] = useState(null);
+  const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", hostDialogUrl: "", nativeDialogMode: "server" });
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showBaselineDialog, setShowBaselineDialog] = useState(false);
   const [baselineName, setBaselineName] = useState("");
@@ -84,7 +86,10 @@ function App() {
   const [activeConflictId, setActiveConflictId] = useState(null);
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [importPath, setImportPath] = useState("");
+  const [exportFormat, setExportFormat] = useState("labelme");
   const [browseBusy, setBrowseBusy] = useState(false);
+  const [dirPicker, setDirPicker] = useState(null);
+  const [dirPickerBusy, setDirPickerBusy] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(null);
   const [checkedIds, setCheckedIds] = useState([]);
   const [lastCheckedId, setLastCheckedId] = useState(null);
@@ -127,10 +132,12 @@ function App() {
   const [envForm, setEnvForm] = useState({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
+  const importRefreshKeyRef = useRef("");
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
   useEffect(() => {
     refreshHome();
+    fetch("/api/config").then((r) => r.json()).then((d) => setAppConfig(d)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -152,6 +159,15 @@ function App() {
   }, [activeProject]);
 
   useEffect(() => {
+    if (!activeProject) return;
+    const terminalImport = imports.find((row) => ["done", "failed", "cancelled"].includes(row.status));
+    const refreshKey = terminalImport ? `${activeProject.id}:${terminalImport.id}:${terminalImport.status}:${terminalImport.finished_at || ""}` : "";
+    if (!refreshKey || importRefreshKeyRef.current === refreshKey) return;
+    importRefreshKeyRef.current = refreshKey;
+    loadWorkspace(activeProject.id);
+  }, [activeProject, imports]);
+
+  useEffect(() => {
     if (!["training", "inference", "models", "evaluation"].includes(view)) return;
     const timer = window.setInterval(() => loadMlPlatform(), 2500);
     return () => window.clearInterval(timer);
@@ -167,6 +183,24 @@ function App() {
       .then((d) => setTrainingLogs(d.logs || []))
       .catch(() => {});
   }, [activeTrainingJobId, trainingJobs]);
+
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
+  const visibleProjects = useMemo(
+    () => projects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
+    [projects, currentFolderId],
+  );
+  const breadcrumbs = useMemo(() => {
+    const rows = [];
+    let cursor = currentFolder;
+    const seen = new Set();
+    while (cursor && !seen.has(cursor.id) && rows.length < 3) {
+      rows.unshift(cursor);
+      seen.add(cursor.id);
+      cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
+    }
+    return rows;
+  }, [currentFolder, projectById]);
 
   function refreshHome() {
     fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => {});
@@ -398,18 +432,29 @@ function App() {
     fetch(`/api/projects/${projectId}/imports`).then((r) => r.json()).then((d) => {
       const rows = d.imports || [];
       setImports(rows);
-      const running = rows.find((row) => ["scanning", "running", "cancel_requested", "failed"].includes(row.status));
+      const running = rows.find((row) => ["scanning", "running", "cancel_requested"].includes(row.status));
       setLatestImport(running || null);
     }).catch(() => {});
     fetch(`/api/projects/${projectId}/imports?trash=1`).then((r) => r.json()).then((d) => setTrashImports(d.imports || [])).catch(() => {});
   }
 
   function createProject() {
-    const name = window.prompt("请输入项目名称", "新建项目");
+    const name = window.prompt("请输入项目名称或路径（最多 3 级，例如：任务A/批次1/样本集）", "新建项目");
     if (!name) return;
-    fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })
-      .then((r) => r.json())
-      .then(() => refreshHome());
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, parentId: currentFolderId }),
+    })
+      .then((r) => r.json().then((data) => {
+        if (!r.ok) throw new Error(data.error || "新建项目失败");
+        return data;
+      }))
+      .then((data) => {
+        if (data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
+        refreshHome();
+      })
+      .catch((err) => setError(err.message));
   }
 
   function openBaselineDialog() {
@@ -534,25 +579,52 @@ function App() {
     setShowImportDialog(true);
   }
 
-  function browseFolder() {
+  async function browseFolder() {
     setError(null);
+    if (appConfig.nativeDialogMode === "disabled") {
+      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      return;
+    }
     setBrowseBusy(true);
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 8000);
-    fetch("/api/dialog/folder?purpose=import", { signal: controller.signal })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.selectedPath) setImportPath(d.selectedPath);
-        else setError("当前运行方式不支持稳定弹出系统文件夹选择器。请直接输入路径，例如 F:\\ZBH\\统计用\\山地");
-      })
-      .catch((err) => {
-        const reason = err.name === "AbortError" ? "打开超时" : err.message;
-        setError("文件夹选择器失败: " + reason + "。请直接输入路径，例如 F:\\ZBH\\统计用\\山地");
-      })
-      .finally(() => {
-        window.clearTimeout(timer);
-        setBrowseBusy(false);
-      });
+    const timer = window.setTimeout(() => controller.abort(), 120000);
+    const dialogBase = String(appConfig.hostDialogUrl || "").replace(/\/$/, "");
+    const dialogUrl = dialogBase ? `${dialogBase}/api/dialog/folder` : "/api/dialog/folder?purpose=import";
+    try {
+      const response = await fetch(dialogUrl, { signal: controller.signal, cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "系统文件夹选择器不可用");
+      if (result.status === "selected" && result.selectedPath) {
+        setImportPath(result.selectedPath);
+      } else if (result.status !== "cancelled") {
+        throw new Error(result.error || "系统文件夹选择器不可用");
+      }
+    } catch (err) {
+      const reason = err.name === "AbortError" ? "打开超时" : err.message;
+      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      setError(`系统文件夹选择器失败，已切换到网页选择器：${reason}`);
+    } finally {
+      window.clearTimeout(timer);
+      setBrowseBusy(false);
+    }
+  }
+
+  function openDataRootPicker(pathValue) {
+    setError(null);
+    setDirPickerBusy(true);
+    fetch(`/api/fs/dirs?path=${encodeURIComponent(pathValue || appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot)}`)
+      .then((r) => r.json().then((d) => {
+        if (!r.ok) throw new Error(d.error || "读取目录失败");
+        setDirPicker(d);
+      }))
+      .catch((err) => setError(`读取数据根目录失败: ${err.message}`))
+      .finally(() => setDirPickerBusy(false));
+  }
+
+  function chooseDir(pathValue) {
+    setImportPath(pathValue);
+    setDirPicker(null);
+    setError(null);
   }
 
   function confirmImport() {
@@ -610,20 +682,16 @@ function App() {
   function exportProject() {
     if (!activeProject) return;
     setError(null);
-    fetch("/api/dialog/folder?purpose=export")
-      .then((r) => r.json())
-      .then((dialog) => {
-        const outputPath = dialog.selectedPath;
-        if (!outputPath) {
-          setError("导出文件夹选择器未能弹出，暂不支持手动输入导出路径");
-          return;
-        }
-        fetch(`/api/projects/${activeProject.id}/export`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ outputPath }),
-        }).catch((err) => setError("导出失败: " + err.message));
-      }).catch((err) => setError("导出文件夹选择失败: " + err.message));
+    fetch(`/api/projects/${activeProject.id}/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ format: exportFormat }),
+    })
+      .then((r) => r.json().then((data) => {
+        if (!r.ok) throw new Error(data.error || "导出失败");
+        return data;
+      }))
+      .catch((err) => setError("导出失败: " + err.message));
   }
 
   function deleteCheckedImages() {
@@ -646,6 +714,7 @@ function App() {
   const goHome = () => {
     setView("home");
     setActiveProject(null);
+    setCurrentFolderId(null);
     setError(null);
     refreshHome();
   };
@@ -664,20 +733,34 @@ function App() {
         </header>
         <main className="home-page">
           <section className="home-section">
-            <h2>历史项目</h2>
+            <div className="section-title-row">
+              <div>
+                <h2>{currentFolder ? currentFolder.name : "历史项目"}</h2>
+                <div className="breadcrumbs">
+                  <button onClick={() => setCurrentFolderId(null)}>根目录</button>
+                  {breadcrumbs.map((project) => (
+                    <button key={project.id} onClick={() => setCurrentFolderId(project.id)}>{project.name}</button>
+                  ))}
+                </div>
+              </div>
+              {currentFolder && <button onClick={() => setCurrentFolderId(currentFolder.parent_id || null)}><ArrowLeft size={14} />上一级</button>}
+            </div>
             <div className="project-grid">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <article className="project-folder" key={project.id} onDoubleClick={() => openProject(project)}>
                   <Folder size={34} />
                   <div>
                     <h3>{project.name}</h3>
-                    <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频</p>
+                    <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频 · {project.child_count || 0} 下级</p>
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
-                  <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  <div className="project-actions">
+                    <button title="进入文件夹" onClick={(event) => { event.stopPropagation(); setCurrentFolderId(project.id); }}><FolderOpen size={16} /></button>
+                    <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  </div>
                 </article>
               ))}
-              {!projects.length && <div className="empty-state">还没有项目，点击右上角新建项目。</div>}
+              {!visibleProjects.length && <div className="empty-state">当前文件夹为空，点击右上角新建项目。</div>}
             </div>
           </section>
           <section className="home-section">
@@ -754,6 +837,13 @@ function App() {
           <p>{summary?.image_count || 0} 图片 · {summary?.video_count || 0} 视频 · {summary?.annotation_count || 0} 标注</p>
         </div>
         <button className="primary" onClick={importData}><Import size={16} />导入数据</button>
+        <label className="export-format">导出格式
+          <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
+            <option value="labelme">LabelMe</option>
+            <option value="coco">COCO</option>
+            <option value="yolo">YOLO</option>
+          </select>
+        </label>
         <button className="warning" onClick={exportProject}><Upload size={16} />导出数据集</button>
       </header>
       <div className="workspace-layout">
@@ -781,7 +871,7 @@ function App() {
         <div className="overlay" onClick={() => setShowImportDialog(false)}>
           <div className="import-dialog" onClick={(e) => e.stopPropagation()}>
             <h2>导入数据</h2>
-            <p className="muted">输入或选择要导入的数据文件夹路径（图片 + JSON 标注）</p>
+            <p className="muted">输入或选择要导入的数据文件夹路径（浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}）</p>
             <div className="import-path-row">
               <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder='例如: F:\ZBH\统计用\山地' />
               <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
@@ -790,6 +880,31 @@ function App() {
             <div className="dialog-actions">
               <button onClick={() => { setShowImportDialog(false); setError(null); }}>取消</button>
               <button className="primary" onClick={confirmImport}>开始导入</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {dirPicker && (
+        <div className="overlay" onClick={() => setDirPicker(null)}>
+          <div className="dir-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="section-title-row">
+              <h2>选择数据文件夹</h2>
+              <button onClick={() => setDirPicker(null)}><X size={14} /></button>
+            </div>
+            <div className="dir-current">{dirPicker.current}</div>
+            <div className="dir-actions">
+              <button onClick={() => openDataRootPicker(dirPicker.parent)} disabled={!dirPicker.parent || dirPickerBusy}><ArrowLeft size={14} />上一级</button>
+              <button className="primary" onClick={() => chooseDir(dirPicker.current)} disabled={dirPickerBusy}><FolderOpen size={14} />选择当前文件夹</button>
+            </div>
+            {error && <div className="error-msg">{error}</div>}
+            <div className="dir-list">
+              {dirPicker.dirs.map((dir) => (
+                <button key={dir.path} onClick={() => openDataRootPicker(dir.path)} disabled={dirPickerBusy}>
+                  <Folder size={15} />
+                  <span>{dir.name}</span>
+                </button>
+              ))}
+              {!dirPicker.dirs.length && <div className="muted">当前目录下没有子文件夹</div>}
             </div>
           </div>
         </div>
@@ -1723,8 +1838,10 @@ function MultiFilter({ title, values, selected = [], onToggle }) {
 }
 
 function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport }) {
-  const latestExport = jobs.find((job) => job.type === "export");
-  const canCancelImport = latestImport && ["scanning", "running", "cancel_requested"].includes(latestImport.status);
+  const runningStatuses = new Set(["pending", "scanning", "running", "cancel_requested", "preparing"]);
+  const visibleImport = latestImport && runningStatuses.has(latestImport.status) ? latestImport : null;
+  const latestExport = jobs.find((job) => job.type === "export" && runningStatuses.has(job.status));
+  const canCancelImport = visibleImport && ["scanning", "running", "cancel_requested"].includes(visibleImport.status);
   return (
     <div className="progress-stack">
       {error && (
@@ -1733,7 +1850,7 @@ function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport
           <button onClick={onCloseError}>&times;</button>
         </div>
       )}
-      {latestImport && <ProgressBar title="导入进度" message={latestImport.message || latestImport.status} progress={latestImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
+      {visibleImport && <ProgressBar title="导入进度" message={visibleImport.message || visibleImport.status} progress={visibleImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
       {latestExport && <ProgressBar title="导出进度" message={latestExport.message || latestExport.status} progress={latestExport.progress || 0} />}
     </div>
   );

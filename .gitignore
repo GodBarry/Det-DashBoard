@@ -7,6 +7,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.portable.example
 .conda-det-dashboard/
 .conda-pkgs/
 
@@ -14,11 +15,16 @@ dist/
 runtime/
 tmp/
 object-store-fallback/
+portable-data/
+datasets/
+exports/
 
 # Logs
 *.log
 *.err.log
 *.out.log
+test-results/
+playwright-report/
 
 # OS/editor noise
 .DS_Store
