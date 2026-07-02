@@ -99,6 +99,28 @@ async function main() {
   assert.equal(dirs.parent, "");
   assert.ok(dirs.dirs.some((entry) => entry.name === "coco"));
 
+  const nested = (await request("POST", "/api/projects", { name: "level-a/level-b/level-c" })).project;
+  assert.equal(nested.name, "level-c");
+  const projectTree = await request("GET", "/api/projects");
+  const middle = projectTree.projects.find((project) => project.id === nested.parent_id);
+  const root = projectTree.projects.find((project) => project.id === middle.parent_id);
+  assert.equal(middle.name, "level-b");
+  assert.equal(root.name, "level-a");
+  await request("POST", "/api/projects", { name: "too/deep/path/here" }, 400);
+  const trashTreeName = `trash-tree-${Date.now()}`;
+  const trashLeaf = (await request("POST", "/api/projects", { name: `${trashTreeName}/branch/leaf` })).project;
+  const trashTree = await request("GET", "/api/projects");
+  const trashBranch = trashTree.projects.find((project) => project.id === trashLeaf.parent_id);
+  const trashRoot = trashTree.projects.find((project) => project.id === trashBranch.parent_id);
+  await request("DELETE", `/api/projects/${trashRoot.id}`, null);
+  const afterDeleteTree = await request("GET", "/api/projects");
+  assert.ok(!afterDeleteTree.projects.some((project) => [trashRoot.id, trashBranch.id, trashLeaf.id].includes(project.id)));
+  const trashAfterTreeDelete = await request("GET", "/api/projects/trash");
+  assert.ok([trashRoot.id, trashBranch.id, trashLeaf.id].every((id) => trashAfterTreeDelete.projects.some((project) => project.id === id)));
+  await request("POST", `/api/projects/${trashRoot.id}/restore`, {});
+  const afterRestoreTree = await request("GET", "/api/projects");
+  assert.ok([trashRoot.id, trashBranch.id, trashLeaf.id].every((id) => afterRestoreTree.projects.some((project) => project.id === id)));
+
   const labelme = await createAndImport("e2e-labelme", "labelme/scene-labelme");
   assert.equal(labelme.summary.image_count, 1);
   assert.equal(labelme.summary.annotation_count, 1);

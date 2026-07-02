@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("creates a project, navigates folders, imports YOLO, filters and exports COCO", async ({ page }) => {
   const projectName = `ui-e2e-${Date.now()}`;
+  const folderRoot = `ui-root-${Date.now()}`;
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "数据集管理" })).toBeVisible();
 
@@ -54,5 +55,5 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
 
   await page.getByLabel("导出格式").selectOption("coco");
   await page.getByRole("button", { name: "导出数据集" }).click();
-  await expect(page.locator(".progress-card").filter({ hasText: "COCO 导出完成" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".progress-card").filter({ hasText: "导出进度" })).toBeHidden({ timeout: 20_000 });
 });

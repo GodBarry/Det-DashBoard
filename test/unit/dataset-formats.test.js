@@ -42,6 +42,23 @@ test("imports LabelMe JSON by imagePath", () => {
   assert.equal(result.unresolved.length, 0);
 });
 
+test("imports LabelMe JSON with UTF-8 BOM", () => {
+  const root = fixture();
+  const image = write(path.join(root, "scene-a", "images", "one.jpg"));
+  const label = write(path.join(root, "scene-a", "jsons", "one.json"), `\uFEFF${JSON.stringify({
+    imagePath: "one.jpg",
+    imageWidth: 100,
+    imageHeight: 80,
+    scene: "bom-scene",
+    shapes: [{ label: "car", points: [[10, 20], [30, 50]], shape_type: "rectangle" }],
+  })}`);
+  const result = buildDatasetMatches({ files: [image, label], images: [image], sourceRoot: root });
+  const match = result.matches.get(imageKey(image));
+  assert.equal(match.format, "labelme");
+  assert.equal(match.meta.scene, "bom-scene");
+  assert.equal(result.formatCounts.labelme, 1);
+});
+
 test("imports standard COCO single JSON", () => {
   const root = fixture();
   const image = write(path.join(root, "images", "one.jpg"));

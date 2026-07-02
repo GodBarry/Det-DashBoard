@@ -32,8 +32,21 @@ function sendJson(res, data, code = 200) {
   res.end(JSON.stringify(data));
 }
 
+  res.end(JSON.stringify(data));
+}
+
 function sendError(res, code, message) {
   sendJson(res, { error: message }, code);
+}
+
+function psQuote(value) {
+  return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 function psQuote(value) {
@@ -184,7 +197,7 @@ function listFolders(target, scope = "browse") {
   const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
   if (!isInsideRoot(root, current)) throw httpError(403, `路径必须位于浏览根目录内：${displayRoot}`);
   const stat = fs.statSync(current);
-  if (!stat.isDirectory()) throw new Error("路径必须是文件夹");
+  if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
   const dirs = fs.readdirSync(current, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -211,6 +224,11 @@ function videoObjectKey(sha256, ext) {
 
 function rawLabelObjectKey(projectId, versionId, name) {
   return `objects/raw-labels/${projectId}/${versionId}/${name}`;
+}
+
+function pythonEnvObjectKey(sha256, name) {
+  const safeName = path.basename(name || `${sha256}.tar.gz`).replace(/[\\/:*?"<>|]/g, "_");
+  return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/${safeName}`;
 }
 
 function uniqueExistingPaths(paths) {
@@ -294,6 +312,60 @@ async function seedMlRuntimeConfig() {
      WHERE framework='ultralytics' AND (capabilities_json = '{}'::jsonb OR capabilities_json->'tasks' IS NULL)`,
     [JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }), "自动识别为支持 detect / segment / classify 的 Ultralytics YOLO 模板"],
   );
+  const dinoTemplate = (await query("SELECT id FROM training_templates WHERE template_key=$1", ["dinov3_faster_rcnn"])).rows[0];
+  if (!dinoTemplate) {
+    await query(
+      `INSERT INTO training_templates (name, template_key, framework, task_type, command_json, default_params_json, capabilities_json, description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        "DINOv3 Faster R-CNN 推理",
+        "dinov3_faster_rcnn",
+        "mmdetection",
+        "detect",
+        JSON.stringify({
+          script: "dinov3-faster-rcnn/tools/platform_infer.py",
+          args: ["--image-dir", "{input.imagesDir}", "--manifest", "{input.manifestPath}", "--config", "{model.configPath}", "--checkpoint", "{model.checkpointPath}", "--out-dir", "{outputRoot}"],
+        }),
+        JSON.stringify({ scoreThr: 0.25, width: 1920, height: 1080, nmsAgnostic: false, outputFormats: ["json", "voc_xml"] }),
+        JSON.stringify({ tasks: ["detect"], algorithmRole: "inference", input: "image_dir", output: ["predictions_json", "voc_xml"] }),
+        "基于 MMDetection 的 DINOv3 + Faster R-CNN 目录推理入口，读取平台 input-cache/images 并输出 predictions.json/VOC XML。",
+      ],
+    );
+  }
+  const dummyTemplate = (await query("SELECT id FROM training_templates WHERE template_key=$1", ["dummy_empty_detector"])).rows[0];
+  if (!dummyTemplate) {
+    await query(
+      `INSERT INTO training_templates (name, template_key, framework, task_type, command_json, default_params_json, capabilities_json, description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        "空检测模型推理",
+        "dummy_empty_detector",
+        "builtin",
+        "detect",
+        JSON.stringify({ builtin: "empty_predictions" }),
+        JSON.stringify({}),
+        JSON.stringify({ tasks: ["detect"], algorithmRole: "inference", input: "manifest", output: ["predictions_json"] }),
+        "平台内置空模型，用于打通推理流程：读取 input-cache/manifest.json，为每张图片输出空预测。",
+      ],
+    );
+  }
+  const dummyModel = (await query("SELECT * FROM ml_models WHERE name=$1 AND deleted_at IS NULL", ["Dummy Empty Detector"])).rows[0];
+  let dummyModelId = dummyModel?.id;
+  if (!dummyModelId) {
+    dummyModelId = (await query(
+      `INSERT INTO ml_models (name, task_type, framework, description)
+       VALUES ($1,'detect','builtin',$2) RETURNING id`,
+      ["Dummy Empty Detector", "平台内置空检测模型，用于测试推理任务、输入缓存和结果写回。"],
+    )).rows[0].id;
+  }
+  const dummyVersion = (await query("SELECT id FROM model_versions WHERE model_id=$1 AND version_name=$2", [dummyModelId, "empty_v1"])).rows[0];
+  if (!dummyVersion) {
+    await query(
+      `INSERT INTO model_versions (model_id, version_name, stage, params_json, artifact_root)
+       VALUES ($1,'empty_v1','builtin',$2,$3)`,
+      [dummyModelId, JSON.stringify({ templateKey: "dummy_empty_detector", emptyPredictions: true }), path.join(storageRoot, "runtime", "models", dummyModelId, "empty_v1")],
+    );
+  }
   const candidates = uniqueExistingPaths([
     process.env.PYTHON,
     "D:\\ProgramData\\miniforge3\\python.exe",
@@ -353,6 +425,8 @@ async function ensureRuntimeSchema() {
   const statements = [
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
@@ -538,6 +612,12 @@ async function ensureRuntimeSchema() {
     "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_available BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_version TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'server_python'",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_key TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_name TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_size BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_sha256 TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS unpack_path TEXT NOT NULL DEFAULT ''",
   ];
   for (const sql of statements) await query(sql);
   await query(
@@ -632,6 +712,7 @@ async function upsertVideoAsset(client, filePath) {
     if (storedSize !== Number(row.file_size || stat.size)) await store.putFile(row.object_key, filePath);
     return row;
   }
+  if (existing.rows[0]) return existing.rows[0];
   const objectKey = videoObjectKey(sha, ext);
   await store.putFile(objectKey, filePath);
   const inserted = await client.query(
@@ -642,10 +723,93 @@ async function upsertVideoAsset(client, filePath) {
   return inserted.rows[0];
 }
 
+
 async function createProject(body) {
-  const name = body.name || `project_${Date.now()}`;
-  const result = await query("INSERT INTO projects (name, description, project_type) VALUES ($1,$2,$3) RETURNING *", [name, body.description || "", body.project_type || "normal"]);
-  return result.rows[0];
+  const rawName = String(body.name || `project_${Date.now()}`);
+  const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
+  if (!segments.length) throw httpError(400, "项目名称不能为空");
+  let parentId = body.parentId || body.parent_id || null;
+  const parentDepth = parentId ? await projectDepth(parentId) : 0;
+  if (parentDepth + segments.length > 3) throw httpError(400, "项目文件夹最多支持 3 级");
+  let project = null;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const shouldReuseFolder = segments.length > 1 && index < segments.length - 1;
+    const existing = shouldReuseFolder ? (await query(
+      "SELECT * FROM projects WHERE deleted_at IS NULL AND name=$1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY created_at DESC LIMIT 1",
+      [segment, parentId],
+    )).rows[0] : null;
+    if (existing) {
+      project = existing;
+    } else {
+      project = (await query(
+        "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,$3,$4) RETURNING *",
+        [segment, body.description || "", body.project_type || "normal", parentId],
+      )).rows[0];
+    }
+    parentId = project.id;
+  }
+  return project;
+}
+
+async function projectDepth(projectId) {
+  const result = await query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_id, 1 AS depth FROM projects WHERE id=$1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT p.id, p.parent_id, ancestors.depth + 1
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+       WHERE p.deleted_at IS NULL AND ancestors.depth < 3
+     )
+     SELECT count(*)::int AS depth FROM ancestors`,
+    [projectId],
+  );
+  const depth = result.rows[0]?.depth || 0;
+  if (!depth) throw httpError(400, "父级项目不存在");
+  return depth;
+}
+
+async function softDeleteProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     )
+     UPDATE projects SET deleted_at=now()
+     WHERE id IN (SELECT id FROM descendants)`,
+    [projectId],
+  );
+}
+
+async function restoreProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     ),
+     ancestors AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+     ),
+     affected AS (
+       SELECT id FROM descendants
+       UNION
+       SELECT id FROM ancestors
+     )
+     UPDATE projects SET deleted_at=NULL
+     WHERE id IN (SELECT id FROM affected)`,
+    [projectId],
+  );
 }
 
 async function listProjects(trash = false) {
@@ -653,6 +817,15 @@ async function listProjects(trash = false) {
     `SELECT p.*,
       (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
+      (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
+     FROM projects p
+     WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
+     ORDER BY p.created_at DESC`,
+  );
+  return result.rows;
+}
+
+      (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND c.deleted_at IS NULL) AS child_count,
       (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
      FROM projects p
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
@@ -670,10 +843,10 @@ async function importPath(body) {
     throw error;
   }
   const sourcePath = toInternalDataPath(body.sourcePath || "");
-  if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("导入路径不存在");
-  if (!fs.statSync(sourcePath).isDirectory()) throw new Error("导入路径必须是文件夹");
+  if (!sourcePath || !fs.existsSync(sourcePath)) throw httpError(400, "导入路径不存在");
+  if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "导入路径必须是文件夹");
   if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(browseRoot, sourcePath)) {
-    throw new Error(`导入路径必须位于浏览根目录内：${browseRootDisplay}`);
+    throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
   }
   body.sourcePath = sourcePath;
 
@@ -1397,6 +1570,52 @@ async function listPythonEnvs() {
 }
 
 async function createPythonEnv(body = {}) {
+  const sourceType = body.sourceType || body.source_type || "server_python";
+  if (sourceType === "conda_pack") {
+    const sourcePath = path.resolve(String(body.condaPackPath || body.conda_pack_path || body.sourcePath || body.source_path || "").trim());
+    if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("conda-pack 环境包路径不存在");
+    if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(storageRoot, sourcePath)) throw new Error(`conda-pack 环境包必须位于 ${dataRoot} 或 ${storageRoot} 内`);
+    const stat = fs.statSync(sourcePath);
+    const sha = await hashFile(sourcePath);
+    const artifactKey = pythonEnvObjectKey(sha, path.basename(sourcePath));
+    await store.putFile(artifactKey, sourcePath, { "x-amz-meta-source": "conda-pack" });
+    const platform = {
+      osType: ["windows", "linux"].includes(body.osType || body.os_type) ? (body.osType || body.os_type) : "linux",
+      arch: ["x86_64", "arm64"].includes(body.arch) ? body.arch : "x86_64",
+    };
+    const accelerator = ["cpu", "cuda"].includes(body.accelerator) ? body.accelerator : "cpu";
+    const unpackPath = String(body.unpackPath || body.unpack_path || path.join(storageRoot, "runtime", "python-envs", sha.slice(0, 12))).trim();
+    const pythonPath = String(body.pythonPath || body.python_path || path.join(unpackPath, "bin", "python")).trim();
+    const rows = await query(
+      `INSERT INTO python_envs
+       (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version,
+        packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+      [
+        body.name || path.basename(sourcePath).replace(/\.(tar\.gz|tgz)$/i, ""),
+        pythonPath,
+        "conda-pack",
+        platform.osType,
+        platform.arch,
+        accelerator,
+        "uploaded",
+        body.pythonVersion || body.python_version || "",
+        body.torchVersion || body.torch_version || "",
+        accelerator === "cuda",
+        body.cudaVersion || body.cuda_version || "",
+        JSON.stringify({ sourcePath }),
+        JSON.stringify({ source_type: "conda_pack", artifact_key: artifactKey, tasks: body.tasks || ["detect", "segment", "classify"] }),
+        "conda_pack",
+        artifactKey,
+        path.basename(sourcePath),
+        stat.size,
+        sha,
+        unpackPath,
+      ],
+    );
+    return rows.rows[0];
+  }
+
   const pythonPath = path.resolve(String(body.pythonPath || body.python_path || "").trim());
   if (!pythonPath || !fs.existsSync(pythonPath)) throw new Error("Python 解释器路径不存在");
   const info = inspectPythonEnv(pythonPath);
@@ -1405,8 +1624,8 @@ async function createPythonEnv(body = {}) {
   const arch = ["x86_64", "arm64"].includes(body.arch) ? body.arch : info.platform.arch;
   const accelerator = ["cpu", "cuda"].includes(body.accelerator) ? body.accelerator : info.accelerator;
   const rows = await query(
-    `INSERT INTO python_envs (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version, packages_json, capabilities_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    `INSERT INTO python_envs (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version, packages_json, capabilities_json, source_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
     [
       body.name || info.version || path.basename(pythonPath),
       pythonPath,
@@ -1421,6 +1640,7 @@ async function createPythonEnv(body = {}) {
       info.packages.cuda_version || "",
       JSON.stringify(info.packages),
       JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
+      "server_python",
     ],
   );
   return rows.rows[0];
@@ -1600,6 +1820,25 @@ async function listInferenceJobs() {
   return rows.rows;
 }
 
+async function listInferenceResults(jobId) {
+  const rows = await query(
+    `SELECT ir.*, pi.display_name, pi.scene, pi.view, pi.modality
+     FROM inference_results ir
+     LEFT JOIN project_images pi ON pi.id=ir.project_image_id
+     WHERE ir.inference_job_id=$1
+     ORDER BY ir.created_at, ir.id
+     LIMIT 500`,
+    [jobId],
+  );
+  return rows.rows;
+}
+
+async function deleteInferenceJob(jobId) {
+  const deleted = await query("DELETE FROM inference_jobs WHERE id=$1 RETURNING id", [jobId]);
+  if (!deleted.rows[0]) throw new Error("推理任务不存在");
+  return { deleted: true, id: deleted.rows[0].id };
+}
+
 async function createInferenceJob(body = {}) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
   if (!datasetProjectId) throw new Error("请选择推理数据集项目");
@@ -1613,14 +1852,23 @@ async function createInferenceJob(body = {}) {
   const params = body.params || {};
   const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const inserted = await query(
-    `INSERT INTO inference_jobs (name, model_version_id, dataset_project_id, params_json, message)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [name, modelVersionId, datasetProjectId, JSON.stringify(params), "已进入推理队列，等待推理 worker 接管"],
+    `INSERT INTO inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message)
+     VALUES ($1,$2,$3,'preparing',$4,$5) RETURNING *`,
+    [name, modelVersionId, datasetProjectId, JSON.stringify(params), "正在准备推理输入缓存"],
   );
   const job = inserted.rows[0];
   const outputRoot = path.join(storageRoot, "runtime", "inference", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
   const updated = await query("UPDATE inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
+  setImmediate(() => {
+    prepareInferenceInputCache(updated.rows[0]).catch(async (error) => {
+      console.error("prepare inference input failed", error);
+      await query(
+        "UPDATE inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+        [error.message || "推理输入缓存准备失败", job.id],
+      ).catch(() => {});
+    });
+  });
   return updated.rows[0];
 }
 
@@ -1654,6 +1902,297 @@ async function writeObjectToFile(objectKey, targetPath) {
     write.on("error", reject);
     stream.on("error", reject);
   });
+}
+
+function inferenceListParam(source = {}, ...keys) {
+  for (const key of keys) {
+    const raw = source[key];
+    if (!raw || raw === "all") continue;
+    if (Array.isArray(raw)) return raw.map((item) => String(item).trim()).filter(Boolean);
+    const values = String(raw).split(",").map((item) => item.trim()).filter(Boolean);
+    if (values.length) return values;
+  }
+  return [];
+}
+
+function linkOrCopyFile(source, target, copyOnly = false) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.rmSync(target, { force: true });
+  if (copyOnly) {
+    fs.copyFileSync(source, target);
+    return;
+  }
+  try {
+    fs.linkSync(source, target);
+  } catch {
+    try {
+      fs.symlinkSync(path.relative(path.dirname(target), source), target);
+    } catch {
+      fs.copyFileSync(source, target);
+    }
+  }
+}
+
+async function ensureImageAssetCache(row) {
+  const ext = row.original_ext || path.extname(row.object_key || "") || ".jpg";
+  const target = path.join(storageRoot, "runtime", "cache", "assets", "images", `${row.image_asset_id}${ext}`);
+  if (!fs.existsSync(target)) await writeObjectToFile(row.object_key, target);
+  return target;
+}
+
+async function prepareInferenceInputCache(job) {
+  const paramsJson = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const input = paramsJson.input || {};
+  const filters = input.filters || {};
+  const sqlParams = [job.dataset_project_id];
+  const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
+
+  const sceneValues = inferenceListParam(filters, "scenes", "scene");
+  const viewValues = inferenceListParam(filters, "views", "view");
+  const modalityValues = inferenceListParam(filters, "modalities", "modality");
+  const importValues = inferenceListParam(filters, "importBatchIds", "importBatchId");
+  const labelValues = inferenceListParam(filters, "labels", "label");
+  const q = String(filters.q || "").trim();
+
+  if (sceneValues.length) {
+    sqlParams.push(sceneValues);
+    where.push(`pi.scene = ANY($${sqlParams.length})`);
+  }
+  if (viewValues.length) {
+    sqlParams.push(viewValues);
+    where.push(`pi.view = ANY($${sqlParams.length})`);
+  }
+  if (modalityValues.length) {
+    sqlParams.push(modalityValues);
+    where.push(`pi.modality = ANY($${sqlParams.length})`);
+  }
+  if (importValues.length) {
+    sqlParams.push(importValues);
+    where.push(`pi.import_batch_id = ANY($${sqlParams.length}::uuid[])`);
+  }
+  if (q) {
+    sqlParams.push(`%${q}%`);
+    where.push(`(pi.display_name ILIKE $${sqlParams.length} OR pi.scene ILIKE $${sqlParams.length} OR pi.view ILIKE $${sqlParams.length} OR pi.keyword ILIKE $${sqlParams.length})`);
+  }
+  if (labelValues.length) {
+    sqlParams.push(labelValues);
+    where.push(`EXISTS (
+      SELECT 1 FROM image_annotations a
+      JOIN projects p ON p.active_label_version_id = a.label_version_id
+      WHERE p.id = pi.project_id AND a.project_image_id = pi.id AND a.label = ANY($${sqlParams.length})
+    )`);
+  }
+
+  const limit = Math.max(0, Math.min(100000, Number(input.limit || 0)));
+  if (limit > 0) sqlParams.push(limit);
+
+  const rows = (await query(
+    `SELECT pi.id AS project_image_id, pi.project_id, pi.image_asset_id, pi.import_batch_id, pi.display_name,
+            pi.scene, pi.view, pi.modality, pi.keyword,
+            ia.object_key, ia.original_ext, ia.width, ia.height, ia.file_size
+     FROM project_images pi
+     JOIN image_assets ia ON ia.id=pi.image_asset_id
+     LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
+     WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
+     ORDER BY pi.created_at, pi.id
+     ${limit > 0 ? `LIMIT $${sqlParams.length}` : ""}`,
+    sqlParams,
+  )).rows;
+  if (!rows.length) throw new Error("推理输入范围内没有可用图片");
+
+  const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+  const cacheRoot = path.join(outputRoot, "input-cache");
+  const imagesDir = path.join(cacheRoot, "images");
+  const cachePolicy = input.cachePolicy || "reuse_asset_cache";
+  fs.mkdirSync(imagesDir, { recursive: true });
+
+  const manifestImages = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const assetPath = await ensureImageAssetCache(row);
+    const ext = path.extname(assetPath) || row.original_ext || ".jpg";
+    const cachedFileName = `${String(index + 1).padStart(8, "0")}${ext}`;
+    const cachedPath = path.join(imagesDir, cachedFileName);
+    linkOrCopyFile(assetPath, cachedPath, cachePolicy === "job_copy");
+    manifestImages.push({
+      index: index + 1,
+      projectImageId: row.project_image_id,
+      imageAssetId: row.image_asset_id,
+      importBatchId: row.import_batch_id,
+      objectKey: row.object_key,
+      originalFileName: row.display_name,
+      cachedFileName,
+      localPath: path.join("images", cachedFileName).replaceAll("\\", "/"),
+      width: row.width,
+      height: row.height,
+      scene: row.scene,
+      view: row.view,
+      modality: row.modality,
+      keyword: row.keyword,
+    });
+  }
+
+  const manifest = {
+    jobId: job.id,
+    projectId: job.dataset_project_id,
+    imageCount: manifestImages.length,
+    cacheRoot,
+    imagesDir,
+    createdAt: new Date().toISOString(),
+    images: manifestImages,
+  };
+  const sourceFilters = {
+    sourceType: input.sourceType || "project_images",
+    projectId: job.dataset_project_id,
+    filters,
+    limit,
+    cachePolicy,
+  };
+  fs.writeFileSync(path.join(cacheRoot, "manifest.json"), JSON.stringify(manifest, null, 2));
+  fs.writeFileSync(path.join(cacheRoot, "source_filters.json"), JSON.stringify(sourceFilters, null, 2));
+  fs.writeFileSync(path.join(cacheRoot, "dataset_meta.json"), JSON.stringify({
+    projectId: job.dataset_project_id,
+    imageCount: manifestImages.length,
+    modalities: Array.from(new Set(manifestImages.map((item) => item.modality).filter(Boolean))),
+    scenes: Array.from(new Set(manifestImages.map((item) => item.scene).filter(Boolean))),
+    views: Array.from(new Set(manifestImages.map((item) => item.view).filter(Boolean))),
+  }, null, 2));
+
+  const nextParams = {
+    ...paramsJson,
+    input: {
+      sourceType: input.sourceType || "project_images",
+      filters,
+      limit,
+      cachePolicy,
+      cacheRoot,
+      imagesDir,
+      manifestPath: path.join(cacheRoot, "manifest.json"),
+      imageCount: manifestImages.length,
+      preparedAt: manifest.createdAt,
+    },
+  };
+  await query(
+    "UPDATE inference_jobs SET status='pending', progress=5, params_json=$1, message=$2 WHERE id=$3",
+    [JSON.stringify(nextParams), `推理输入缓存已准备：${manifestImages.length} 张图片`, job.id],
+  );
+  return manifest;
+}
+
+async function claimInferenceJob(workerId) {
+  return transaction(async (client) => {
+    const row = (await client.query(
+      `SELECT *
+       FROM inference_jobs
+       WHERE status='pending'
+       ORDER BY created_at
+       FOR UPDATE SKIP LOCKED
+       LIMIT 1`,
+    )).rows[0];
+    if (!row) return null;
+    await client.query(
+      "UPDATE inference_jobs SET status='running', progress=10, message=$1, started_at=COALESCE(started_at, now()) WHERE id=$2",
+      [`推理 worker ${workerId} 已接管任务`, row.id],
+    );
+    return { ...row, status: "running" };
+  });
+}
+
+function isDummyInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  return params.templateKey === "dummy_empty_detector" || (!job.model_version_id && params.templateKey === "dinov3_faster_rcnn");
+}
+
+async function runDummyInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const input = params.input || {};
+  const manifestPath = input.manifestPath || path.join(job.output_root, "input-cache", "manifest.json");
+  if (!fs.existsSync(manifestPath)) throw new Error("推理输入 manifest 不存在");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+  const outputDir = path.join(outputRoot, "output");
+  fs.mkdirSync(outputDir, { recursive: true });
+  const images = Array.isArray(manifest.images) ? manifest.images : [];
+  const predictionRows = images.map((image) => ({
+    index: image.index,
+    cachedFileName: image.cachedFileName,
+    projectImageId: image.projectImageId,
+    imageAssetId: image.imageAssetId,
+    originalFileName: image.originalFileName,
+    width: image.width,
+    height: image.height,
+    predictions: [],
+  }));
+  const predictions = {
+    format: "det-dashboard.predictions.v1",
+    algorithm: "dummy_empty_detector",
+    jobId: job.id,
+    imageCount: predictionRows.length,
+    images: predictionRows,
+  };
+  const predictionsPath = path.join(outputDir, "predictions.json");
+  fs.writeFileSync(predictionsPath, JSON.stringify(predictions, null, 2), "utf8");
+
+  await transaction(async (client) => {
+    await client.query("DELETE FROM inference_results WHERE inference_job_id=$1", [job.id]);
+    for (const row of predictionRows) {
+      await client.query(
+        `INSERT INTO inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
+         VALUES ($1,$2,$3,$4)`,
+        [job.id, row.projectImageId || null, JSON.stringify(row.predictions), predictionsPath],
+      );
+    }
+    const nextParams = {
+      ...params,
+      output: {
+        ...(params.output || {}),
+        predictionsPath,
+        resultCount: predictionRows.length,
+        completedAt: new Date().toISOString(),
+      },
+    };
+    await client.query(
+      "UPDATE inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
+      [JSON.stringify(nextParams), `空模型推理完成：${predictionRows.length} 张图片，0 个预测框`, job.id],
+    );
+  });
+}
+
+async function runInferenceJob(job, workerId) {
+  try {
+    if (!isDummyInferenceJob(job)) {
+      await query(
+        "UPDATE inference_jobs SET status='pending', progress=5, message=$1 WHERE id=$2",
+        ["等待外部推理 worker：当前内置 worker 只执行空模型任务", job.id],
+      );
+      return;
+    }
+    await query("UPDATE inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在执行空模型推理", job.id]);
+    await runDummyInferenceJob(job);
+  } catch (error) {
+    await query(
+      "UPDATE inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+      [error.message || `推理 worker ${workerId} 执行失败`, job.id],
+    ).catch(() => {});
+  }
+}
+
+function startInferenceWorker() {
+  if (String(process.env.INFERENCE_WORKER_ENABLED || "true").toLowerCase() === "false") return;
+  const workerId = `local-infer-${process.pid}`;
+  let busy = false;
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const job = await claimInferenceJob(workerId);
+      if (job) await runInferenceJob(job, workerId);
+    } catch (error) {
+      console.error("inference worker error:", error);
+    } finally {
+      busy = false;
+    }
+  }, Number(process.env.INFERENCE_WORKER_INTERVAL_MS || 2500));
 }
 
 async function appendTrainingLog(jobId, stream, line) {
@@ -2275,11 +2814,13 @@ async function route(req, res) {
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (method === "DELETE" && deleteProject) {
     await query("UPDATE projects SET deleted_at=now() WHERE id=$1", [deleteProject[1]]);
+    await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
     await query("UPDATE projects SET deleted_at=NULL WHERE id=$1", [restoreProject[1]]);
+    await restoreProjectTree(restoreProject[1]);
     return sendJson(res, { ok: true });
   }
   if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req)));
@@ -2312,6 +2853,10 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
+  const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
+  if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
+  const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
+  if (method === "GET" && inferenceResultsMatch) return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) });
   if (method === "POST" && parsed.pathname === "/api/baselines/preview") return sendJson(res, await createBaselinePreview(await readBody(req)));
   const baselineConflicts = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/conflicts$/);
   if (method === "GET" && baselineConflicts) return sendJson(res, { conflicts: await listBaselineConflicts(baselineConflicts[1]) });
@@ -2463,6 +3008,7 @@ async function main() {
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
   startTrainingWorker();
+  startInferenceWorker();
   return server;
 }
 

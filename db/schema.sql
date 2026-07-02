@@ -1,14 +1,15 @@
--- PostgreSQL 13+ provides gen_random_uuid() in pg_catalog. Do not require
--- pgcrypto here because some lightweight local PostgreSQL packages omit contrib.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  parent_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   active_label_version_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id);
 
 CREATE TABLE IF NOT EXISTS import_batches (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

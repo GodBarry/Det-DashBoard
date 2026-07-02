@@ -93,6 +93,25 @@ LabelMe 导出的 `imagePath` 写成相对图片路径，例如：
 3. 按用户选择生成 LabelMe、COCO 或 YOLO 文档。
 4. 后台任务记录状态、输出目录和错误；导出根目录是唯一可写边界。
 
+## 推理平台流程
+
+推理平台按训练平台的 Run / Artifact / Model Version / Queue 思路组织：
+
+```text
+数据集项目 -> 模型簇 -> 推理模型版本 -> 推理模板/算法入口 -> 任务类型 -> 运行环境资产 -> 推理参数 -> 输出策略 -> 推理队列
+```
+
+推理任务提交后，后端先把选中的项目图片整理成任务级输入缓存，再由推理 worker 消费。输入范围支持全项目，也支持按场景、视角、模态、导入批次、类别、关键词和最大图片数筛选。
+
+```text
+PostgreSQL project_images/image_assets
+  -> MinIO object_key
+  -> runtime/cache/assets/images/<image_asset_id>.<ext>
+  -> runtime/inference/<job_id>/input-cache/images/
+```
+
+运行环境采用 PostgreSQL 管元数据、MinIO 管制品的方式。现阶段支持登记服务器 Python 路径，也支持将服务器可访问的 conda-pack `.tar.gz` 环境包导入为运行环境资产。
+
 ## 测试与发布门禁
 
 - `npm test`：Node 内置测试运行器验证格式转换、错误输入、场景推断和取消扫描。

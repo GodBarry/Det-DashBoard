@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: docker.io/library/postgres:16
     container_name: det-dashboard-postgres
     environment:
       POSTGRES_DB: det_dashboard
@@ -9,11 +9,16 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./runtime/postgres:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./runtime/postgres:/var/lib/postgresql/data:Z,U
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U det -d det_dashboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: docker.io/minio/minio:latest
     container_name: det-dashboard-minio
     command: server /data --console-address ":9001"
     environment:
@@ -23,4 +28,4 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - ./runtime/minio:/data
+      - ./runtime/minio:/data:Z,U
