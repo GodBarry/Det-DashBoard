@@ -163,7 +163,7 @@ runtime/inference/<job_id>/input-cache/images/
 - 服务器 Python 路径：登记服务器上已有的 Python/Conda/Miniforge 解释器。
 - conda-pack 云端导入：将服务器可访问的 `.tar.gz` 环境包导入 MinIO，并记录 `artifact_key / sha256 / unpack_path`。
 
-conda-pack 导入要求环境包先放在 `DATA_ROOT` 或 `STORAGE_ROOT` 内，后端再上传到 MinIO：
+conda-pack 导入要求环境包先放在 `DATA_ROOT` 或缓存区 `STORAGE_ROOT` 内，后端再上传到 MinIO：
 
 ```text
 envs/python/conda-pack/<sha_prefix>/<sha256>/<package_name>.tar.gz

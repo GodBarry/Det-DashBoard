@@ -8,7 +8,7 @@ function bool(value, fallback = false) {
 module.exports = {
   port: Number(process.env.PORT || 4177),
   dataRoot: path.resolve(process.env.DATA_ROOT || "F:\\ZBH"),
-  storageRoot: path.resolve(process.env.STORAGE_ROOT || "F:\\ZBH\\zhuji"),
+  storageRoot: path.resolve(process.env.STORAGE_ROOT || "F:\\ZBH\\zhuji\\runtime\\cache"),
   databaseUrl: process.env.DATABASE_URL || "postgres://det:det_password@localhost:5432/det_dashboard",
   minio: {
     endPoint: process.env.MINIO_ENDPOINT || "localhost",
