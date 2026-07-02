@@ -33,7 +33,7 @@ function sendJson(res, data, code = 200) {
 }
 
   res.end(JSON.stringify(data));
-}
+
 
 function sendError(res, code, message) {
   sendJson(res, { error: message }, code);
@@ -817,14 +817,6 @@ async function listProjects(trash = false) {
     `SELECT p.*,
       (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
-      (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
-     FROM projects p
-     WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
-     ORDER BY p.created_at DESC`,
-  );
-  return result.rows;
-}
-
       (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND c.deleted_at IS NULL) AS child_count,
       (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
      FROM projects p
@@ -833,6 +825,7 @@ async function listProjects(trash = false) {
   );
   return result.rows;
 }
+
 
 async function importPath(body) {
   const projectId = body.projectId;
