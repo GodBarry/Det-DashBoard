@@ -12,8 +12,6 @@ const client = new Minio.Client({
   secretKey: minio.secretKey,
 });
 
-const forceFallbackWrites = process.env.OBJECT_STORE_WRITE_FALLBACK === "true";
-
 async function ensureBucket() {
   const exists = await client.bucketExists(minio.bucket).catch(() => false);
   if (!exists) await client.makeBucket(minio.bucket);
@@ -128,47 +126,35 @@ async function ensureBucketSafe() {
     await ensureBucket();
     return true;
   } catch (error) {
-    console.error("MinIO unavailable, using local object files for reads and fallback for new objects:", error.message);
+    console.error("MinIO unavailable, using local fallback for new objects:", error.message);
     fs.mkdirSync(path.join(storageRoot, "object-store-fallback"), { recursive: true });
     return false;
   }
 }
 
 async function putFile(objectKey, filePath, meta = {}) {
-  if (!forceFallbackWrites && await ensureBucketSafe()) {
-    try {
-      await client.fPutObject(minio.bucket, objectKey, filePath, meta);
-      return objectKey;
-    } catch (error) {
-      console.error("MinIO write failed, using local fallback:", error.message);
-    }
+  if (await ensureBucketSafe()) {
+    await client.fPutObject(minio.bucket, objectKey, filePath, meta);
+    writeFallbackFile(objectKey, filePath);
+    return objectKey;
   }
   writeFallbackFile(objectKey, filePath);
   return objectKey;
 }
 
 async function getStream(objectKey) {
-  if (await ensureBucketSafe()) {
-    try {
-      return await client.getObject(minio.bucket, objectKey);
-    } catch (error) {
-      console.error("MinIO read failed, checking local object files:", error.message);
-    }
-  }
   const files = localObjectFiles(objectKey);
-  if (!files.length) throw new Error(`local object not found: ${objectKey}`);
-  return createFileStream(files);
+  if (files.length) return createFileStream(files);
+  if (await ensureBucketSafe()) return client.getObject(minio.bucket, objectKey);
+  return fs.createReadStream(fallbackPath(objectKey));
 }
 
 async function putJson(objectKey, value) {
   const data = Buffer.from(JSON.stringify(value, null, 2), "utf8");
-  if (!forceFallbackWrites && await ensureBucketSafe()) {
-    try {
-      await client.putObject(minio.bucket, objectKey, data, data.length, { "content-type": "application/json" });
-      return objectKey;
-    } catch (error) {
-      console.error("MinIO write failed, using local fallback:", error.message);
-    }
+  if (await ensureBucketSafe()) {
+    await client.putObject(minio.bucket, objectKey, data, data.length, { "content-type": "application/json" });
+    writeFallbackBuffer(objectKey, data);
+    return objectKey;
   }
   writeFallbackBuffer(objectKey, data);
   return objectKey;
@@ -176,35 +162,33 @@ async function putJson(objectKey, value) {
 
 async function objectExists(objectKey) {
   try {
-    if (!(await ensureBucketSafe())) return localObjectFiles(objectKey).length > 0;
+    if (localObjectFiles(objectKey).length) return true;
+    if (!(await ensureBucketSafe())) return false;
     await client.statObject(minio.bucket, objectKey);
     return true;
   } catch {
-    return localObjectFiles(objectKey).length > 0;
+    return false;
   }
-}
-
-async function objectSize(objectKey) {
-  try {
-    if (await ensureBucketSafe()) {
-      const stat = await client.statObject(minio.bucket, objectKey);
-      return Number(stat.size || 0);
-    }
-  } catch {
-    // Fall through to local object files.
-  }
-  const files = localObjectFiles(objectKey);
-  if (!files.length) return -1;
-  return files.reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
 }
 
 async function removeObject(objectKey) {
   if (!objectKey) return;
   if (await ensureBucketSafe()) {
     await client.removeObject(minio.bucket, objectKey).catch(() => {});
+    return;
   }
   fs.rmSync(fallbackPath(objectKey), { force: true });
   fs.rmSync(secondaryFallbackPath(objectKey), { force: true });
+}
+
+async function objectSize(objectKey) {
+  const files = localObjectFiles(objectKey);
+  if (files.length) return files.reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
+  if (await ensureBucketSafe()) {
+    const stat = await client.statObject(minio.bucket, objectKey);
+    return Number(stat.size) || 0;
+  }
+  return 0;
 }
 
 function extOf(filePath) {
