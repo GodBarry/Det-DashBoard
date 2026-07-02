@@ -63,6 +63,18 @@ async function putJson(objectKey, value) {
   return objectKey;
 }
 
+async function putText(objectKey, value, contentType = "text/plain") {
+  const data = Buffer.from(String(value || ""), "utf8");
+  if (await ensureBucketSafe()) {
+    await client.putObject(minio.bucket, objectKey, data, data.length, { "content-type": contentType });
+    return objectKey;
+  }
+  const target = fallbackPath(objectKey);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, data);
+  return objectKey;
+}
+
 async function objectExists(objectKey) {
   try {
     if (!(await ensureBucketSafe())) return fs.existsSync(fallbackPath(objectKey));
@@ -86,4 +98,4 @@ function extOf(filePath) {
   return path.extname(filePath).toLowerCase() || ".bin";
 }
 
-module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, getStream, objectExists, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, removeObject, extOf, localFallbackPath, bucket: minio.bucket };

@@ -93,6 +93,7 @@ function App() {
   const [trainingJobs, setTrainingJobs] = useState([]);
   const [inferenceJobs, setInferenceJobs] = useState([]);
   const [trainingTemplates, setTrainingTemplates] = useState([]);
+  const [algorithmAssets, setAlgorithmAssets] = useState([]);
   const [pythonEnvs, setPythonEnvs] = useState([]);
   const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
   const [trainingForm, setTrainingForm] = useState({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0" });
@@ -123,8 +124,7 @@ function App() {
     createLabelVersion: false,
   });
   const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
-  const [templateForm, setTemplateForm] = useState({ name: "", templateKey: "ultralytics_yolo", framework: "ultralytics", tasks: ["detect", "segment", "classify"], description: "" });
-  const [envForm, setEnvForm] = useState({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
+  const [envForm, setEnvForm] = useState({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
@@ -178,7 +178,17 @@ function App() {
     fetch("/api/ml/model-versions").then((r) => r.json()).then((d) => setModelVersions(d.versions || [])).catch(() => {});
     fetch("/api/ml/training-jobs").then((r) => r.json()).then((d) => setTrainingJobs(d.jobs || [])).catch(() => {});
     fetch("/api/ml/inference-jobs").then((r) => r.json()).then((d) => setInferenceJobs(d.jobs || [])).catch(() => {});
-    fetch("/api/ml/training-templates").then((r) => r.json()).then((d) => setTrainingTemplates(d.templates || [])).catch(() => {});
+    fetch("/api/ml/algorithm-assets").then((r) => r.json()).then((d) => {
+      const algorithms = d.algorithms || [];
+      setAlgorithmAssets(algorithms);
+      setTrainingTemplates(algorithms.map((item) => ({
+        ...item,
+        template_key: item.algorithm_key,
+        capabilities_json: item.capabilities_json || { tasks: [item.task_type || "detect"] },
+      })));
+    }).catch(() => {
+      fetch("/api/ml/training-templates").then((r) => r.json()).then((d) => setTrainingTemplates(d.templates || [])).catch(() => {});
+    });
     fetch("/api/ml/python-envs").then((r) => r.json()).then((d) => setPythonEnvs(d.envs || [])).catch(() => {});
     refreshHome();
   }
@@ -198,7 +208,7 @@ function App() {
     })
       .then((r) => Promise.all([r.status, r.json()]))
       .then(([status, data]) => {
-        if (status >= 400) throw new Error(data.error || "创建模型失败");
+        if (status >= 400) throw new Error(data.error || "创建模型簇失败");
         setModelForm({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
         loadMlPlatform();
       })
@@ -213,7 +223,7 @@ function App() {
         name: trainingForm.name,
         datasetProjectId: trainingForm.datasetProjectId,
         modelId: trainingForm.modelId || null,
-        templateId: trainingForm.templateId || null,
+        templateId: null,
         taskType: trainingForm.taskType,
         pythonEnvId: trainingForm.pythonEnvId || null,
         initialModelVersionId: trainingForm.initialModelVersionId || null,
@@ -259,28 +269,16 @@ function App() {
       .catch((err) => setError(err.message));
   }
 
-  function createTrainingTemplate() {
-    fetch("/api/ml/training-templates", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...templateForm, capabilities: { tasks: templateForm.tasks } }),
-    }).then((r) => Promise.all([r.status, r.json()]))
-      .then(([status, data]) => {
-        if (status >= 400) throw new Error(data.error || "创建模板失败");
-        setTemplateForm({ name: "", templateKey: "ultralytics_yolo", framework: "ultralytics", tasks: ["detect", "segment", "classify"], description: "" });
-        loadMlPlatform();
-      }).catch((err) => setError(err.message));
-  }
-
   function createPythonEnv() {
+    const payload = envForm.sourceType === "server_python" ? { ...envForm, preferCondaPack: true } : envForm;
     fetch("/api/ml/python-envs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(envForm),
+      body: JSON.stringify(payload),
     }).then((r) => Promise.all([r.status, r.json()]))
       .then(([status, data]) => {
         if (status >= 400) throw new Error(data.error || "登记环境失败");
-        setEnvForm({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
+        setEnvForm({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
         loadMlPlatform();
       }).catch((err) => setError(err.message));
   }
@@ -311,7 +309,8 @@ function App() {
         modelVersionId: inferenceForm.modelVersionId || null,
         params: {
           modelId: null,
-          templateId: inferenceForm.templateId || null,
+        algorithmAssetId: inferenceForm.templateId || null,
+        templateId: inferenceForm.templateId || null,
           taskType: inferenceForm.taskType,
           pythonEnvId: inferenceForm.pythonEnvId || null,
           conf: Number(inferenceForm.conf),
@@ -712,6 +711,7 @@ function App() {
         trainingJobs={trainingJobs}
         inferenceJobs={inferenceJobs}
         trainingTemplates={trainingTemplates}
+        algorithmAssets={algorithmAssets}
         pythonEnvs={pythonEnvs}
         activeTrainingJobId={activeTrainingJobId}
         setActiveTrainingJobId={setActiveTrainingJobId}
@@ -725,13 +725,10 @@ function App() {
         setInferenceForm={setInferenceForm}
         versionForm={versionForm}
         setVersionForm={setVersionForm}
-        templateForm={templateForm}
-        setTemplateForm={setTemplateForm}
         envForm={envForm}
         setEnvForm={setEnvForm}
         createModel={createModel}
         createModelVersion={createModelVersion}
-        createTrainingTemplate={createTrainingTemplate}
         createPythonEnv={createPythonEnv}
         renameModelVersion={renameModelVersion}
         submitTrainingJob={submitTrainingJob}
@@ -882,6 +879,7 @@ function PlatformPage({
   trainingJobs,
   inferenceJobs,
   trainingTemplates,
+  algorithmAssets,
   pythonEnvs,
   activeTrainingJobId,
   setActiveTrainingJobId,
@@ -895,13 +893,10 @@ function PlatformPage({
   setInferenceForm,
   versionForm,
   setVersionForm,
-  templateForm,
-  setTemplateForm,
   envForm,
   setEnvForm,
   createModel,
   createModelVersion,
-  createTrainingTemplate,
   createPythonEnv,
   renameModelVersion,
   submitTrainingJob,
@@ -914,9 +909,8 @@ function PlatformPage({
   setError,
   openPlatform,
 }) {
-  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "模型管理";
-  const selectedTemplate = trainingTemplates.find((tpl) => tpl.id === trainingForm.templateId);
-  const supportedTasks = selectedTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "资产管理";
+  const supportedTasks = ["detect", "segment", "classify"];
   const [evaluationCluster, setEvaluationCluster] = useState("all");
   const [evaluationType, setEvaluationType] = useState("all");
   const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState([]);
@@ -969,21 +963,13 @@ function PlatformPage({
                 <option value="">请选择</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select></label>
-              <label>模型族<select value={trainingForm.modelId} onChange={(e) => setTrainingForm({ ...trainingForm, modelId: e.target.value })}>
-                <option value="">暂不绑定模型族</option>
+              <label>模型簇<select value={trainingForm.modelId} onChange={(e) => setTrainingForm({ ...trainingForm, modelId: e.target.value })}>
+                <option value="">暂不绑定模型簇</option>
                 {mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
               </select></label>
               <label>初始化模型版本<select value={trainingForm.initialModelVersionId} onChange={(e) => setTrainingForm({ ...trainingForm, initialModelVersionId: e.target.value })}>
                 <option value="">使用 YOLO 默认权重</option>
                 {modelVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
-              </select></label>
-              <label>训练模板<select value={trainingForm.templateId} onChange={(e) => {
-                const tpl = trainingTemplates.find((item) => item.id === e.target.value);
-                const tasks = tpl?.capabilities_json?.tasks || ["detect", "segment", "classify"];
-                setTrainingForm({ ...trainingForm, templateId: e.target.value, taskType: tasks.includes(trainingForm.taskType) ? trainingForm.taskType : tasks[0] || "detect" });
-              }}>
-                <option value="">默认 Ultralytics YOLO Detect</option>
-                {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
               </select></label>
               <label>任务类型<select value={trainingForm.taskType} onChange={(e) => setTrainingForm({ ...trainingForm, taskType: e.target.value })}>
                 {supportedTasks.map((task) => <option key={task} value={task}>{task === "detect" ? "目标检测" : task === "segment" ? "实例分割" : "图像分类"}</option>)}
@@ -1039,7 +1025,7 @@ function PlatformPage({
                 setInferenceForm({ ...inferenceForm, templateId: e.target.value, taskType: tasks.includes(inferenceForm.taskType) ? inferenceForm.taskType : tasks[0] || "detect" });
               }}>
                 <option value="">默认 Ultralytics YOLO 推理</option>
-                {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
+                {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name} · {tpl.version || "builtin"}</option>)}
               </select></label>
               <label>运行环境资产<select value={inferenceForm.pythonEnvId} onChange={(e) => setInferenceForm({ ...inferenceForm, pythonEnvId: e.target.value })}>
                 <option value="">由推理 worker 默认选择</option>
@@ -1087,7 +1073,7 @@ function PlatformPage({
               <div className="metric-grid">
                 <div><b>{mlModels.length}</b><span>模型簇</span></div>
                 <div><b>{modelVersions.length}</b><span>模型版本</span></div>
-                <div><b>{trainingTemplates.length}</b><span>算法入口</span></div>
+                <div><b>{algorithmAssets.length || trainingTemplates.length}</b><span>算法资产</span></div>
                 <div><b>{pythonEnvs.length}</b><span>环境资产</span></div>
               </div>
               <JobList title="推理队列" jobs={inferenceJobs} kind="inference" bare resultReserved onViewResults={viewInferenceResults} onDelete={deleteInferenceJob} />
@@ -1120,92 +1106,69 @@ function PlatformPage({
         {view === "models" && (
           <div className="platform-grid">
             <section className="platform-card">
-              <h2>登记模型族</h2>
+              <h2>登记模型簇</h2>
               <label>模型名<input value={modelForm.name} onChange={(e) => setModelForm({ ...modelForm, name: e.target.value })} placeholder="例如 yolo_vehicle_detect" /></label>
               <label>任务类型<select value={modelForm.taskType} onChange={(e) => setModelForm({ ...modelForm, taskType: e.target.value })}>
                 <option value="detect">目标检测</option>
                 <option value="segment">实例分割</option>
                 <option value="classify">分类</option>
               </select></label>
-              <label>框架<select value={modelForm.framework} onChange={(e) => setModelForm({ ...modelForm, framework: e.target.value })}>
-                <option value="ultralytics">Ultralytics</option>
-                <option value="pytorch">PyTorch</option>
-                <option value="custom">Custom</option>
-              </select></label>
+              <label>算法名称<input list="algorithm-options" value={modelForm.framework} onChange={(e) => setModelForm({ ...modelForm, framework: e.target.value })} placeholder="可选择已登记方法，也可输入自定义算法名" /></label>
+              <datalist id="algorithm-options">
+                {(algorithmAssets.length ? algorithmAssets : trainingTemplates).map((tpl) => <option key={tpl.id} value={tpl.name || tpl.algorithm_key || tpl.template_key} />)}
+                <option value="自定义算法" />
+              </datalist>
               <label>说明<textarea value={modelForm.description} onChange={(e) => setModelForm({ ...modelForm, description: e.target.value })} /></label>
-              <button className="primary" onClick={createModel}>创建模型族</button>
+              <button className="primary" onClick={createModel}>创建模型簇</button>
               <h2>登记初始化权重</h2>
-              <label>模型族<select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}>
+              <label>模型簇<select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}>
                 <option value="">请选择</option>
                 {mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
               </select></label>
               <label>版本名<input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="留空自动命名，例如 pretrain_模型名_日期_001" /></label>
               <label>权重文件路径<input value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} placeholder="例如 F:\models\best.pt" /></label>
               <button className="primary" onClick={createModelVersion}>登记权重版本</button>
-              <h2>训练模板</h2>
-              <label>模板名<input value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} placeholder="例如 YOLOv8 检测训练" /></label>
-              <label>模板类型<select value={templateForm.templateKey} onChange={(e) => setTemplateForm({ ...templateForm, templateKey: e.target.value })}>
-                <option value="ultralytics_yolo">Ultralytics YOLO</option>
-                <option value="custom_command">自定义命令</option>
-              </select></label>
-              <div className="check-list compact">
-                {["detect", "segment", "classify"].map((task) => (
-                  <label className="check-row" key={task}>
-                    <input type="checkbox" checked={templateForm.tasks.includes(task)} onChange={() => {
-                      const tasks = templateForm.tasks.includes(task) ? templateForm.tasks.filter((item) => item !== task) : [...templateForm.tasks, task];
-                      setTemplateForm({ ...templateForm, tasks });
-                    }} />
-                    <span>{task === "detect" ? "目标检测" : task === "segment" ? "实例分割" : "图像分类"}</span>
-                  </label>
-                ))}
-              </div>
-              <label>说明<textarea value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
-              <button onClick={createTrainingTemplate}>创建训练模板</button>
               <h2>运行环境资产</h2>
               <label>环境名<input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="例如 linux-yolo-cuda" /></label>
               <label>来源类型<select value={envForm.sourceType} onChange={(e) => setEnvForm({ ...envForm, sourceType: e.target.value })}>
-                <option value="server_python">服务器 Python 路径</option>
-                <option value="conda_pack">导入 conda-pack 包到云端</option>
-              </select></label>
-              <label>环境类型<select value={envForm.envType} onChange={(e) => setEnvForm({ ...envForm, envType: e.target.value })}>
-                <option value="miniforge">Miniforge</option>
-                <option value="conda">Conda</option>
-                <option value="conda-pack">Conda Pack</option>
-              </select></label>
-              <label>平台分类<select value={`${envForm.osType}:${envForm.arch}`} onChange={(e) => {
-                const [osType, arch] = e.target.value.split(":");
-                setEnvForm({ ...envForm, osType, arch });
-              }}>
-                <option value="windows:x86_64">Windows x86_64</option>
-                <option value="linux:x86_64">Linux x86_64</option>
-                <option value="linux:arm64">Linux ARM64</option>
-              </select></label>
-              <label>加速能力<select value={envForm.accelerator} onChange={(e) => setEnvForm({ ...envForm, accelerator: e.target.value })}>
-                <option value="cpu">CPU</option>
-                <option value="cuda">CUDA</option>
+                <option value="conda_pack">conda-pack 环境包入 MinIO（推荐）</option>
+                <option value="server_python">服务器 Python 路径快速登记</option>
               </select></label>
               {envForm.sourceType === "server_python" && (
-                <label>服务器 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="/home/administrator/miniforge3/envs/yolo/bin/python" /></label>
+                <label>服务器 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="建议先用 conda-pack 打包入 MinIO；这里用于快速检测登记" /></label>
               )}
               {envForm.sourceType === "conda_pack" && (
                 <>
                   <label>conda-pack 包路径<input value={envForm.condaPackPath} onChange={(e) => setEnvForm({ ...envForm, condaPackPath: e.target.value })} placeholder="/home/administrator/Projects/det-dashboard/runtime/datasets/envs/yolo.tar.gz" /></label>
                   <label>云端解包路径<input value={envForm.unpackPath} onChange={(e) => setEnvForm({ ...envForm, unpackPath: e.target.value })} placeholder="留空则自动生成 runtime/python-envs/..." /></label>
-                  <label>解包后 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="留空则使用 解包路径/bin/python" /></label>
+                  <label>解包后 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="可留空；已解包时用于自动检测 Python/Torch/CUDA" /></label>
                 </>
               )}
               <button onClick={createPythonEnv}>{envForm.sourceType === "conda_pack" ? "导入环境包到 MinIO" : "登记运行环境"}</button>
             </section>
             <section className="platform-card wide">
+              <h2>算法方法资产</h2>
+              <div className="model-list">
+                {(algorithmAssets.length ? algorithmAssets : trainingTemplates).map((algorithm) => (
+                  <article className="model-row" key={algorithm.id}>
+                    <div>
+                      <b>{algorithm.name}</b>
+                      <span>{algorithm.framework || "custom"} · {algorithm.task_type || "detect"} · {algorithm.version || "builtin"} · {algorithm.status || "ready"}</span>
+                      <span>{algorithm.minio_prefix || algorithm.manifest_key || "内置方法，等待同步到 MinIO"}</span>
+                    </div>
+                  </article>
+                ))}
+                {!(algorithmAssets.length || trainingTemplates.length) && <div className="empty-state">还没有算法方法资产。</div>}
+              </div>
               <h2>模型列表</h2>
               <div className="model-list">
                 {mlModels.map((model) => (
                   <article className="model-row" key={model.id}>
-                    <div><b>{model.name}</b><span>{model.framework} · {model.task_type}</span></div>
+                    <div><b>{model.name}</b><span>算法：{model.framework} · {model.task_type}</span></div>
                     <em>{model.version_count || 0} 个版本</em>
                   </article>
                 ))}
-                {!mlModels.length && <div className="empty-state">还没有模型族。</div>}
+                {!mlModels.length && <div className="empty-state">还没有模型簇。</div>}
               </div>
               <h2>模型版本</h2>
               <div className="model-list">
@@ -1222,15 +1185,6 @@ function PlatformPage({
                   </article>
                 ))}
                 {!modelVersions.length && <div className="empty-state">还没有模型版本。</div>}
-              </div>
-              <h2>训练模板</h2>
-              <div className="model-list">
-                {trainingTemplates.map((tpl) => (
-                  <article className="model-row" key={tpl.id}>
-                    <div><b>{tpl.name}</b><span>{tpl.framework} · {(tpl.capabilities_json?.tasks || [tpl.task_type]).join(" / ")} · {tpl.template_key}</span></div>
-                  </article>
-                ))}
-                {!trainingTemplates.length && <div className="empty-state">还没有训练模板。</div>}
               </div>
               <h2>运行环境资产</h2>
               <div className="model-list">
@@ -1265,7 +1219,7 @@ function EvaluationPage({ cluster, setCluster, type, setType, tasks, onDetail, o
   const flowSteps = [
     { title: "数据准备", description: "在“数据集管理”模块上传或标注原始数据（图像/文本/结构化数据）。" },
     { title: "模型训练", description: "选择预训练基座模型，配置SFT（全量/LoRA/Prompt Tuning）或全参训练参数，提交训练任务。" },
-    { title: "模型推理", description: "从“模型管理”选择已训练好的版本，部署为在线服务或离线批量推理任务。" },
+    { title: "模型推理", description: "从“资产管理”选择已登记的模型版本，部署为在线服务或离线批量推理任务。" },
     { title: "效果评估", description: "进入“测试评估入口”，加载推理结果，执行人工标注或基线模型比对。" },
   ];
 
@@ -1576,7 +1530,7 @@ function MainNav({ view, goHome, openPlatform }) {
       <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练平台</button>
       <button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理平台</button>
       <button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />测试评估</button>
-      <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />模型管理</button>
+      <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />资产管理</button>
     </nav>
   );
 }
@@ -2255,3 +2209,5 @@ function EditableAnnotationLayer({ width, height, annotations, selectedId, setSe
 }
 
 createRoot(document.getElementById("root")).render(<App />);
+
+

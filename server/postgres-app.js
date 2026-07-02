@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const url = require("url");
+const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
 const { port, dataRoot, storageRoot } = require("./config");
@@ -96,6 +97,77 @@ function pythonEnvObjectKey(sha256, name) {
   return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/${safeName}`;
 }
 
+function serverPythonEnvObjectKey(sha256) {
+  return `envs/python/server-python/${sha256.slice(0, 2)}/${sha256}/metadata.json`;
+}
+
+function algorithmAssetPrefix(algorithmKey, version = "builtin") {
+  const safeKey = cleanName(algorithmKey || "custom_algorithm", "algorithm").toLowerCase();
+  const safeVersion = cleanName(version || "builtin", "version").toLowerCase();
+  return `code-assets/algorithms/${safeKey}/${safeVersion}`;
+}
+
+function algorithmManifestKey(algorithmKey, version = "builtin") {
+  return `${algorithmAssetPrefix(algorithmKey, version)}/manifest.json`;
+}
+
+function algorithmAdapterKey(algorithmKey, version = "builtin") {
+  return `${algorithmAssetPrefix(algorithmKey, version)}/adapter.py`;
+}
+
+const builtinAlgorithmAssets = [
+  {
+    name: "Ultralytics YOLO",
+    algorithmKey: "ultralytics_yolo",
+    framework: "ultralytics",
+    taskType: "detect",
+    version: "builtin",
+    tasks: ["detect", "segment", "classify"],
+    description: "Ultralytics YOLO 通用训练和推理适配入口。",
+    params: { conf: 0.25, iou: 0.7, imgsz: 640, batch: 16, device: "0", max_det: 300 },
+    adapter: [
+      "# Platform adapter placeholder for Ultralytics YOLO.",
+      "# The dashboard stores this file as a code asset and uses the manifest to resolve runtime behavior.",
+      "def run_inference(**kwargs):",
+      "    raise NotImplementedError('Use server/postgres-app.js worker integration for the current prototype.')",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "DINOv3 Faster R-CNN",
+    algorithmKey: "dinov3_faster_rcnn",
+    framework: "mmdetection",
+    taskType: "detect",
+    version: "builtin",
+    tasks: ["detect"],
+    description: "DINOv3 + Faster R-CNN 目录推理适配入口。",
+    params: { scoreThr: 0.25, width: 1920, height: 1080, nmsAgnostic: false },
+    adapter: "# Platform adapter placeholder for DINOv3 Faster R-CNN.\n",
+  },
+  {
+    name: "RT-DETR",
+    algorithmKey: "rtdetr",
+    framework: "pytorch",
+    taskType: "detect",
+    version: "builtin",
+    tasks: ["detect"],
+    description: "RT-DETR 检测算法适配入口。",
+    params: { conf: 0.25, imgsz: 640, device: "0" },
+    adapter: "# Platform adapter placeholder for RT-DETR.\n",
+  },
+  {
+    name: "空检测模型推理",
+    algorithmKey: "dummy_empty_detector",
+    framework: "builtin",
+    taskType: "detect",
+    version: "builtin",
+    tasks: ["detect"],
+    description: "平台内置空预测适配入口，用于打通推理链路。",
+    params: {},
+    adapter: "# Platform adapter placeholder for empty detector.\n",
+  },
+];
+
 function uniqueExistingPaths(paths) {
   return Array.from(new Set(paths.filter(Boolean).map((item) => path.resolve(item)))).filter((item) => fs.existsSync(item));
 }
@@ -149,6 +221,40 @@ function inspectPythonEnv(pythonPath) {
   const accelerator = packages.cuda_available ? "cuda" : "cpu";
   const status = packages.ultralytics ? "ready" : "missing_ultralytics";
   return { version, packages, platform, accelerator, status };
+}
+
+function inspectCondaPackArchive(sourcePath, unpackPath, pythonPath) {
+  const candidates = uniqueExistingPaths([
+    pythonPath,
+    path.join(unpackPath || "", "bin", "python"),
+    path.join(unpackPath || "", "python.exe"),
+    path.join(unpackPath || "", "Scripts", "python.exe"),
+  ]);
+  if (candidates[0]) {
+    const info = inspectPythonEnv(candidates[0]);
+    return { ...info, pythonPath: candidates[0], detectedFrom: "python" };
+  }
+  const lowerName = path.basename(sourcePath || "").toLowerCase();
+  let listing = "";
+  try {
+    const result = spawnSync("tar", ["-tf", sourcePath], { encoding: "utf8", timeout: 15000, maxBuffer: 1024 * 1024 });
+    listing = String(result.stdout || "").toLowerCase();
+  } catch {
+    listing = "";
+  }
+  const text = `${lowerName}\n${listing}`;
+  const osType = text.includes("scripts/python.exe") || text.includes("python.exe") || text.includes("win") ? "windows" : "linux";
+  const arch = text.includes("aarch64") || text.includes("arm64") ? "arm64" : "x86_64";
+  const accelerator = /\b(cuda|cu11|cu12|gpu|nvidia)\b/.test(text) ? "cuda" : "cpu";
+  return {
+    version: "",
+    packages: { archive_inspected: Boolean(listing), cuda_available: accelerator === "cuda" },
+    platform: { osType, arch },
+    accelerator,
+    status: "uploaded",
+    pythonPath,
+    detectedFrom: listing ? "archive" : "filename",
+  };
 }
 
 async function seedMlRuntimeConfig() {
@@ -214,19 +320,19 @@ async function seedMlRuntimeConfig() {
       ],
     );
   }
-  const dummyModel = (await query("SELECT * FROM ml_models WHERE name=$1 AND deleted_at IS NULL", ["Dummy Empty Detector"])).rows[0];
+  const dummyModel = (await query("SELECT * FROM model_clusters WHERE name=$1 AND deleted_at IS NULL", ["Dummy Empty Detector"])).rows[0];
   let dummyModelId = dummyModel?.id;
   if (!dummyModelId) {
     dummyModelId = (await query(
-      `INSERT INTO ml_models (name, task_type, framework, description)
+      `INSERT INTO model_clusters (name, task_type, framework, description)
        VALUES ($1,'detect','builtin',$2) RETURNING id`,
       ["Dummy Empty Detector", "平台内置空检测模型，用于测试推理任务、输入缓存和结果写回。"],
     )).rows[0].id;
   }
-  const dummyVersion = (await query("SELECT id FROM model_versions WHERE model_id=$1 AND version_name=$2", [dummyModelId, "empty_v1"])).rows[0];
+  const dummyVersion = (await query("SELECT id FROM model_revisions WHERE model_id=$1 AND version_name=$2", [dummyModelId, "empty_v1"])).rows[0];
   if (!dummyVersion) {
     await query(
-      `INSERT INTO model_versions (model_id, version_name, stage, params_json, artifact_root)
+      `INSERT INTO model_revisions (model_id, version_name, stage, params_json, artifact_root)
        VALUES ($1,'empty_v1','builtin',$2,$3)`,
       [dummyModelId, JSON.stringify({ templateKey: "dummy_empty_detector", emptyPredictions: true }), path.join(storageRoot, "runtime", "models", dummyModelId, "empty_v1")],
     );
@@ -239,10 +345,10 @@ async function seedMlRuntimeConfig() {
   ]);
   for (const pythonPath of candidates) {
     const info = inspectPythonEnv(pythonPath);
-    const exists = (await query("SELECT id FROM python_envs WHERE python_path=$1", [pythonPath])).rows[0];
+    const exists = (await query("SELECT id FROM runtime_envs WHERE python_path=$1", [pythonPath])).rows[0];
     if (exists) {
       await query(
-        `UPDATE python_envs
+        `UPDATE runtime_envs
          SET env_type=$1, status=$2, packages_json=$3, os_type=$4, arch=$5, accelerator=$6,
              python_version=$7, torch_version=$8, cuda_available=$9, cuda_version=$10,
              capabilities_json=$11, updated_at=now()
@@ -265,7 +371,7 @@ async function seedMlRuntimeConfig() {
       continue;
     }
     await query(
-      `INSERT INTO python_envs (name, python_path, env_type, status, packages_json, os_type, arch, accelerator, python_version, torch_version, cuda_available, cuda_version, capabilities_json)
+      `INSERT INTO runtime_envs (name, python_path, env_type, status, packages_json, os_type, arch, accelerator, python_version, torch_version, cuda_available, cuda_version, capabilities_json)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         info.version ? info.version.replace(/^Python\s*/i, "Python ") : path.basename(pythonPath),
@@ -328,7 +434,7 @@ async function ensureRuntimeSchema() {
       annotation_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS ml_models (
+    `CREATE TABLE IF NOT EXISTS model_clusters (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
       task_type TEXT NOT NULL DEFAULT 'detect',
@@ -351,13 +457,13 @@ async function ensureRuntimeSchema() {
       metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS training_jobs (
+    `CREATE TABLE IF NOT EXISTS runtime_training_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
       template TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
       dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
       dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
-      model_id UUID REFERENCES ml_models(id) ON DELETE SET NULL,
+      model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -373,27 +479,27 @@ async function ensureRuntimeSchema() {
       started_at TIMESTAMPTZ,
       finished_at TIMESTAMPTZ
     )`,
-    `CREATE TABLE IF NOT EXISTS training_job_logs (
+    `CREATE TABLE IF NOT EXISTS runtime_training_logs (
       id BIGSERIAL PRIMARY KEY,
-      job_id UUID NOT NULL REFERENCES training_jobs(id) ON DELETE CASCADE,
+      job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
       stream TEXT NOT NULL DEFAULT 'stdout',
       line TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS training_metrics (
+    `CREATE TABLE IF NOT EXISTS runtime_training_metrics (
       id BIGSERIAL PRIMARY KEY,
-      job_id UUID NOT NULL REFERENCES training_jobs(id) ON DELETE CASCADE,
+      job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
       step INT NOT NULL DEFAULT 0,
       epoch INT NOT NULL DEFAULT 0,
       key TEXT NOT NULL,
       value NUMERIC,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS model_versions (
+    `CREATE TABLE IF NOT EXISTS model_revisions (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      model_id UUID NOT NULL REFERENCES ml_models(id) ON DELETE CASCADE,
+      model_id UUID NOT NULL REFERENCES model_clusters(id) ON DELETE CASCADE,
       version_name TEXT NOT NULL,
-      training_job_id UUID REFERENCES training_jobs(id) ON DELETE SET NULL,
+      training_job_id UUID REFERENCES runtime_training_jobs(id) ON DELETE SET NULL,
       dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
       dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
       stage TEXT NOT NULL DEFAULT 'candidate',
@@ -402,10 +508,10 @@ async function ensureRuntimeSchema() {
       artifact_root TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS model_artifacts (
+    `CREATE TABLE IF NOT EXISTS model_files (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      model_version_id UUID REFERENCES model_versions(id) ON DELETE CASCADE,
-      training_job_id UUID REFERENCES training_jobs(id) ON DELETE CASCADE,
+      model_version_id UUID REFERENCES model_revisions(id) ON DELETE CASCADE,
+      training_job_id UUID REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
       artifact_type TEXT NOT NULL,
       path TEXT NOT NULL,
       size BIGINT,
@@ -413,10 +519,10 @@ async function ensureRuntimeSchema() {
       metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    `CREATE TABLE IF NOT EXISTS inference_jobs (
+    `CREATE TABLE IF NOT EXISTS runtime_inference_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
-      model_version_id UUID REFERENCES model_versions(id) ON DELETE SET NULL,
+      model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
       dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -427,9 +533,9 @@ async function ensureRuntimeSchema() {
       started_at TIMESTAMPTZ,
       finished_at TIMESTAMPTZ
     )`,
-    `CREATE TABLE IF NOT EXISTS inference_results (
+    `CREATE TABLE IF NOT EXISTS runtime_inference_results (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      inference_job_id UUID NOT NULL REFERENCES inference_jobs(id) ON DELETE CASCADE,
+      inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
       project_image_id UUID REFERENCES project_images(id) ON DELETE SET NULL,
       predictions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
       artifact_path TEXT NOT NULL DEFAULT '',
@@ -449,7 +555,7 @@ async function ensureRuntimeSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
-    `CREATE TABLE IF NOT EXISTS python_envs (
+    `CREATE TABLE IF NOT EXISTS runtime_envs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
       python_path TEXT NOT NULL,
@@ -467,23 +573,359 @@ async function ensureRuntimeSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS os_type TEXT NOT NULL DEFAULT 'windows'",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT 'x86_64'",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS accelerator TEXT NOT NULL DEFAULT 'cpu'",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS python_version TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS torch_version TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_available BOOLEAN NOT NULL DEFAULT false",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS cuda_version TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'server_python'",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_key TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_name TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_size BIGINT NOT NULL DEFAULT 0",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS artifact_sha256 TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE python_envs ADD COLUMN IF NOT EXISTS unpack_path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS os_type TEXT NOT NULL DEFAULT 'windows'",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT 'x86_64'",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS accelerator TEXT NOT NULL DEFAULT 'cpu'",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS python_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS torch_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS cuda_available BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS cuda_version TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'server_python'",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS artifact_key TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS artifact_name TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS artifact_size BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS artifact_sha256 TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS unpack_path TEXT NOT NULL DEFAULT ''",
   ];
-  for (const sql of statements) await query(sql);
-  await seedMlRuntimeConfig();
+  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 6);
+  await query("SET statement_timeout = '5000ms'");
+  await query("SET lock_timeout = '2000ms'");
+  for (let index = 0; index < runtimeStatements.length; index += 1) {
+    const sql = runtimeStatements[index];
+    try {
+      console.log(`Schema ${index + 1}/${runtimeStatements.length}: ${sql.slice(0, 90).replace(/\s+/g, " ")}`);
+      await query(sql);
+    } catch (error) {
+      // Existing runtime folders can contain partially-applied Postgres defaults.
+      // Treat duplicate catalog/default entries as already migrated.
+      if (error.code === "23505" && String(error.constraint || "").includes("pg_attrdef")) {
+        console.warn("Skipping already-applied schema default:", sql.slice(0, 120));
+        continue;
+      }
+      if (error.code === "57014") {
+        console.warn("Skipping timed-out schema statement:", sql.slice(0, 120));
+        continue;
+      }
+      if (error.code === "XX002") {
+        console.warn("Skipping corrupted-catalog schema statement:", sql.slice(0, 120));
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (process.env.RUN_EXTENDED_SCHEMA !== "true") {
+    const mlRuntimeStatements = [
+      `CREATE TABLE IF NOT EXISTS model_clusters (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        task_type TEXT NOT NULL DEFAULT 'detect',
+        framework TEXT NOT NULL DEFAULT 'ultralytics',
+        description TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        deleted_at TIMESTAMPTZ
+      )`,
+      `CREATE TABLE IF NOT EXISTS dataset_snapshots (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        source_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        label_version_id UUID REFERENCES label_versions(id) ON DELETE SET NULL,
+        format TEXT NOT NULL DEFAULT 'yolo',
+        split_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        path TEXT NOT NULL DEFAULT '',
+        image_count INT NOT NULL DEFAULT 0,
+        annotation_count INT NOT NULL DEFAULT 0,
+        metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS training_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        template_key TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
+        framework TEXT NOT NULL DEFAULT 'ultralytics',
+        task_type TEXT NOT NULL DEFAULT 'detect',
+        command_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        default_params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_envs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        python_path TEXT NOT NULL,
+        env_type TEXT NOT NULL DEFAULT 'miniforge',
+        os_type TEXT NOT NULL DEFAULT 'windows',
+        arch TEXT NOT NULL DEFAULT 'x86_64',
+        accelerator TEXT NOT NULL DEFAULT 'cpu',
+        status TEXT NOT NULL DEFAULT 'unknown',
+        python_version TEXT NOT NULL DEFAULT '',
+        torch_version TEXT NOT NULL DEFAULT '',
+        cuda_available BOOLEAN NOT NULL DEFAULT false,
+        cuda_version TEXT NOT NULL DEFAULT '',
+        packages_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        source_type TEXT NOT NULL DEFAULT 'server_python',
+        artifact_key TEXT NOT NULL DEFAULT '',
+        artifact_name TEXT NOT NULL DEFAULT '',
+        artifact_size BIGINT NOT NULL DEFAULT 0,
+        artifact_sha256 TEXT NOT NULL DEFAULT '',
+        unpack_path TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS model_revisions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        model_id UUID NOT NULL REFERENCES model_clusters(id) ON DELETE CASCADE,
+        version_name TEXT NOT NULL,
+        training_job_id UUID,
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
+        stage TEXT NOT NULL DEFAULT 'candidate',
+        metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        artifact_root TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS model_files (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        model_version_id UUID REFERENCES model_revisions(id) ON DELETE CASCADE,
+        training_job_id UUID,
+        artifact_type TEXT NOT NULL,
+        path TEXT NOT NULL,
+        size BIGINT,
+        sha256 TEXT,
+        metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        template TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
+        model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        priority INT NOT NULL DEFAULT 0,
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        progress INT NOT NULL DEFAULT 0,
+        current_epoch INT NOT NULL DEFAULT 0,
+        total_epochs INT NOT NULL DEFAULT 0,
+        worker_id TEXT NOT NULL DEFAULT '',
+        process_pid INT,
+        heartbeat_at TIMESTAMPTZ,
+        output_root TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_logs (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
+        stream TEXT NOT NULL DEFAULT 'stdout',
+        line TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_metrics (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
+        step INT NOT NULL DEFAULT 0,
+        epoch INT NOT NULL DEFAULT 0,
+        key TEXT NOT NULL,
+        value NUMERIC,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        progress INT NOT NULL DEFAULT 0,
+        output_root TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_results (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
+        project_image_id UUID REFERENCES project_images(id) ON DELETE SET NULL,
+        predictions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+        artifact_path TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+    ];
+    const assetRuntimeStatements = [
+      mlRuntimeStatements[0],
+      `CREATE TABLE IF NOT EXISTS runtime_envs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        python_path TEXT NOT NULL,
+        env_type TEXT NOT NULL DEFAULT 'server_python',
+        os_type TEXT NOT NULL DEFAULT 'windows',
+        arch TEXT NOT NULL DEFAULT 'x86_64',
+        accelerator TEXT NOT NULL DEFAULT 'cpu',
+        status TEXT NOT NULL DEFAULT 'unknown',
+        python_version TEXT NOT NULL DEFAULT '',
+        torch_version TEXT NOT NULL DEFAULT '',
+        cuda_available BOOLEAN NOT NULL DEFAULT false,
+        cuda_version TEXT NOT NULL DEFAULT '',
+        packages_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        source_type TEXT NOT NULL DEFAULT 'server_python',
+        artifact_key TEXT NOT NULL DEFAULT '',
+        artifact_name TEXT NOT NULL DEFAULT '',
+        artifact_size BIGINT NOT NULL DEFAULT 0,
+        artifact_sha256 TEXT NOT NULL DEFAULT '',
+        unpack_path TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS model_revisions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        model_id UUID NOT NULL REFERENCES model_clusters(id) ON DELETE CASCADE,
+        version_name TEXT NOT NULL,
+        training_job_id UUID,
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        dataset_snapshot_id UUID,
+        stage TEXT NOT NULL DEFAULT 'candidate',
+        metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        artifact_root TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS model_files (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        model_version_id UUID REFERENCES model_revisions(id) ON DELETE CASCADE,
+        training_job_id UUID,
+        artifact_type TEXT NOT NULL,
+        path TEXT NOT NULL,
+        size BIGINT,
+        sha256 TEXT,
+        metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS algorithm_assets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        algorithm_key TEXT NOT NULL,
+        framework TEXT NOT NULL DEFAULT '',
+        task_type TEXT NOT NULL DEFAULT 'detect',
+        version TEXT NOT NULL DEFAULT 'builtin',
+        source_type TEXT NOT NULL DEFAULT 'builtin',
+        minio_prefix TEXT NOT NULL,
+        manifest_key TEXT NOT NULL,
+        adapter_key TEXT NOT NULL DEFAULT '',
+        source_prefix TEXT NOT NULL DEFAULT '',
+        capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        default_params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'ready',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        deleted_at TIMESTAMPTZ,
+        UNIQUE (algorithm_key, version)
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        template TEXT NOT NULL DEFAULT 'ultralytics_yolo_detect',
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        dataset_snapshot_id UUID,
+        model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        priority INT NOT NULL DEFAULT 0,
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        progress INT NOT NULL DEFAULT 0,
+        current_epoch INT NOT NULL DEFAULT 0,
+        total_epochs INT NOT NULL DEFAULT 0,
+        worker_id TEXT NOT NULL DEFAULT '',
+        process_pid INT,
+        heartbeat_at TIMESTAMPTZ,
+        output_root TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_logs (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
+        stream TEXT NOT NULL DEFAULT 'stdout',
+        line TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_training_metrics (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_training_jobs(id) ON DELETE CASCADE,
+        step INT NOT NULL DEFAULT 0,
+        epoch INT NOT NULL DEFAULT 0,
+        key TEXT NOT NULL,
+        value NUMERIC,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_jobs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
+        dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        progress INT NOT NULL DEFAULT 0,
+        output_root TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_results (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
+        project_image_id UUID REFERENCES project_images(id) ON DELETE SET NULL,
+        predictions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+        artifact_path TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+    ];
+    const enabledMlRuntimeStatements = process.env.RUN_ML_SCHEMA === "true" ? mlRuntimeStatements : assetRuntimeStatements.slice(0, 5);
+    for (let index = 0; index < enabledMlRuntimeStatements.length; index += 1) {
+      const sql = enabledMlRuntimeStatements[index];
+      try {
+        const tableMatch = sql.match(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/i);
+        if (tableMatch) {
+          const exists = await query("SELECT to_regclass($1) AS name", [tableMatch[1]]);
+          if (exists.rows[0]?.name) {
+            console.log(`ML schema ${index + 1}/${enabledMlRuntimeStatements.length}: skip existing ${tableMatch[1]}`);
+            continue;
+          }
+        }
+        console.log(`ML schema ${index + 1}/${enabledMlRuntimeStatements.length}: ${sql.slice(0, 90).replace(/\s+/g, " ")}`);
+        await query(sql);
+      } catch (error) {
+        if (error.code === "57014") {
+          console.warn("Skipping timed-out ML schema statement:", sql.slice(0, 120));
+          continue;
+        }
+        if (error.code === "55P03") {
+          console.warn("Skipping locked ML schema statement:", sql.slice(0, 120));
+          continue;
+        }
+        if (error.code === "XX002") {
+          console.warn("Skipping corrupted-catalog ML schema statement:", sql.slice(0, 120));
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (process.env.RUN_ML_SCHEMA === "true") await seedMlRuntimeConfig();
+  }
+  if (process.env.RUN_EXTENDED_SCHEMA === "true") await seedMlRuntimeConfig();
 }
 
 async function upsertImageAsset(client, filePath, meta = {}) {
@@ -1119,15 +1561,26 @@ async function applyBaselineRun(runId, body = {}) {
 }
 
 async function listMlModels() {
-  const rows = await query(
-    `SELECT m.*,
-      (SELECT count(*)::int FROM model_versions mv WHERE mv.model_id=m.id) AS version_count,
-      (SELECT max(mv.created_at) FROM model_versions mv WHERE mv.model_id=m.id) AS last_version_at
-     FROM ml_models m
-     WHERE m.deleted_at IS NULL
-     ORDER BY m.created_at DESC`,
-  );
-  return rows.rows;
+  try {
+    const rows = await query(
+      `SELECT m.*,
+        (SELECT count(*)::int FROM model_revisions mv WHERE mv.model_id=m.id) AS version_count,
+        (SELECT max(mv.created_at) FROM model_revisions mv WHERE mv.model_id=m.id) AS last_version_at
+       FROM model_clusters m
+       WHERE m.deleted_at IS NULL
+       ORDER BY m.created_at DESC`,
+    );
+    return rows.rows;
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+    const rows = await query(
+      `SELECT m.*, 0::int AS version_count, NULL::timestamptz AS last_version_at
+       FROM model_clusters m
+       WHERE m.deleted_at IS NULL
+       ORDER BY m.created_at DESC`,
+    );
+    return rows.rows;
+  }
 }
 
 async function createMlModel(body = {}) {
@@ -1137,7 +1590,7 @@ async function createMlModel(body = {}) {
   const framework = String(body.framework || "ultralytics").trim() || "ultralytics";
   const description = String(body.description || "").trim();
   const rows = await query(
-    `INSERT INTO ml_models (name, task_type, framework, description)
+    `INSERT INTO model_clusters (name, task_type, framework, description)
      VALUES ($1,$2,$3,$4) RETURNING *`,
     [name, taskType, framework, description],
   );
@@ -1151,15 +1604,15 @@ function dateCode() {
 async function nextModelVersionName(prefix, modelId) {
   const base = cleanName(prefix, "version");
   const like = `${base}_%`;
-  const rows = await query("SELECT count(*)::int AS count FROM model_versions WHERE model_id=$1 AND version_name LIKE $2", [modelId, like]);
+  const rows = await query("SELECT count(*)::int AS count FROM model_revisions WHERE model_id=$1 AND version_name LIKE $2", [modelId, like]);
   return `${base}_${String((rows.rows[0]?.count || 0) + 1).padStart(3, "0")}`;
 }
 
 async function createModelVersion(body = {}) {
   const modelId = body.modelId || body.model_id;
-  if (!modelId) throw new Error("请选择模型族");
-  const model = (await query("SELECT * FROM ml_models WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
-  if (!model) throw new Error("模型族不存在");
+  if (!modelId) throw new Error("请选择模型簇");
+  const model = (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
+  if (!model) throw new Error("模型簇不存在");
   const stage = String(body.stage || "pretrained").trim();
   const sourcePath = String(body.sourcePath || body.source_path || "").trim();
   const params = body.params || {};
@@ -1168,7 +1621,7 @@ async function createModelVersion(body = {}) {
   const artifactRoot = path.join(storageRoot, "runtime", "models", model.id, versionName);
   fs.mkdirSync(artifactRoot, { recursive: true });
   const version = (await query(
-    `INSERT INTO model_versions (model_id, version_name, stage, params_json, artifact_root)
+    `INSERT INTO model_revisions (model_id, version_name, stage, params_json, artifact_root)
      VALUES ($1,$2,$3,$4,$5) RETURNING *`,
     [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
   )).rows[0];
@@ -1182,7 +1635,7 @@ async function createModelVersion(body = {}) {
     const stat = fs.statSync(target);
     const sha = await hashFile(target).catch(() => null);
     await query(
-      `INSERT INTO model_artifacts (model_version_id, artifact_type, path, size, sha256, metadata_json)
+      `INSERT INTO model_files (model_version_id, artifact_type, path, size, sha256, metadata_json)
        VALUES ($1,'weights',$2,$3,$4,$5)`,
       [version.id, objectKey, stat.size, sha, JSON.stringify({ localPath: target, sourcePath })],
     );
@@ -1193,7 +1646,7 @@ async function createModelVersion(body = {}) {
 async function renameModelVersion(versionId, body = {}) {
   const name = String(body.versionName || body.version_name || "").trim();
   if (!name) throw new Error("版本名不能为空");
-  const rows = await query("UPDATE model_versions SET version_name=$1 WHERE id=$2 RETURNING *", [name, versionId]);
+  const rows = await query("UPDATE model_revisions SET version_name=$1 WHERE id=$2 RETURNING *", [name, versionId]);
   if (!rows.rows[0]) throw new Error("模型版本不存在");
   return rows.rows[0];
 }
@@ -1210,7 +1663,109 @@ async function listDatasetSnapshots() {
 }
 
 async function listTrainingTemplates() {
-  return (await query("SELECT * FROM training_templates ORDER BY created_at DESC")).rows;
+  try {
+    return (await query("SELECT * FROM training_templates ORDER BY created_at DESC")).rows;
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+    return builtinAlgorithmAssets.map((asset) => ({
+      id: `builtin-${asset.algorithmKey}`,
+      name: asset.name,
+      template_key: asset.algorithmKey,
+      framework: asset.framework,
+      task_type: asset.taskType,
+      capabilities_json: { tasks: asset.tasks, builtin: true },
+    }));
+  }
+}
+
+function algorithmManifest(asset) {
+  return {
+    name: asset.name,
+    algorithmKey: asset.algorithmKey,
+    framework: asset.framework,
+    version: asset.version || "builtin",
+    tasks: asset.tasks || [asset.taskType || "detect"],
+    entry: { type: "python", adapter: "adapter.py", function: "run_inference" },
+    inputs: { imageDir: true, manifest: true, modelWeights: true },
+    outputs: { predictionsJson: true, visualizations: true, labelmeJson: true },
+    params: asset.params || {},
+    description: asset.description || "",
+  };
+}
+
+async function ensureBuiltinAlgorithmAssets() {
+  for (const asset of builtinAlgorithmAssets) {
+    const version = asset.version || "builtin";
+    const minioPrefix = algorithmAssetPrefix(asset.algorithmKey, version);
+    const manifestKey = algorithmManifestKey(asset.algorithmKey, version);
+    const adapterKey = algorithmAdapterKey(asset.algorithmKey, version);
+    const manifest = algorithmManifest(asset);
+    await store.putJson(manifestKey, manifest);
+    await store.putText(adapterKey, asset.adapter || "", "text/x-python");
+    await query(
+      `INSERT INTO algorithm_assets
+       (name, algorithm_key, framework, task_type, version, source_type, minio_prefix, manifest_key, adapter_key, source_prefix, capabilities_json, default_params_json, description, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'ready')
+       ON CONFLICT (algorithm_key, version) DO UPDATE SET
+         name=EXCLUDED.name,
+         framework=EXCLUDED.framework,
+         task_type=EXCLUDED.task_type,
+         minio_prefix=EXCLUDED.minio_prefix,
+         manifest_key=EXCLUDED.manifest_key,
+         adapter_key=EXCLUDED.adapter_key,
+         capabilities_json=EXCLUDED.capabilities_json,
+         default_params_json=EXCLUDED.default_params_json,
+         description=EXCLUDED.description,
+         status='ready',
+         deleted_at=NULL,
+         updated_at=now()`,
+      [
+        asset.name,
+        asset.algorithmKey,
+        asset.framework,
+        asset.taskType || "detect",
+        version,
+        "builtin",
+        minioPrefix,
+        manifestKey,
+        adapterKey,
+        `${minioPrefix}/source/`,
+        JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], builtin: true }),
+        JSON.stringify(asset.params || {}),
+        asset.description || "",
+      ],
+    );
+  }
+}
+
+async function listAlgorithmAssets() {
+  try {
+    await ensureBuiltinAlgorithmAssets();
+    const rows = await query(
+      `SELECT * FROM algorithm_assets
+       WHERE deleted_at IS NULL
+       ORDER BY source_type='builtin' DESC, name, version`,
+    );
+    return rows.rows;
+  } catch (error) {
+    if (!["42P01", "XX002", "57014"].includes(error.code)) throw error;
+    return builtinAlgorithmAssets.map((asset) => ({
+      id: `builtin-${asset.algorithmKey}`,
+      name: asset.name,
+      algorithm_key: asset.algorithmKey,
+      framework: asset.framework,
+      task_type: asset.taskType,
+      version: asset.version || "builtin",
+      source_type: "builtin",
+      minio_prefix: algorithmAssetPrefix(asset.algorithmKey, asset.version),
+      manifest_key: algorithmManifestKey(asset.algorithmKey, asset.version),
+      adapter_key: algorithmAdapterKey(asset.algorithmKey, asset.version),
+      capabilities_json: { tasks: asset.tasks, builtin: true },
+      default_params_json: asset.params || {},
+      description: asset.description,
+      status: "ready",
+    }));
+  }
 }
 
 function templateCapabilities(body = {}) {
@@ -1249,7 +1804,7 @@ async function createTrainingTemplate(body = {}) {
 }
 
 async function listPythonEnvs() {
-  return (await query("SELECT * FROM python_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
+  return (await query("SELECT * FROM runtime_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
 }
 
 async function createPythonEnv(body = {}) {
@@ -1262,15 +1817,22 @@ async function createPythonEnv(body = {}) {
     const sha = await hashFile(sourcePath);
     const artifactKey = pythonEnvObjectKey(sha, path.basename(sourcePath));
     await store.putFile(artifactKey, sourcePath, { "x-amz-meta-source": "conda-pack" });
-    const platform = {
-      osType: ["windows", "linux"].includes(body.osType || body.os_type) ? (body.osType || body.os_type) : "linux",
-      arch: ["x86_64", "arm64"].includes(body.arch) ? body.arch : "x86_64",
-    };
-    const accelerator = ["cpu", "cuda"].includes(body.accelerator) ? body.accelerator : "cpu";
     const unpackPath = String(body.unpackPath || body.unpack_path || path.join(storageRoot, "runtime", "python-envs", sha.slice(0, 12))).trim();
-    const pythonPath = String(body.pythonPath || body.python_path || path.join(unpackPath, "bin", "python")).trim();
+    const defaultPython = process.platform === "win32" ? path.join(unpackPath, "python.exe") : path.join(unpackPath, "bin", "python");
+    const requestedPythonPath = String(body.pythonPath || body.python_path || defaultPython).trim();
+    const info = inspectCondaPackArchive(sourcePath, unpackPath, requestedPythonPath);
+    const pythonPath = info.pythonPath || requestedPythonPath;
+    const platform = info.platform;
+    const accelerator = info.accelerator;
+    const capabilities = {
+      source_type: "conda_pack",
+      artifact_key: artifactKey,
+      tasks: body.tasks || ["detect", "segment", "classify"],
+      detected_from: info.detectedFrom,
+      auto_detected: true,
+    };
     const rows = await query(
-      `INSERT INTO python_envs
+      `INSERT INTO runtime_envs
        (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version,
         packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
@@ -1281,13 +1843,13 @@ async function createPythonEnv(body = {}) {
         platform.osType,
         platform.arch,
         accelerator,
-        "uploaded",
-        body.pythonVersion || body.python_version || "",
-        body.torchVersion || body.torch_version || "",
-        accelerator === "cuda",
-        body.cudaVersion || body.cuda_version || "",
-        JSON.stringify({ sourcePath }),
-        JSON.stringify({ source_type: "conda_pack", artifact_key: artifactKey, tasks: body.tasks || ["detect", "segment", "classify"] }),
+        info.status,
+        info.version,
+        info.packages.torch_version || "",
+        Boolean(info.packages.cuda_available),
+        info.packages.cuda_version || "",
+        JSON.stringify({ sourcePath, packages: info.packages }),
+        JSON.stringify(capabilities),
         "conda_pack",
         artifactKey,
         path.basename(sourcePath),
@@ -1302,13 +1864,33 @@ async function createPythonEnv(body = {}) {
   const pythonPath = path.resolve(String(body.pythonPath || body.python_path || "").trim());
   if (!pythonPath || !fs.existsSync(pythonPath)) throw new Error("Python 解释器路径不存在");
   const info = inspectPythonEnv(pythonPath);
-  const envType = ["conda", "miniforge"].includes(body.envType || body.env_type) ? (body.envType || body.env_type) : inferEnvType(pythonPath);
-  const osType = ["windows", "linux"].includes(body.osType || body.os_type) ? (body.osType || body.os_type) : info.platform.osType;
-  const arch = ["x86_64", "arm64"].includes(body.arch) ? body.arch : info.platform.arch;
-  const accelerator = ["cpu", "cuda"].includes(body.accelerator) ? body.accelerator : info.accelerator;
+  const envType = inferEnvType(pythonPath);
+  const osType = info.platform.osType;
+  const arch = info.platform.arch;
+  const accelerator = info.accelerator;
+  const metadata = {
+    sourceType: "server_python",
+    recommendedSourceType: body.preferCondaPack ? "conda_pack" : "server_python",
+    assetPolicy: body.preferCondaPack ? "建议使用 conda-pack 环境包统一入 MinIO；服务器 Python 路径用于快速检测和临时登记。" : "服务器 Python 路径登记",
+    pythonPath,
+    envType,
+    osType,
+    arch,
+    accelerator,
+    inspectedAt: new Date().toISOString(),
+    version: info.version,
+    packages: info.packages,
+    capabilities: { ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) },
+  };
+  const sha = crypto.createHash("sha256").update(JSON.stringify(metadata)).digest("hex");
+  const artifactKey = serverPythonEnvObjectKey(sha);
+  await store.putJson(artifactKey, metadata);
+  const artifactSize = Buffer.byteLength(JSON.stringify(metadata), "utf8");
   const rows = await query(
-    `INSERT INTO python_envs (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version, packages_json, capabilities_json, source_type)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    `INSERT INTO runtime_envs
+     (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version,
+      packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [
       body.name || info.version || path.basename(pythonPath),
       pythonPath,
@@ -1324,6 +1906,11 @@ async function createPythonEnv(body = {}) {
       JSON.stringify(info.packages),
       JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
       "server_python",
+      artifactKey,
+      "metadata.json",
+      artifactSize,
+      sha,
+      "",
     ],
   );
   return rows.rows[0];
@@ -1338,8 +1925,8 @@ async function listModelVersions(modelId) {
   }
   const rows = await query(
     `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name
-     FROM model_versions mv
-     JOIN ml_models m ON m.id=mv.model_id
+     FROM model_revisions mv
+     JOIN model_clusters m ON m.id=mv.model_id
      LEFT JOIN projects p ON p.id=mv.dataset_project_id
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
      ORDER BY mv.created_at DESC
@@ -1353,7 +1940,7 @@ async function findWeightArtifact(modelVersionId) {
   if (!modelVersionId) return null;
   const rows = await query(
     `SELECT ma.*
-     FROM model_artifacts ma
+     FROM model_files ma
      WHERE ma.model_version_id=$1 AND ma.artifact_type='weights'
      ORDER BY
        CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
@@ -1381,9 +1968,9 @@ async function streamModelArtifact(res, modelVersionId, artifactId) {
   }
   const rows = await query(
     `SELECT ma.*, mv.version_name, m.name AS model_name
-     FROM model_artifacts ma
-     JOIN model_versions mv ON mv.id=ma.model_version_id
-     JOIN ml_models m ON m.id=mv.model_id
+     FROM model_files ma
+     JOIN model_revisions mv ON mv.id=ma.model_version_id
+     JOIN model_clusters m ON m.id=mv.model_id
      WHERE ${where}
      ORDER BY
        CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
@@ -1414,16 +2001,21 @@ async function streamModelArtifact(res, modelVersionId, artifactId) {
 }
 
 async function listTrainingJobs() {
-  const rows = await query(
-    `SELECT tj.*, p.name AS dataset_project_name, m.name AS model_name, ds.name AS dataset_snapshot_name
-     FROM training_jobs tj
-     LEFT JOIN projects p ON p.id=tj.dataset_project_id
-     LEFT JOIN ml_models m ON m.id=tj.model_id
-     LEFT JOIN dataset_snapshots ds ON ds.id=tj.dataset_snapshot_id
-     ORDER BY tj.created_at DESC
-     LIMIT 200`,
-  );
-  return rows.rows;
+  try {
+    const rows = await query(
+      `SELECT tj.*, p.name AS dataset_project_name, m.name AS model_name, ds.name AS dataset_snapshot_name
+       FROM runtime_training_jobs tj
+       LEFT JOIN projects p ON p.id=tj.dataset_project_id
+       LEFT JOIN model_clusters m ON m.id=tj.model_id
+       LEFT JOIN dataset_snapshots ds ON ds.id=tj.dataset_snapshot_id
+       ORDER BY tj.created_at DESC
+       LIMIT 200`,
+    );
+    return rows.rows;
+  } catch (error) {
+    if (!["42P01", "XX002"].includes(error.code)) throw error;
+    return [];
+  }
 }
 
 async function createTrainingJob(body = {}) {
@@ -1433,7 +2025,7 @@ async function createTrainingJob(body = {}) {
   if (!project) throw new Error("训练数据集项目不存在");
   const modelId = body.modelId || body.model_id || null;
   if (modelId) {
-    const model = (await query("SELECT id FROM ml_models WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
+    const model = (await query("SELECT id FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
     if (!model) throw new Error("模型不存在");
   }
   const params = { ...(body.params || {}) };
@@ -1449,7 +2041,7 @@ async function createTrainingJob(body = {}) {
     params.taskType = requestedTask;
   }
   if (body.pythonEnvId || body.python_env_id) {
-    const env = (await query("SELECT * FROM python_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
+    const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
     if (!env) throw new Error("Python 环境不存在");
     params.pythonEnvId = env.id;
     params.python = env.python_path;
@@ -1459,27 +2051,27 @@ async function createTrainingJob(body = {}) {
   const name = String(body.name || `${project.name}_train_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const template = String(body.template || "ultralytics_yolo_detect");
   const inserted = await query(
-    `INSERT INTO training_jobs (name, template, dataset_project_id, model_id, params_json, total_epochs, message)
+    `INSERT INTO runtime_training_jobs (name, template, dataset_project_id, model_id, params_json, total_epochs, message)
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
     [name, template, datasetProjectId, modelId, JSON.stringify(params), totalEpochs, "已进入训练队列，等待训练 worker 接管"],
   );
   const job = inserted.rows[0];
   const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
-  const updated = await query("UPDATE training_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
-  await query("INSERT INTO training_job_logs (job_id, stream, line) VALUES ($1,$2,$3)", [job.id, "system", `queued: ${template}; dataset=${project.name}`]);
+  const updated = await query("UPDATE runtime_training_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
+  await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [job.id, "system", `queued: ${template}; dataset=${project.name}`]);
   return updated.rows[0];
 }
 
 async function requeueTrainingJob(jobId, body = {}) {
-  const job = (await query("SELECT * FROM training_jobs WHERE id=$1", [jobId])).rows[0];
+  const job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [jobId])).rows[0];
   if (!job) throw new Error("训练任务不存在");
   const params = { ...(job.params_json || {}), ...(body.params || {}) };
   const totalEpochs = Number(params.epochs || job.total_epochs || 0) || 0;
   const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
   const updated = await query(
-    `UPDATE training_jobs
+    `UPDATE runtime_training_jobs
      SET status='pending', params_json=$1, progress=0, current_epoch=0, total_epochs=$2,
          worker_id='', process_pid=NULL, heartbeat_at=NULL, started_at=NULL, finished_at=NULL,
          output_root=$3, message=$4
@@ -1491,22 +2083,27 @@ async function requeueTrainingJob(jobId, body = {}) {
 }
 
 async function listInferenceJobs() {
-  const rows = await query(
-    `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
-     FROM inference_jobs ij
-     LEFT JOIN model_versions mv ON mv.id=ij.model_version_id
-     LEFT JOIN ml_models m ON m.id=mv.model_id
-     LEFT JOIN projects p ON p.id=ij.dataset_project_id
-     ORDER BY ij.created_at DESC
-     LIMIT 200`,
-  );
-  return rows.rows;
+  try {
+    const rows = await query(
+      `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
+       FROM runtime_inference_jobs ij
+       LEFT JOIN model_revisions mv ON mv.id=ij.model_version_id
+       LEFT JOIN model_clusters m ON m.id=mv.model_id
+       LEFT JOIN projects p ON p.id=ij.dataset_project_id
+       ORDER BY ij.created_at DESC
+       LIMIT 200`,
+    );
+    return rows.rows;
+  } catch (error) {
+    if (!["42P01", "XX002"].includes(error.code)) throw error;
+    return [];
+  }
 }
 
 async function listInferenceResults(jobId) {
   const rows = await query(
     `SELECT ir.*, pi.display_name, pi.scene, pi.view, pi.modality
-     FROM inference_results ir
+     FROM runtime_inference_results ir
      LEFT JOIN project_images pi ON pi.id=ir.project_image_id
      WHERE ir.inference_job_id=$1
      ORDER BY ir.created_at, ir.id
@@ -1517,7 +2114,7 @@ async function listInferenceResults(jobId) {
 }
 
 async function deleteInferenceJob(jobId) {
-  const deleted = await query("DELETE FROM inference_jobs WHERE id=$1 RETURNING id", [jobId]);
+  const deleted = await query("DELETE FROM runtime_inference_jobs WHERE id=$1 RETURNING id", [jobId]);
   if (!deleted.rows[0]) throw new Error("推理任务不存在");
   return { deleted: true, id: deleted.rows[0].id };
 }
@@ -1529,25 +2126,38 @@ async function createInferenceJob(body = {}) {
   if (!project) throw new Error("推理数据集项目不存在");
   const modelVersionId = body.modelVersionId || body.model_version_id || null;
   if (modelVersionId) {
-    const version = (await query("SELECT id FROM model_versions WHERE id=$1", [modelVersionId])).rows[0];
+    const version = (await query("SELECT id FROM model_revisions WHERE id=$1", [modelVersionId])).rows[0];
     if (!version) throw new Error("模型版本不存在");
   }
   const params = body.params || {};
+  const algorithmAssetId = body.algorithmAssetId || body.algorithm_asset_id || params.algorithmAssetId || params.templateId || null;
+  if (algorithmAssetId) {
+    const algorithms = await listAlgorithmAssets();
+    const algorithm = algorithms.find((item) => String(item.id) === String(algorithmAssetId) || item.algorithm_key === algorithmAssetId || item.template_key === algorithmAssetId);
+    if (!algorithm) throw new Error("算法方法资产不存在");
+    params.algorithmAssetId = algorithm.id;
+    params.templateId = algorithm.id;
+    params.algorithmKey = algorithm.algorithm_key || algorithm.template_key;
+    params.templateName = algorithm.name;
+    params.manifestKey = algorithm.manifest_key;
+    params.adapterKey = algorithm.adapter_key;
+    params.algorithmMinioPrefix = algorithm.minio_prefix;
+  }
   const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const inserted = await query(
-    `INSERT INTO inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message)
+    `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message)
      VALUES ($1,$2,$3,'preparing',$4,$5) RETURNING *`,
     [name, modelVersionId, datasetProjectId, JSON.stringify(params), "正在准备推理输入缓存"],
   );
   const job = inserted.rows[0];
   const outputRoot = path.join(storageRoot, "runtime", "inference", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
-  const updated = await query("UPDATE inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
+  const updated = await query("UPDATE runtime_inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
   setImmediate(() => {
     prepareInferenceInputCache(updated.rows[0]).catch(async (error) => {
       console.error("prepare inference input failed", error);
       await query(
-        "UPDATE inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+        "UPDATE runtime_inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
         [error.message || "推理输入缓存准备失败", job.id],
       ).catch(() => {});
     });
@@ -1756,7 +2366,7 @@ async function prepareInferenceInputCache(job) {
     },
   };
   await query(
-    "UPDATE inference_jobs SET status='pending', progress=5, params_json=$1, message=$2 WHERE id=$3",
+    "UPDATE runtime_inference_jobs SET status='pending', progress=5, params_json=$1, message=$2 WHERE id=$3",
     [JSON.stringify(nextParams), `推理输入缓存已准备：${manifestImages.length} 张图片`, job.id],
   );
   return manifest;
@@ -1766,7 +2376,7 @@ async function claimInferenceJob(workerId) {
   return transaction(async (client) => {
     const row = (await client.query(
       `SELECT *
-       FROM inference_jobs
+       FROM runtime_inference_jobs
        WHERE status='pending'
        ORDER BY created_at
        FOR UPDATE SKIP LOCKED
@@ -1774,7 +2384,7 @@ async function claimInferenceJob(workerId) {
     )).rows[0];
     if (!row) return null;
     await client.query(
-      "UPDATE inference_jobs SET status='running', progress=10, message=$1, started_at=COALESCE(started_at, now()) WHERE id=$2",
+      "UPDATE runtime_inference_jobs SET status='running', progress=10, message=$1, started_at=COALESCE(started_at, now()) WHERE id=$2",
       [`推理 worker ${workerId} 已接管任务`, row.id],
     );
     return { ...row, status: "running" };
@@ -1817,10 +2427,10 @@ async function runDummyInferenceJob(job) {
   fs.writeFileSync(predictionsPath, JSON.stringify(predictions, null, 2), "utf8");
 
   await transaction(async (client) => {
-    await client.query("DELETE FROM inference_results WHERE inference_job_id=$1", [job.id]);
+    await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
     for (const row of predictionRows) {
       await client.query(
-        `INSERT INTO inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
+        `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
          VALUES ($1,$2,$3,$4)`,
         [job.id, row.projectImageId || null, JSON.stringify(row.predictions), predictionsPath],
       );
@@ -1835,7 +2445,7 @@ async function runDummyInferenceJob(job) {
       },
     };
     await client.query(
-      "UPDATE inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
       [JSON.stringify(nextParams), `空模型推理完成：${predictionRows.length} 张图片，0 个预测框`, job.id],
     );
   });
@@ -1845,16 +2455,16 @@ async function runInferenceJob(job, workerId) {
   try {
     if (!isDummyInferenceJob(job)) {
       await query(
-        "UPDATE inference_jobs SET status='pending', progress=5, message=$1 WHERE id=$2",
+        "UPDATE runtime_inference_jobs SET status='pending', progress=5, message=$1 WHERE id=$2",
         ["等待外部推理 worker：当前内置 worker 只执行空模型任务", job.id],
       );
       return;
     }
-    await query("UPDATE inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在执行空模型推理", job.id]);
+    await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在执行空模型推理", job.id]);
     await runDummyInferenceJob(job);
   } catch (error) {
     await query(
-      "UPDATE inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
+      "UPDATE runtime_inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
       [error.message || `推理 worker ${workerId} 执行失败`, job.id],
     ).catch(() => {});
   }
@@ -1881,7 +2491,7 @@ function startInferenceWorker() {
 async function appendTrainingLog(jobId, stream, line) {
   const text = String(line || "").slice(0, 4000);
   if (!text) return;
-  await query("INSERT INTO training_job_logs (job_id, stream, line) VALUES ($1,$2,$3)", [jobId, stream, text]).catch(() => {});
+  await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [jobId, stream, text]).catch(() => {});
 }
 
 async function createDatasetSnapshotForTraining(job) {
@@ -1963,7 +2573,7 @@ async function createDatasetSnapshotForTraining(job) {
      VALUES ($1,$2,$3,'yolo',$4,$5,$6,$7,$8) RETURNING *`,
     [snapshotName, project.id, project.active_label_version_id, JSON.stringify(split), snapshotRoot, rows.length, annRows.length, JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml") })],
   )).rows[0];
-  await query("UPDATE training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
+  await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
   await appendTrainingLog(job.id, "system", `dataset snapshot created: ${snapshotRoot}`);
   return snapshot;
 }
@@ -1995,7 +2605,7 @@ function buildTrainingCommand(job, snapshot) {
 async function claimTrainingJob(workerId) {
   return transaction(async (client) => {
     const row = (await client.query(
-      `SELECT * FROM training_jobs
+      `SELECT * FROM runtime_training_jobs
        WHERE status='pending'
        ORDER BY priority DESC, created_at
        FOR UPDATE SKIP LOCKED
@@ -2003,7 +2613,7 @@ async function claimTrainingJob(workerId) {
     )).rows[0];
     if (!row) return null;
     const updated = (await client.query(
-      `UPDATE training_jobs
+      `UPDATE runtime_training_jobs
        SET status='preparing', worker_id=$1, heartbeat_at=now(), started_at=COALESCE(started_at, now()), message=$2
        WHERE id=$3 RETURNING *`,
       [workerId, "正在生成数据集快照", row.id],
@@ -2025,7 +2635,7 @@ async function scanArtifacts(job, modelVersionId) {
     const stat = fs.statSync(file);
     const sha = stat.size < 1024 * 1024 * 1024 ? await hashFile(file).catch(() => null) : null;
     const row = (await query(
-      `INSERT INTO model_artifacts (model_version_id, training_job_id, artifact_type, path, size, sha256, metadata_json)
+      `INSERT INTO model_files (model_version_id, training_job_id, artifact_type, path, size, sha256, metadata_json)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [modelVersionId, job.id, artifactType, objectKey, stat.size, sha, JSON.stringify({ localPath: file, relativePath: rel })],
     )).rows[0];
@@ -2041,13 +2651,13 @@ async function finishTrainingJob(job) {
   const prefix = `detect_${project?.name || "dataset"}_yolo_ep${Number(params.epochs || job.total_epochs || 0) || "x"}_${dateCode()}`;
   const versionName = await nextModelVersionName(prefix, modelId);
   const version = (await query(
-    `INSERT INTO model_versions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
+    `INSERT INTO model_revisions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
      VALUES ($1,$2,$3,$4,$5,'candidate',$6,$7) RETURNING *`,
     [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify(job.params_json || {}), job.output_root],
   )).rows[0];
   const artifacts = await scanArtifacts(job, version.id);
   await query(
-    "UPDATE training_jobs SET model_id=$1, status='done', progress=100, message=$2, finished_at=now(), heartbeat_at=now() WHERE id=$3",
+    "UPDATE runtime_training_jobs SET model_id=$1, status='done', progress=100, message=$2, finished_at=now(), heartbeat_at=now() WHERE id=$3",
     [modelId, `训练完成，生成模型版本 ${version.version_name}，登记 ${artifacts.length} 个 artifact`, job.id],
   );
   await appendTrainingLog(job.id, "system", `model version created: ${version.version_name}; artifacts=${artifacts.length}`);
@@ -2072,38 +2682,38 @@ async function runTrainingJob(job, workerId) {
   try {
     fs.mkdirSync(job.output_root, { recursive: true });
     const snapshot = await createDatasetSnapshotForTraining(job);
-    job = (await query("SELECT * FROM training_jobs WHERE id=$1", [job.id])).rows[0];
+    job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     if (job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
       const weightPath = await findWeightArtifact(job.params_json.initialModelVersionId);
       if (!weightPath) throw new Error("选择的初始化模型版本没有可用权重 artifact");
       job.params_json = { ...(job.params_json || {}), resolvedWeights: weightPath };
-      await query("UPDATE training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
+      await query("UPDATE runtime_training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
       await appendTrainingLog(job.id, "system", `resolved initial weights: ${weightPath}`);
     }
     const { command, args } = buildTrainingCommand(job, snapshot);
-    await query("UPDATE training_jobs SET status='running', message=$1, heartbeat_at=now() WHERE id=$2", [`正在执行: ${command} ${args.join(" ")}`, job.id]);
+    await query("UPDATE runtime_training_jobs SET status='running', message=$1, heartbeat_at=now() WHERE id=$2", [`正在执行: ${command} ${args.join(" ")}`, job.id]);
     await appendTrainingLog(job.id, "system", `command: ${command} ${args.join(" ")}`);
     const child = spawn(command, args, { cwd: job.output_root, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
-    await query("UPDATE training_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]);
+    await query("UPDATE runtime_training_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]);
     const onData = (stream) => async (chunk) => {
       const text = chunk.toString("utf8");
       for (const line of text.split(/\r?\n/).filter(Boolean)) {
         await appendTrainingLog(job.id, stream, line);
         for (const metric of parseMetricLine(line)) {
-          await query("INSERT INTO training_metrics (job_id, key, value) VALUES ($1,$2,$3)", [job.id, metric.key, metric.value]).catch(() => {});
+          await query("INSERT INTO runtime_training_metrics (job_id, key, value) VALUES ($1,$2,$3)", [job.id, metric.key, metric.value]).catch(() => {});
         }
       }
-      await query("UPDATE training_jobs SET heartbeat_at=now(), message=$1 WHERE id=$2", [text.split(/\r?\n/).filter(Boolean).slice(-1)[0]?.slice(0, 500) || "训练中", job.id]).catch(() => {});
+      await query("UPDATE runtime_training_jobs SET heartbeat_at=now(), message=$1 WHERE id=$2", [text.split(/\r?\n/).filter(Boolean).slice(-1)[0]?.slice(0, 500) || "训练中", job.id]).catch(() => {});
     };
     child.stdout.on("data", onData("stdout"));
     child.stderr.on("data", onData("stderr"));
     const exitCode = await new Promise((resolve) => child.on("close", resolve));
-    job = (await query("SELECT * FROM training_jobs WHERE id=$1", [job.id])).rows[0];
+    job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     if (exitCode !== 0) throw new Error(`训练命令退出码 ${exitCode}`);
     await finishTrainingJob(job);
   } catch (error) {
     await appendTrainingLog(job.id, "error", error.stack || error.message);
-    await query("UPDATE training_jobs SET status='failed', message=$1, finished_at=now(), heartbeat_at=now() WHERE id=$2", [error.message || "训练失败", job.id]).catch(() => {});
+    await query("UPDATE runtime_training_jobs SET status='failed', message=$1, finished_at=now(), heartbeat_at=now() WHERE id=$2", [error.message || "训练失败", job.id]).catch(() => {});
   }
 }
 
@@ -2451,6 +3061,7 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets() });
   if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates() });
   if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs() });
@@ -2466,12 +3077,12 @@ async function route(req, res) {
   if (method === "POST" && requeueTrainingMatch) return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) });
   const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
   if (method === "GET" && trainingLogsMatch) {
-    const rows = await query("SELECT * FROM training_job_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
+    const rows = await query("SELECT * FROM runtime_training_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
     return sendJson(res, { logs: rows.rows.reverse() });
   }
   const trainingMetricsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/metrics$/);
   if (method === "GET" && trainingMetricsMatch) {
-    const rows = await query("SELECT * FROM training_metrics WHERE job_id=$1 ORDER BY id DESC LIMIT 500", [trainingMetricsMatch[1]]);
+    const rows = await query("SELECT * FROM runtime_training_metrics WHERE job_id=$1 ORDER BY id DESC LIMIT 500", [trainingMetricsMatch[1]]);
     return sendJson(res, { metrics: rows.rows.reverse() });
   }
   if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
@@ -2586,8 +3197,13 @@ async function route(req, res) {
 }
 
 async function main() {
+  console.log("Boot: ensureRuntimeSchema start");
   await ensureRuntimeSchema();
+  console.log("Boot: ensureRuntimeSchema done");
+  console.log("Boot: ensureBucketSafe start");
   await store.ensureBucketSafe();
+  console.log("Boot: ensureBucketSafe done");
+  await ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
   const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {
       console.error(error);
@@ -2602,8 +3218,10 @@ async function main() {
     console.log(`DATA_ROOT=${dataRoot}`);
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
-  startTrainingWorker();
-  startInferenceWorker();
+  if (process.env.RUN_EXTENDED_SCHEMA === "true") {
+    startTrainingWorker();
+    startInferenceWorker();
+  }
 }
 
 process.on("beforeExit", (code) => console.error(`Process beforeExit: ${code}`));
@@ -2613,6 +3231,11 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
+
+
+
+
 
 
 
