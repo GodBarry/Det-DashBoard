@@ -359,6 +359,8 @@ async function ensureRuntimeSchema() {
   const statements = [
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
@@ -649,9 +651,91 @@ async function upsertVideoAsset(client, filePath) {
 }
 
 async function createProject(body) {
-  const name = body.name || `project_${Date.now()}`;
-  const result = await query("INSERT INTO projects (name, description, project_type) VALUES ($1,$2,$3) RETURNING *", [name, body.description || "", body.project_type || "normal"]);
-  return result.rows[0];
+  const rawName = String(body.name || `project_${Date.now()}`);
+  const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
+  if (!segments.length) throw httpError(400, "项目名称不能为空");
+  let parentId = body.parentId || body.parent_id || null;
+  const parentDepth = parentId ? await projectDepth(parentId) : 0;
+  if (parentDepth + segments.length > 3) throw httpError(400, "项目文件夹最多支持 3 级");
+  let project = null;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const shouldReuseFolder = segments.length > 1 && index < segments.length - 1;
+    const existing = shouldReuseFolder ? (await query(
+      "SELECT * FROM projects WHERE deleted_at IS NULL AND name=$1 AND parent_id IS NOT DISTINCT FROM $2 ORDER BY created_at DESC LIMIT 1",
+      [segment, parentId],
+    )).rows[0] : null;
+    if (existing) {
+      project = existing;
+    } else {
+      project = (await query(
+        "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,$3,$4) RETURNING *",
+        [segment, body.description || "", body.project_type || "normal", parentId],
+      )).rows[0];
+    }
+    parentId = project.id;
+  }
+  return project;
+}
+
+async function projectDepth(projectId) {
+  const result = await query(
+    `WITH RECURSIVE ancestors AS (
+       SELECT id, parent_id, 1 AS depth FROM projects WHERE id=$1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT p.id, p.parent_id, ancestors.depth + 1
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+       WHERE p.deleted_at IS NULL AND ancestors.depth < 3
+     )
+     SELECT count(*)::int AS depth FROM ancestors`,
+    [projectId],
+  );
+  const depth = result.rows[0]?.depth || 0;
+  if (!depth) throw httpError(400, "父级项目不存在");
+  return depth;
+}
+
+async function softDeleteProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     )
+     UPDATE projects SET deleted_at=now()
+     WHERE id IN (SELECT id FROM descendants)`,
+    [projectId],
+  );
+}
+
+async function restoreProjectTree(projectId) {
+  await query(
+    `WITH RECURSIVE descendants AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN descendants ON p.parent_id = descendants.id
+     ),
+     ancestors AS (
+       SELECT id, parent_id FROM projects WHERE id=$1
+       UNION ALL
+       SELECT p.id, p.parent_id
+       FROM projects p
+       JOIN ancestors ON ancestors.parent_id = p.id
+     ),
+     affected AS (
+       SELECT id FROM descendants
+       UNION
+       SELECT id FROM ancestors
+     )
+     UPDATE projects SET deleted_at=NULL
+     WHERE id IN (SELECT id FROM affected)`,
+    [projectId],
+  );
 }
 
 async function listProjects(trash = false) {
@@ -659,6 +743,7 @@ async function listProjects(trash = false) {
     `SELECT p.*,
       (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
+      (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND c.deleted_at IS NULL) AS child_count,
       (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
      FROM projects p
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
@@ -2280,12 +2365,12 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req)) });
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (method === "DELETE" && deleteProject) {
-    await query("UPDATE projects SET deleted_at=now() WHERE id=$1", [deleteProject[1]]);
+    await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
-    await query("UPDATE projects SET deleted_at=NULL WHERE id=$1", [restoreProject[1]]);
+    await restoreProjectTree(restoreProject[1]);
     return sendJson(res, { ok: true });
   }
   if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req)));

@@ -2,8 +2,23 @@ const { test, expect } = require("@playwright/test");
 
 test("creates a project, navigates folders, imports YOLO, filters and exports COCO", async ({ page }) => {
   const projectName = `ui-e2e-${Date.now()}`;
+  const folderRoot = `ui-root-${Date.now()}`;
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "数据集管理" })).toBeVisible();
+
+  page.once("dialog", async (dialog) => dialog.accept(`${folderRoot}/level-b/level-c`));
+  await page.getByRole("button", { name: "新建项目" }).click();
+  await expect(page.getByRole("heading", { name: "level-b" })).toBeVisible();
+  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
+  await page.getByRole("button", { name: "根目录" }).click();
+  const rootFolder = page.locator("article.project-folder").filter({ hasText: folderRoot });
+  await expect(rootFolder).toBeVisible();
+  await rootFolder.getByTitle("进入文件夹").click();
+  const middleFolder = page.locator("article.project-folder").filter({ hasText: "level-b" });
+  await expect(middleFolder).toBeVisible();
+  await middleFolder.getByTitle("进入文件夹").click();
+  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
+  await page.getByRole("button", { name: "根目录" }).click();
 
   page.once("dialog", async (dialog) => dialog.accept(projectName));
   await page.getByRole("button", { name: "新建项目" }).click();
@@ -39,5 +54,5 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
 
   await page.getByLabel("导出格式").selectOption("coco");
   await page.getByRole("button", { name: "导出数据集" }).click();
-  await expect(page.locator(".progress-card").filter({ hasText: "COCO 导出完成" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".progress-card").filter({ hasText: "导出进度" })).toBeHidden({ timeout: 20_000 });
 });

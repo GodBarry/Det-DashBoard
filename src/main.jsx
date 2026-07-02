@@ -25,6 +25,7 @@ const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff"
 function App() {
   const [view, setView] = useState("home");
   const [projects, setProjects] = useState([]);
+  const [currentFolderId, setCurrentFolderId] = useState(null);
   const [trashProjects, setTrashProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -121,6 +122,24 @@ function App() {
       .then((d) => setTrainingLogs(d.logs || []))
       .catch(() => {});
   }, [activeTrainingJobId, trainingJobs]);
+
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
+  const visibleProjects = useMemo(
+    () => projects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
+    [projects, currentFolderId],
+  );
+  const breadcrumbs = useMemo(() => {
+    const rows = [];
+    let cursor = currentFolder;
+    const seen = new Set();
+    while (cursor && !seen.has(cursor.id) && rows.length < 3) {
+      rows.unshift(cursor);
+      seen.add(cursor.id);
+      cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
+    }
+    return rows;
+  }, [currentFolder, projectById]);
 
   function refreshHome() {
     fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => {});
@@ -305,11 +324,22 @@ function App() {
   }
 
   function createProject() {
-    const name = window.prompt("请输入项目名称", "新建项目");
+    const name = window.prompt("请输入项目名称或路径（最多 3 级，例如：任务A/批次1/样本集）", "新建项目");
     if (!name) return;
-    fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) })
-      .then((r) => r.json())
-      .then(() => refreshHome());
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, parentId: currentFolderId }),
+    })
+      .then((r) => r.json().then((data) => {
+        if (!r.ok) throw new Error(data.error || "新建项目失败");
+        return data;
+      }))
+      .then((data) => {
+        if (data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
+        refreshHome();
+      })
+      .catch((err) => setError(err.message));
   }
 
   function openBaselineDialog() {
@@ -569,6 +599,7 @@ function App() {
   const goHome = () => {
     setView("home");
     setActiveProject(null);
+    setCurrentFolderId(null);
     setError(null);
     refreshHome();
   };
@@ -587,20 +618,34 @@ function App() {
         </header>
         <main className="home-page">
           <section className="home-section">
-            <h2>历史项目</h2>
+            <div className="section-title-row">
+              <div>
+                <h2>{currentFolder ? currentFolder.name : "历史项目"}</h2>
+                <div className="breadcrumbs">
+                  <button onClick={() => setCurrentFolderId(null)}>根目录</button>
+                  {breadcrumbs.map((project) => (
+                    <button key={project.id} onClick={() => setCurrentFolderId(project.id)}>{project.name}</button>
+                  ))}
+                </div>
+              </div>
+              {currentFolder && <button onClick={() => setCurrentFolderId(currentFolder.parent_id || null)}><ArrowLeft size={14} />上一级</button>}
+            </div>
             <div className="project-grid">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <article className="project-folder" key={project.id} onDoubleClick={() => openProject(project)}>
                   <Folder size={34} />
                   <div>
                     <h3>{project.name}</h3>
-                    <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频</p>
+                    <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频 · {project.child_count || 0} 下级</p>
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
-                  <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  <div className="project-actions">
+                    <button title="进入文件夹" onClick={(event) => { event.stopPropagation(); setCurrentFolderId(project.id); }}><FolderOpen size={16} /></button>
+                    <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  </div>
                 </article>
               ))}
-              {!projects.length && <div className="empty-state">还没有项目，点击右上角新建项目。</div>}
+              {!visibleProjects.length && <div className="empty-state">当前文件夹为空，点击右上角新建项目。</div>}
             </div>
           </section>
           <section className="home-section">
@@ -1172,8 +1217,10 @@ function MultiFilter({ title, values, selected = [], onToggle }) {
 }
 
 function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport }) {
-  const latestExport = jobs.find((job) => job.type === "export");
-  const canCancelImport = latestImport && ["scanning", "running", "cancel_requested"].includes(latestImport.status);
+  const runningStatuses = new Set(["pending", "scanning", "running", "cancel_requested", "preparing"]);
+  const visibleImport = latestImport && runningStatuses.has(latestImport.status) ? latestImport : null;
+  const latestExport = jobs.find((job) => job.type === "export" && runningStatuses.has(job.status));
+  const canCancelImport = visibleImport && ["scanning", "running", "cancel_requested"].includes(visibleImport.status);
   return (
     <div className="progress-stack">
       {error && (
@@ -1182,7 +1229,7 @@ function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport
           <button onClick={onCloseError}>&times;</button>
         </div>
       )}
-      {latestImport && <ProgressBar title="导入进度" message={latestImport.message || latestImport.status} progress={latestImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
+      {visibleImport && <ProgressBar title="导入进度" message={visibleImport.message || visibleImport.status} progress={visibleImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
       {latestExport && <ProgressBar title="导出进度" message={latestExport.message || latestExport.status} progress={latestExport.progress || 0} />}
     </div>
   );
