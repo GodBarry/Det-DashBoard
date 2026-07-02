@@ -22,6 +22,41 @@ import "./styles.css";
 
 const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
 
+const evaluationClusterLabels = { detect: "目标检测", segment: "实例分割", classify: "图像分类" };
+const evaluationTypeLabels = { training: "训练模型", inference: "推理模型" };
+const completedEvaluationStatuses = new Set(["done", "completed", "succeeded", "success"]);
+
+function taskLabel(task) {
+  if (task === "detect") return "目标检测";
+  if (task === "segment") return "实例分割";
+  if (task === "classify") return "图像分类";
+  return task || "未知任务";
+}
+
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString() : "--";
+}
+
+function formatDuration(start, end) {
+  if (!start || !end) return "--";
+  const durationMs = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "--";
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+}
+
+function runStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (completedEvaluationStatuses.has(normalized)) return "运行完成";
+  if (["pending", "preparing"].includes(normalized)) return "运行待处理";
+  if (normalized === "running") return "运行中";
+  if (normalized === "failed") return "运行失败";
+  if (normalized === "cancelled") return "已取消";
+  return status || "未知状态";
+}
+
 function App() {
   const [view, setView] = useState("home");
   const [projects, setProjects] = useState([]);
@@ -66,13 +101,39 @@ function App() {
   const [pythonEnvs, setPythonEnvs] = useState([]);
   const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
   const [trainingForm, setTrainingForm] = useState({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0" });
-  const [inferenceForm, setInferenceForm] = useState({ name: "", datasetProjectId: "", modelVersionId: "", conf: 0.25, iou: 0.7, imgsz: 640 });
+  const [inferenceForm, setInferenceForm] = useState({
+    name: "",
+    datasetProjectId: "",
+    modelId: "",
+    modelVersionId: "",
+    templateId: "",
+    taskType: "detect",
+    pythonEnvId: "",
+    conf: 0.25,
+    iou: 0.7,
+    imgsz: 640,
+    batch: 16,
+    device: "0",
+    inputScope: "project",
+    inputScenes: "",
+    inputViews: "",
+    inputModalities: "",
+    inputImportBatchIds: "",
+    inputLabels: "",
+    inputQuery: "",
+    inputLimit: 0,
+    cachePolicy: "reuse_asset_cache",
+    saveJson: true,
+    saveVisualization: true,
+    createLabelVersion: false,
+  });
   const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
   const [templateForm, setTemplateForm] = useState({ name: "", templateKey: "ultralytics_yolo", framework: "ultralytics", tasks: ["detect", "segment", "classify"], description: "" });
-  const [envForm, setEnvForm] = useState({ name: "", pythonPath: "", envType: "miniforge", osType: "windows", arch: "x86_64", accelerator: "cpu" });
+  const [envForm, setEnvForm] = useState({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
   const importRefreshKeyRef = useRef("");
+  const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
   useEffect(() => {
     refreshHome();
@@ -107,7 +168,7 @@ function App() {
   }, [activeProject, imports]);
 
   useEffect(() => {
-    if (!["training", "inference", "models"].includes(view)) return;
+    if (!["training", "inference", "models", "evaluation"].includes(view)) return;
     const timer = window.setInterval(() => loadMlPlatform(), 2500);
     return () => window.clearInterval(timer);
   }, [view]);
@@ -253,7 +314,7 @@ function App() {
     }).then((r) => Promise.all([r.status, r.json()]))
       .then(([status, data]) => {
         if (status >= 400) throw new Error(data.error || "登记环境失败");
-        setEnvForm({ name: "", pythonPath: "", envType: "miniforge", osType: "windows", arch: "x86_64", accelerator: "cpu" });
+        setEnvForm({ name: "", sourceType: "server_python", pythonPath: "", condaPackPath: "", unpackPath: "", envType: "miniforge", osType: "linux", arch: "x86_64", accelerator: "cpu" });
         loadMlPlatform();
       }).catch((err) => setError(err.message));
   }
@@ -282,7 +343,36 @@ function App() {
         name: inferenceForm.name,
         datasetProjectId: inferenceForm.datasetProjectId,
         modelVersionId: inferenceForm.modelVersionId || null,
-        params: { conf: Number(inferenceForm.conf), iou: Number(inferenceForm.iou), imgsz: Number(inferenceForm.imgsz) },
+        params: {
+          modelId: null,
+          templateId: inferenceForm.templateId || null,
+          taskType: inferenceForm.taskType,
+          pythonEnvId: inferenceForm.pythonEnvId || null,
+          conf: Number(inferenceForm.conf),
+          iou: Number(inferenceForm.iou),
+          imgsz: Number(inferenceForm.imgsz),
+          batch: Number(inferenceForm.batch),
+          device: inferenceForm.device,
+          input: {
+            sourceType: "project_images",
+            scope: inferenceForm.inputScope,
+            filters: inferenceForm.inputScope === "project" ? {} : {
+              scenes: inferenceForm.inputScenes.split(",").map((item) => item.trim()).filter(Boolean),
+              views: inferenceForm.inputViews.split(",").map((item) => item.trim()).filter(Boolean),
+              modalities: inferenceForm.inputModalities.split(",").map((item) => item.trim()).filter(Boolean),
+              importBatchIds: inferenceForm.inputImportBatchIds.split(",").map((item) => item.trim()).filter(Boolean),
+              labels: inferenceForm.inputLabels.split(",").map((item) => item.trim()).filter(Boolean),
+              q: inferenceForm.inputQuery,
+            },
+            limit: 0,
+            cachePolicy: "reuse_asset_cache",
+          },
+          output: {
+            saveJson: Boolean(inferenceForm.saveJson),
+            saveVisualization: Boolean(inferenceForm.saveVisualization),
+            createLabelVersion: Boolean(inferenceForm.createLabelVersion),
+          },
+        },
       }),
     })
       .then((r) => Promise.all([r.status, r.json()]))
@@ -292,6 +382,32 @@ function App() {
         loadMlPlatform();
       })
       .catch((err) => setError(err.message));
+  }
+
+  function deleteInferenceJob(jobId) {
+    if (!window.confirm("确认删除这个推理任务？")) return;
+    fetch(`/api/ml/inference-jobs/${jobId}`, { method: "DELETE" })
+      .then((r) => Promise.all([r.status, r.json()]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "删除推理任务失败");
+        loadMlPlatform();
+      })
+      .catch((err) => setError(err.message));
+  }
+
+  function viewInferenceResults(job) {
+    setError(null);
+    setActiveInferenceResult({ job, results: [], loading: true });
+    fetch(`/api/ml/inference-jobs/${job.id}/results`)
+      .then((r) => Promise.all([r.status, r.json()]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "读取推理结果失败");
+        setActiveInferenceResult({ job, results: data.results || [], loading: false });
+      })
+      .catch((err) => {
+        setActiveInferenceResult(null);
+        setError(err.message);
+      });
   }
 
   function loadWorkspace(projectId) {
@@ -668,7 +784,7 @@ function App() {
     );
   }
 
-  if (view === "training" || view === "inference" || view === "models") {
+  if (view === "training" || view === "inference" || view === "models" || view === "evaluation") {
     return (
       <PlatformPage
         view={view}
@@ -703,6 +819,10 @@ function App() {
         renameModelVersion={renameModelVersion}
         submitTrainingJob={submitTrainingJob}
         submitInferenceJob={submitInferenceJob}
+        deleteInferenceJob={deleteInferenceJob}
+        activeInferenceResult={activeInferenceResult}
+        setActiveInferenceResult={setActiveInferenceResult}
+        viewInferenceResults={viewInferenceResults}
         error={error}
         setError={setError}
         openPlatform={openPlatform}
@@ -756,7 +876,7 @@ function App() {
             <h2>导入数据</h2>
             <p className="muted">输入或选择要导入的数据文件夹路径（浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}）</p>
             <div className="import-path-row">
-              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="例如: /home/barry/图片/最新统计/统计用/山地" />
+              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder='例如: F:\ZBH\统计用\山地' />
               <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
             </div>
             {error && <div className="error-msg">{error}</div>}
@@ -901,13 +1021,49 @@ function PlatformPage({
   renameModelVersion,
   submitTrainingJob,
   submitInferenceJob,
+  deleteInferenceJob,
+  activeInferenceResult,
+  setActiveInferenceResult,
+  viewInferenceResults,
   error,
   setError,
   openPlatform,
 }) {
-  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : "模型管理";
+  const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "模型管理";
   const selectedTemplate = trainingTemplates.find((tpl) => tpl.id === trainingForm.templateId);
   const supportedTasks = selectedTemplate?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+  const [evaluationCluster, setEvaluationCluster] = useState("all");
+  const [evaluationType, setEvaluationType] = useState("all");
+  const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState([]);
+  const [activeEvaluationTask, setActiveEvaluationTask] = useState(null);
+  const [activeEvaluationReportTask, setActiveEvaluationReportTask] = useState(null);
+  const evaluationTasks = inferenceJobs
+    .filter((job) => completedEvaluationStatuses.has(String(job.status || "").toLowerCase()))
+    .filter((job) => !hiddenEvaluationJobIds.includes(job.id))
+    .map((job) => {
+      const cluster = job.task_type || job.taskType || "detect";
+      const modelText = job.model_name ? `${job.model_name}/${job.version_name || "版本"}` : "未指定模型版本";
+      return {
+        id: job.id,
+        name: job.name || `推理任务 ${job.id}`,
+        cluster,
+        type: "inference",
+        description: job.message || `${job.dataset_project_name || "未绑定数据集"} · ${modelText} · 已完成推理任务，可进入评估`,
+        creator: job.created_by || job.creator || "admin",
+        createdAt: formatDateTime(job.created_at),
+        sourceJob: job,
+      };
+    });
+  const filteredEvaluationTasks = evaluationTasks.filter((task) => {
+    const clusterMatch = evaluationCluster === "all" || task.cluster === evaluationCluster;
+    const typeMatch = evaluationType === "all" || task.type === evaluationType;
+    return clusterMatch && typeMatch;
+  });
+  const inferenceVersions = modelVersions.filter((version) => {
+    const model = mlModels.find((item) => item.id === version.model_id);
+    return !model?.task_type || model.task_type === inferenceForm.taskType;
+  });
+  const selectedInferenceEnv = pythonEnvs.find((env) => env.id === inferenceForm.pythonEnvId);
   return (
     <div className="app-shell">
       <MainNav view={view} goHome={() => { setView("home"); setError(null); }} openPlatform={openPlatform} />
@@ -980,20 +1136,102 @@ function PlatformPage({
                 <option value="">请选择</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select></label>
-              <label>模型版本<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
-                <option value="">暂不指定版本</option>
-                {modelVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
+              <label>模型簇<select value={inferenceForm.taskType} onChange={(e) => {
+                const taskType = e.target.value;
+                const currentVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
+                const currentModel = mlModels.find((model) => model.id === currentVersion?.model_id);
+                setInferenceForm({ ...inferenceForm, taskType, modelVersionId: !currentModel?.task_type || currentModel.task_type === taskType ? inferenceForm.modelVersionId : "" });
+              }}>
+                {["detect", "segment", "classify"].map((task) => <option key={task} value={task}>{taskLabel(task)}</option>)}
               </select></label>
+              <label>加载权重<select value={inferenceForm.modelVersionId} onChange={(e) => setInferenceForm({ ...inferenceForm, modelVersionId: e.target.value })}>
+                <option value="">暂不指定版本</option>
+                {inferenceVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
+              </select></label>
+              <label>算法名称<select value={inferenceForm.templateId} onChange={(e) => {
+                const tpl = trainingTemplates.find((item) => item.id === e.target.value);
+                const tasks = tpl?.capabilities_json?.tasks || ["detect", "segment", "classify"];
+                setInferenceForm({ ...inferenceForm, templateId: e.target.value, taskType: tasks.includes(inferenceForm.taskType) ? inferenceForm.taskType : tasks[0] || "detect" });
+              }}>
+                <option value="">默认 Ultralytics YOLO 推理</option>
+                {trainingTemplates.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
+              </select></label>
+              <label>运行环境资产<select value={inferenceForm.pythonEnvId} onChange={(e) => setInferenceForm({ ...inferenceForm, pythonEnvId: e.target.value })}>
+                <option value="">由推理 worker 默认选择</option>
+                {pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.source_type === "conda_pack" ? "conda-pack" : env.env_type} · {env.os_type}/{env.arch} · {env.accelerator?.toUpperCase()} · {env.status}</option>)}
+              </select></label>
+              {selectedInferenceEnv && (
+                <div className="hint-box">
+                  <b>{selectedInferenceEnv.source_type === "conda_pack" ? "云端环境包" : "服务器 Python"}</b>
+                  <span>{selectedInferenceEnv.artifact_key || selectedInferenceEnv.python_path}</span>
+                </div>
+              )}
+              <h2>输入范围</h2>
+              <label>数据选择<select value={inferenceForm.inputScope} onChange={(e) => setInferenceForm({ ...inferenceForm, inputScope: e.target.value })}>
+                <option value="project">全项目</option>
+                <option value="filters">按筛选条件</option>
+              </select></label>
+              {inferenceForm.inputScope === "filters" && (
+                <>
+                  <label>场景<input value={inferenceForm.inputScenes} onChange={(e) => setInferenceForm({ ...inferenceForm, inputScenes: e.target.value })} placeholder="逗号分隔，例如 Grassland,Urban" /></label>
+                  <label>视角<input value={inferenceForm.inputViews} onChange={(e) => setInferenceForm({ ...inferenceForm, inputViews: e.target.value })} placeholder="逗号分隔，例如 Aerial View" /></label>
+                  <label>模态<input value={inferenceForm.inputModalities} onChange={(e) => setInferenceForm({ ...inferenceForm, inputModalities: e.target.value })} placeholder="visible,infrared" /></label>
+                  <label>导入批次 ID<input value={inferenceForm.inputImportBatchIds} onChange={(e) => setInferenceForm({ ...inferenceForm, inputImportBatchIds: e.target.value })} placeholder="逗号分隔，可留空" /></label>
+                  <label>类别<input value={inferenceForm.inputLabels} onChange={(e) => setInferenceForm({ ...inferenceForm, inputLabels: e.target.value })} placeholder="逗号分隔，可留空" /></label>
+                  <label>关键词<input value={inferenceForm.inputQuery} onChange={(e) => setInferenceForm({ ...inferenceForm, inputQuery: e.target.value })} placeholder="文件名 / 场景 / 视角 / 关键字" /></label>
+                </>
+              )}
               <div className="form-row">
                 <label>Conf<input type="number" step="0.01" value={inferenceForm.conf} onChange={(e) => setInferenceForm({ ...inferenceForm, conf: e.target.value })} /></label>
                 <label>IoU<input type="number" step="0.01" value={inferenceForm.iou} onChange={(e) => setInferenceForm({ ...inferenceForm, iou: e.target.value })} /></label>
               </div>
-              <label>ImgSz<input type="number" value={inferenceForm.imgsz} onChange={(e) => setInferenceForm({ ...inferenceForm, imgsz: e.target.value })} /></label>
+              <div className="form-row">
+                <label>ImgSz<input type="number" value={inferenceForm.imgsz} onChange={(e) => setInferenceForm({ ...inferenceForm, imgsz: e.target.value })} /></label>
+                <label>Batch<input type="number" value={inferenceForm.batch} onChange={(e) => setInferenceForm({ ...inferenceForm, batch: e.target.value })} /></label>
+              </div>
+              <label>Device<input value={inferenceForm.device} onChange={(e) => setInferenceForm({ ...inferenceForm, device: e.target.value })} placeholder="0 / cpu / 0,1" /></label>
+              <h2>输入策略</h2>
+              <div className="check-list compact">
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.saveJson} onChange={() => setInferenceForm({ ...inferenceForm, saveJson: !inferenceForm.saveJson })} /><span>保存预测 JSON</span></label>
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.saveVisualization} onChange={() => setInferenceForm({ ...inferenceForm, saveVisualization: !inferenceForm.saveVisualization })} /><span>保存可视化结果</span></label>
+                <label className="check-row"><input type="checkbox" checked={inferenceForm.createLabelVersion} onChange={() => setInferenceForm({ ...inferenceForm, createLabelVersion: !inferenceForm.createLabelVersion })} /><span>生成候选标注版本</span></label>
+              </div>
               <button className="primary" onClick={submitInferenceJob}>提交到推理队列</button>
             </section>
-            <JobList title="推理队列" jobs={inferenceJobs} kind="inference" />
+            <section className="platform-card wide">
+              <div className="metric-grid">
+                <div><b>{mlModels.length}</b><span>模型簇</span></div>
+                <div><b>{modelVersions.length}</b><span>模型版本</span></div>
+                <div><b>{trainingTemplates.length}</b><span>算法入口</span></div>
+                <div><b>{pythonEnvs.length}</b><span>环境资产</span></div>
+              </div>
+              <JobList title="推理队列" jobs={inferenceJobs} kind="inference" bare resultReserved onViewResults={viewInferenceResults} onDelete={deleteInferenceJob} />
+            </section>
           </div>
         )}
+        {view === "evaluation" && (activeEvaluationReportTask ? (
+          <EvaluationReportPage
+            task={activeEvaluationReportTask}
+            onBack={() => setActiveEvaluationReportTask(null)}
+          />
+        ) : activeEvaluationTask ? (
+          <EvaluationDetailPage
+            task={activeEvaluationTask}
+            onBack={() => setActiveEvaluationTask(null)}
+            onRunDetail={(task) => viewInferenceResults(task.sourceJob)}
+            onReport={setActiveEvaluationReportTask}
+          />
+        ) : (
+          <EvaluationPage
+            cluster={evaluationCluster}
+            setCluster={setEvaluationCluster}
+            type={evaluationType}
+            setType={setEvaluationType}
+            tasks={filteredEvaluationTasks}
+            onDetail={setActiveEvaluationTask}
+            onDelete={(taskId) => setHiddenEvaluationJobIds((ids) => Array.from(new Set([...ids, taskId])))}
+          />
+        ))}
         {view === "models" && (
           <div className="platform-grid">
             <section className="platform-card">
@@ -1038,11 +1276,16 @@ function PlatformPage({
               </div>
               <label>说明<textarea value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
               <button onClick={createTrainingTemplate}>创建训练模板</button>
-              <h2>运行环境</h2>
-              <label>环境名<input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="例如 miniforge-ultralytics" /></label>
-              <label>运行方式<select value={envForm.envType} onChange={(e) => setEnvForm({ ...envForm, envType: e.target.value })}>
+              <h2>运行环境资产</h2>
+              <label>环境名<input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="例如 linux-yolo-cuda" /></label>
+              <label>来源类型<select value={envForm.sourceType} onChange={(e) => setEnvForm({ ...envForm, sourceType: e.target.value })}>
+                <option value="server_python">服务器 Python 路径</option>
+                <option value="conda_pack">导入 conda-pack 包到云端</option>
+              </select></label>
+              <label>环境类型<select value={envForm.envType} onChange={(e) => setEnvForm({ ...envForm, envType: e.target.value })}>
                 <option value="miniforge">Miniforge</option>
                 <option value="conda">Conda</option>
+                <option value="conda-pack">Conda Pack</option>
               </select></label>
               <label>平台分类<select value={`${envForm.osType}:${envForm.arch}`} onChange={(e) => {
                 const [osType, arch] = e.target.value.split(":");
@@ -1056,8 +1299,17 @@ function PlatformPage({
                 <option value="cpu">CPU</option>
                 <option value="cuda">CUDA</option>
               </select></label>
-              <label>Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="D:\ProgramData\miniforge3\python.exe" /></label>
-              <button onClick={createPythonEnv}>登记运行环境</button>
+              {envForm.sourceType === "server_python" && (
+                <label>服务器 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="/home/administrator/miniforge3/envs/yolo/bin/python" /></label>
+              )}
+              {envForm.sourceType === "conda_pack" && (
+                <>
+                  <label>conda-pack 包路径<input value={envForm.condaPackPath} onChange={(e) => setEnvForm({ ...envForm, condaPackPath: e.target.value })} placeholder="/home/administrator/Projects/det-dashboard/runtime/datasets/envs/yolo.tar.gz" /></label>
+                  <label>云端解包路径<input value={envForm.unpackPath} onChange={(e) => setEnvForm({ ...envForm, unpackPath: e.target.value })} placeholder="留空则自动生成 runtime/python-envs/..." /></label>
+                  <label>解包后 Python 路径<input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="留空则使用 解包路径/bin/python" /></label>
+                </>
+              )}
+              <button onClick={createPythonEnv}>{envForm.sourceType === "conda_pack" ? "导入环境包到 MinIO" : "登记运行环境"}</button>
             </section>
             <section className="platform-card wide">
               <h2>模型列表</h2>
@@ -1095,15 +1347,16 @@ function PlatformPage({
                 ))}
                 {!trainingTemplates.length && <div className="empty-state">还没有训练模板。</div>}
               </div>
-              <h2>运行环境</h2>
+              <h2>运行环境资产</h2>
               <div className="model-list">
                 {pythonEnvs.map((env) => (
                   <article className="model-row" key={env.id}>
                     <div>
                       <b>{env.name}</b>
-                      <span>{env.os_type} {env.arch} · {env.env_type} · {env.accelerator?.toUpperCase()} · {env.status}</span>
+                      <span>{env.os_type} {env.arch} · {env.source_type === "conda_pack" ? "conda-pack 云端包" : env.env_type} · {env.accelerator?.toUpperCase()} · {env.status}</span>
                       <span>{env.python_version || "未知 Python"} · Torch {env.torch_version || "未检测"} · {env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU only"}</span>
-                      <span>{env.python_path}</span>
+                      <span>{env.artifact_key || env.python_path}</span>
+                      {env.unpack_path && <span>解包路径：{env.unpack_path}</span>}
                     </div>
                   </article>
                 ))}
@@ -1112,7 +1365,317 @@ function PlatformPage({
             </section>
           </div>
         )}
+        {activeInferenceResult && (
+          <InferenceResultDialog
+            resultState={activeInferenceResult}
+            onClose={() => setActiveInferenceResult(null)}
+          />
+        )}
       </main>
+    </div>
+  );
+}
+
+function EvaluationPage({ cluster, setCluster, type, setType, tasks, onDetail, onDelete }) {
+  const flowSteps = [
+    { title: "数据准备", description: "在“数据集管理”模块上传或标注原始数据（图像/文本/结构化数据）。" },
+    { title: "模型训练", description: "选择预训练基座模型，配置SFT（全量/LoRA/Prompt Tuning）或全参训练参数，提交训练任务。" },
+    { title: "模型推理", description: "从“模型管理”选择已训练好的版本，部署为在线服务或离线批量推理任务。" },
+    { title: "效果评估", description: "进入“测试评估入口”，加载推理结果，执行人工标注或基线模型比对。" },
+  ];
+
+  return (
+    <div className="evaluation-page">
+      <section className="evaluation-flow">
+        <div className="evaluation-flow-grid">
+          {flowSteps.map((step, index) => (
+            <article className="evaluation-flow-card" key={step.title}>
+              <div className="flow-step-head">
+                <span>{index + 1}</span>
+                <b>{step.title}</b>
+              </div>
+              <p>{step.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="evaluation-tasks platform-card">
+        <div className="evaluation-filters">
+          <label>模型簇
+            <select value={cluster} onChange={(event) => setCluster(event.target.value)}>
+              <option value="all">全部</option>
+              <option value="detect">目标检测</option>
+              <option value="segment">实例分割</option>
+              <option value="classify">图像分类</option>
+            </select>
+          </label>
+          <label>评估类型
+            <select value={type} onChange={(event) => setType(event.target.value)}>
+              <option value="all">全部</option>
+              <option value="training">训练模型</option>
+              <option value="inference">推理模型</option>
+            </select>
+          </label>
+        </div>
+        <div className="evaluation-table-wrap">
+          <table className="evaluation-table">
+            <thead>
+              <tr>
+                <th>任务名称</th>
+                <th>任务ID</th>
+                <th>模型簇</th>
+                <th>任务描述</th>
+                <th>创建人</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={task.id}>
+                  <td><b>{task.name}</b></td>
+                  <td>{task.id}</td>
+                  <td>{evaluationClusterLabels[task.cluster]}</td>
+                  <td>{task.description}</td>
+                  <td>{task.creator}</td>
+                  <td>{task.createdAt}</td>
+                  <td>
+                    <div className="evaluation-actions">
+                      <button type="button" onClick={() => onDetail(task)}>详情</button>
+                      <button
+                        type="button"
+                        className="danger-action"
+                        onClick={() => {
+                          if (window.confirm(`确认删除评估任务“${task.name}”？`)) onDelete(task.id);
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!tasks.length && (
+                <tr>
+                  <td colSpan="7">
+                    <div className="empty-state">当前筛选条件下没有评估任务。</div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EvaluationDetailPage({ task, onBack, onRunDetail, onReport }) {
+  const job = task.sourceJob || {};
+  const params = parseMaybeJson(job.params_json);
+  const modelText = job.model_name ? `${job.model_name}/${job.version_name || "版本"}` : "未指定模型版本";
+  const algorithmText = job.template_name || params.templateName || params.template_id || job.template_id || "默认推理算法";
+  const runRows = [
+    {
+      name: job.name || task.name,
+      status: runStatusLabel(job.status),
+      duration: formatDuration(job.created_at, job.finished_at || params.completedAt),
+      createdAt: formatDateTime(job.created_at),
+    },
+  ];
+
+  const detailItems = [
+    ["任务名称", task.name],
+    ["任务ID", task.id],
+    ["创建人", task.creator],
+    ["创建时间", task.createdAt],
+    ["任务描述", task.description],
+    ["模型簇", evaluationClusterLabels[task.cluster] || task.cluster],
+    ["算法名称", algorithmText],
+    ["加载权重", modelText],
+  ];
+
+  return (
+    <div className="evaluation-detail-page">
+      <div className="evaluation-detail-toolbar">
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />返回测试评估</button>
+      </div>
+      <section className="evaluation-detail-card platform-card">
+        <div className="section-title-row">
+          <h2>任务详情</h2>
+        </div>
+        <div className="evaluation-detail-grid">
+          {detailItems.map(([label, value]) => (
+            <div className="evaluation-detail-item" key={label}>
+              <span>{label}</span>
+              <b>{value || "--"}</b>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="evaluation-run-card platform-card">
+        <div className="evaluation-table-wrap">
+          <table className="evaluation-table evaluation-run-table">
+            <thead>
+              <tr>
+                <th>运行名称</th>
+                <th>运行状态</th>
+                <th>运行时长</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runRows.map((run) => (
+                <tr key={run.name}>
+                  <td><b>{run.name}</b></td>
+                  <td>{run.status}</td>
+                  <td>{run.duration}</td>
+                  <td>{run.createdAt}</td>
+                  <td>
+                    <div className="evaluation-run-actions">
+                      <button type="button" onClick={() => onRunDetail(task)}>详情</button>
+                      <button type="button">发布</button>
+                      <button type="button" onClick={() => onReport(task)}>评估报告</button>
+                      <button type="button">训练测试</button>
+                      <button type="button">测试追踪</button>
+                      <button type="button">启动测试</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EvaluationReportPage({ task, onBack }) {
+  const [expandedAp, setExpandedAp] = useState("类别");
+  const classes = ["车辆", "人员", "设备", "背景"];
+  const matrix = [
+    [96, 4, 2, 1],
+    [5, 88, 6, 3],
+    [1, 7, 91, 4],
+    [2, 3, 5, 84],
+  ];
+  const maxValue = Math.max(...matrix.flat());
+  const metrics = [
+    ["mAP@0.5", "92.6%"],
+    ["mAP@0.5:0.95", "76.4%"],
+    ["Precision", "90.8%"],
+    ["Recall", "88.7%"],
+  ];
+  const apGroups = [
+    { name: "类别", items: [["车辆", 0.94], ["人员", 0.89], ["设备", 0.86], ["背景", 0.81]] },
+    { name: "场景", items: [["城区", 0.91], ["道路", 0.88], ["园区", 0.85], ["夜间", 0.79]] },
+    { name: "视角", items: [["俯视", 0.9], ["平视", 0.87], ["侧视", 0.84], ["远景", 0.78]] },
+    { name: "模态", items: [["RGB", 0.9], ["IR", 0.83], ["融合", 0.92], ["低照度", 0.77]] },
+  ];
+  const activeGroup = apGroups.find((group) => group.name === expandedAp) || apGroups[0];
+  const reportTitle = `${task.name} 评估报告`;
+
+  return (
+    <div className="evaluation-report-page">
+      <div className="evaluation-detail-toolbar">
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />返回任务详情</button>
+      </div>
+      <div className="report-top-grid">
+        <section className="platform-card report-metrics-card">
+          <h2>概览指标</h2>
+          <p>{reportTitle}</p>
+          <div className="report-metric-grid">
+            {metrics.map(([label, value]) => (
+              <div className="report-metric" key={label}>
+                <span>{label}</span>
+                <b>{value}</b>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="platform-card confusion-card">
+          <h2>混淆矩阵热力图</h2>
+          <div className="confusion-axis-label predicted">预测类别（Predicted）</div>
+          <div className="confusion-layout">
+            <div className="confusion-axis-label ground">真实类别（Ground Truth）</div>
+            <div className="confusion-grid" style={{ gridTemplateColumns: `72px repeat(${classes.length}, minmax(58px, 1fr))` }}>
+              <div />
+              {classes.map((label) => <b className="confusion-label" key={label}>{label}</b>)}
+              {classes.map((truth, rowIndex) => (
+                <React.Fragment key={truth}>
+                  <b className="confusion-label">{truth}</b>
+                  {classes.map((predicted, colIndex) => {
+                    const value = matrix[rowIndex][colIndex];
+                    const ratio = value / maxValue;
+                    const background = rowIndex === colIndex
+                      ? `rgba(255, ${Math.round(245 - ratio * 80)}, ${Math.round(155 - ratio * 80)}, .96)`
+                      : `rgba(${Math.round(95 + ratio * 155)}, ${Math.round(180 - ratio * 120)}, ${Math.round(220 - ratio * 170)}, .9)`;
+                    return (
+                      <div
+                        className="confusion-cell"
+                        key={`${truth}-${predicted}`}
+                        style={{ background }}
+                        title={`真实类别：${truth}；预测类别：${predicted}；数量：${value}`}
+                      >
+                        {value}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+      <section className="platform-card report-ap-card">
+        <h2>AP 值</h2>
+        <div className="ap-card-strip">
+          {apGroups.map((group) => (
+            <button
+              type="button"
+              className={expandedAp === group.name ? "ap-dimension-card active" : "ap-dimension-card"}
+              key={group.name}
+              onClick={() => setExpandedAp(group.name)}
+            >
+              <span>{group.name}统计</span>
+              <b>{(group.items.reduce((sum, item) => sum + item[1], 0) / group.items.length * 100).toFixed(1)}%</b>
+            </button>
+          ))}
+        </div>
+        <div className="pr-curve-panel">
+          <div>
+            <h3>{activeGroup.name}维度 PR 曲线</h3>
+            <p>点击上方维度卡片可切换展开内容。</p>
+          </div>
+          <div className="pr-bars">
+            {activeGroup.items.map(([label, value]) => (
+              <div className="pr-row" key={label}>
+                <span>{label}</span>
+                <i><em style={{ width: `${value * 100}%` }} /></i>
+                <b>{(value * 100).toFixed(1)}%</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className="platform-card bbox-compare-card">
+        <h2>预测框与标注框对比</h2>
+        <div className="bbox-compare-stage">
+          <div className="bbox-image">
+            <div className="bbox gt one"><span>GT: 车辆</span></div>
+            <div className="bbox pred one"><span>Pred: 车辆 0.94</span></div>
+            <div className="bbox gt two"><span>GT: 人员</span></div>
+            <div className="bbox pred two"><span>Pred: 人员 0.87</span></div>
+          </div>
+          <div className="bbox-legend">
+            <span><i className="gt-color" />标注框</span>
+            <span><i className="pred-color" />预测框</span>
+            <p>用于快速检查预测框与人工标注框的重合程度、漏检与误检位置。</p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1122,17 +1685,18 @@ function MainNav({ view, goHome, openPlatform }) {
     <nav className="main-nav">
       <div className="brand-mark">
         <Boxes size={18} />
-        <span>209所AI集成化平台</span>
+        <span>AI集成化平台</span>
       </div>
       <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据集管理</button>
       <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练平台</button>
       <button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理平台</button>
+      <button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />测试评估</button>
       <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />模型管理</button>
     </nav>
   );
 }
 
-function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = false }) {
+function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, onViewResults, onDelete, bare = false, resultReserved = false }) {
   const Tag = bare ? "div" : "section";
   return (
     <Tag className={bare ? "job-panel" : "platform-card wide job-panel"}>
@@ -1152,12 +1716,115 @@ function JobList({ title, jobs, kind, activeId, setActiveId, onRequeue, bare = f
               {onRequeue && !["pending", "preparing", "running"].includes(job.status) && (
                 <button onClick={(event) => { event.stopPropagation(); onRequeue(job.id); }}>重新入队</button>
               )}
+              {resultReserved && onViewResults && (
+                <button
+                  className={job.status === "done" ? "result-ready" : ""}
+                  disabled={job.status !== "done"}
+                  title={job.status === "done" ? "查看推理结果" : "任务完成后可查看结果"}
+                  onClick={(event) => { event.stopPropagation(); onViewResults(job); }}
+                >
+                  查看结果
+                </button>
+              )}
+              {onDelete && (
+                <button className="danger-icon" title="删除任务" onClick={(event) => { event.stopPropagation(); onDelete(job.id); }}><Trash2 size={14} />删除</button>
+              )}
             </div>
           </article>
         ))}
         {!jobs.length && <div className="empty-state">队列为空。</div>}
       </div>
     </Tag>
+  );
+}
+
+function predictionItems(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value.predictions) ? value.predictions : [];
+}
+
+function parseMaybeJson(value) {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+function metricValue(metrics, keys) {
+  for (const key of keys) {
+    const value = metrics?.[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  if (number >= 0 && number <= 1) return `${(number * 100).toFixed(2)}%`;
+  return number.toFixed(2);
+}
+
+function InferenceResultDialog({ resultState, onClose }) {
+  const { job, results, loading } = resultState;
+  const rows = results || [];
+  const totalPredictions = rows.reduce((sum, row) => sum + predictionItems(row.predictions_json).length, 0);
+  const params = parseMaybeJson(job.params_json);
+  const output = params.output || {};
+  const metrics = output.metrics || params.metrics || {};
+  const outputPath = output.predictionsPath || rows.find((row) => row.artifact_path)?.artifact_path || job.output_root || "";
+  const metricCards = [
+    ["Precision", ["precision", "Precision", "p", "P"]],
+    ["Recall", ["recall", "Recall", "r", "R"]],
+    ["mAP50", ["map50", "mAP50", "map_50", "mAP_50"]],
+    ["mAP50-95", ["map", "mAP", "map5095", "mAP50-95", "map_50_95"]],
+  ];
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="result-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="section-title-row">
+          <div>
+            <h2>推理结果</h2>
+            <p className="muted">{job.name} · {job.dataset_project_name || "未绑定数据集"}</p>
+          </div>
+          <button onClick={onClose}><X size={14} /></button>
+        </div>
+        <div className="result-summary">
+          <div><span>任务状态</span><b>{job.status}</b></div>
+          <div><span>图片结果</span><b>{loading ? "..." : rows.length}</b></div>
+          <div><span>预测数量</span><b>{loading ? "..." : totalPredictions}</b></div>
+        </div>
+        <div className="metric-summary">
+          {metricCards.map(([label, keys]) => (
+            <div key={label}><span>{label}</span><b>{loading ? "..." : formatMetric(metricValue(metrics, keys))}</b></div>
+          ))}
+        </div>
+        <div className="result-path">
+          <span>输出文件路径</span>
+          <b>{outputPath || "暂无输出文件路径"}</b>
+        </div>
+        {loading ? (
+          <div className="empty-state">正在读取结果...</div>
+        ) : !rows.length && (
+          <div className="muted">暂无图片级结果明细。</div>
+        )}
+      </div>
+    </div>
   );
 }
 
