@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft,
@@ -71,6 +71,7 @@ function App() {
   const [envForm, setEnvForm] = useState({ name: "", pythonPath: "", envType: "miniforge", osType: "windows", arch: "x86_64", accelerator: "cpu" });
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
   const [trainingLogs, setTrainingLogs] = useState([]);
+  const importRefreshKeyRef = useRef("");
 
   useEffect(() => {
     refreshHome();
@@ -94,6 +95,15 @@ function App() {
     }, 1500);
     return () => window.clearInterval(timer);
   }, [activeProject]);
+
+  useEffect(() => {
+    if (!activeProject) return;
+    const terminalImport = imports.find((row) => ["done", "failed", "cancelled"].includes(row.status));
+    const refreshKey = terminalImport ? `${activeProject.id}:${terminalImport.id}:${terminalImport.status}:${terminalImport.finished_at || ""}` : "";
+    if (!refreshKey || importRefreshKeyRef.current === refreshKey) return;
+    importRefreshKeyRef.current = refreshKey;
+    loadWorkspace(activeProject.id);
+  }, [activeProject, imports]);
 
   useEffect(() => {
     if (!["training", "inference", "models"].includes(view)) return;
