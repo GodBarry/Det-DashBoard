@@ -36,6 +36,12 @@ function sendError(res, code, message) {
   sendJson(res, { error: message }, code);
 }
 
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function psQuote(value) {
   return `'${String(value || "").replace(/'/g, "''")}'`;
 }
@@ -182,9 +188,9 @@ function listFolders(target, scope = "browse") {
   const root = scope === "data" ? dataRoot : browseRoot;
   const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
   const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
-  if (!isInsideRoot(root, current)) throw new Error(`路径必须位于浏览根目录内：${displayRoot}`);
+  if (!isInsideRoot(root, current)) throw httpError(403, `路径必须位于浏览根目录内：${displayRoot}`);
   const stat = fs.statSync(current);
-  if (!stat.isDirectory()) throw new Error("路径必须是文件夹");
+  if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
   const dirs = fs.readdirSync(current, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -670,10 +676,10 @@ async function importPath(body) {
     throw error;
   }
   const sourcePath = toInternalDataPath(body.sourcePath || "");
-  if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("导入路径不存在");
-  if (!fs.statSync(sourcePath).isDirectory()) throw new Error("导入路径必须是文件夹");
+  if (!sourcePath || !fs.existsSync(sourcePath)) throw httpError(400, "导入路径不存在");
+  if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "导入路径必须是文件夹");
   if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(browseRoot, sourcePath)) {
-    throw new Error(`导入路径必须位于浏览根目录内：${browseRootDisplay}`);
+    throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
   }
   body.sourcePath = sourcePath;
 

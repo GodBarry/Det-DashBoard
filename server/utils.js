@@ -133,7 +133,7 @@ function quickHash(filePath) {
 
 function safeReadJson(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    return JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
   } catch {
     return null;
   }
