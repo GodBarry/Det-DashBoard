@@ -50,6 +50,7 @@ function App() {
   const [activeConflictId, setActiveConflictId] = useState(null);
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [importPath, setImportPath] = useState("");
+  const [exportFormat, setExportFormat] = useState("labelme");
   const [browseBusy, setBrowseBusy] = useState(false);
   const [dirPicker, setDirPicker] = useState(null);
   const [dirPickerBusy, setDirPickerBusy] = useState(false);
@@ -529,7 +530,7 @@ function App() {
     fetch(`/api/projects/${activeProject.id}/export`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ format: exportFormat }),
     })
       .then((r) => r.json().then((data) => {
         if (!r.ok) throw new Error(data.error || "导出失败");
@@ -664,6 +665,13 @@ function App() {
           <p>{summary?.image_count || 0} 图片 · {summary?.video_count || 0} 视频 · {summary?.annotation_count || 0} 标注</p>
         </div>
         <button className="primary" onClick={importData}><Import size={16} />导入数据</button>
+        <label className="export-format">导出格式
+          <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
+            <option value="labelme">LabelMe</option>
+            <option value="coco">COCO</option>
+            <option value="yolo">YOLO</option>
+          </select>
+        </label>
         <button className="warning" onClick={exportProject}><Upload size={16} />导出数据集</button>
       </header>
       <div className="workspace-layout">

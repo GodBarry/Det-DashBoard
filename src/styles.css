@@ -68,6 +68,24 @@ button { cursor: pointer; }
 h1, h2, h3, p { margin: 0; }
 .app-header h1 { font-size: 19px; }
 .app-header p, .muted { color: #8fa3ae; font-size: 12px; }
+.export-format {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 8px;
+  color: #9fb3bd;
+  font-size: 12px;
+  background: rgba(15, 23, 31, .85);
+}
+.export-format select {
+  border: 0;
+  outline: 0;
+  color: #e5f0f4;
+  background: #15232c;
+}
 button {
   border: 1px solid rgba(148, 163, 184, .2);
   border-radius: 8px;

@@ -1,446 +1,631 @@
-# 目标检测数据集管理平台
+# Det-DashBoard
 
-React + Vite + Node.js 单页应用，用于管理目标检测数据集资产。当前主线已经从早期的“本地目录扫描原型”演进为 PostgreSQL + 对象存储的项目化工作台。
+Det-DashBoard 是一个面向目标检测数据集的本地管理平台，提供项目管理、多格式数据导入、场景属性识别、图片预览、LabelMe 标注、多格式数据导出、基准数据集合并以及模型任务管理。
 
-## 当前能力
-
-- 项目管理：新建项目、项目回收站、恢复和清空回收站。
-- 数据导入：从服务端路径递归导入图片、LabelMe JSON 和视频。
-- 资产存储：图片和视频按 SHA256 去重，元数据写入 PostgreSQL，对象写入 MinIO；MinIO 不可用时后端会退回本地 fallback 对象目录。
-- 数据预览：分页缩略图、场景/视角/模态/类别/导入批次筛选、详情面板。
-- 标注编辑：图片查看器支持缩放、平移、左右切换、画框、移动/缩放框、删除框和保存标注。
-- 导入管理：导入记录、导入取消、导入回收站。
-- 导出：按 `dataset/images` 和 `dataset/jsons` 结构导出 LabelMe 数据。
-- 基准数据集：多项目按图片资产去重，基于 IoU 和来源优先级生成基准项目。
-- 模型平台雏形：模型族、模型版本、训练模板、Python 环境、训练队列、训练日志和推理任务记录。
-
-## 主要入口
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/main.jsx` | 前端主应用，当前 UI 主要调用项目化 API。 |
-| `server/postgres-app.js` | 正式后端入口，连接 PostgreSQL，并通过 MinIO/本地 fallback 存对象。 |
-| `server.js` | 早期轻量后端，只做本地目录扫描、缩略图和导出；不匹配当前前端主线。 |
-| `db/schema.sql` | 基础数据库 schema。部分新增表由 `server/postgres-app.js` 启动时补齐。 |
-| `docs/architecture.md` | 原始正式架构说明。 |
-| `docker-compose.yml` | PostgreSQL + MinIO 开发依赖。 |
-
-## 运行要求
-
-- Node.js 20+ 和 npm
-- PostgreSQL 16+
-- 可选：MinIO
-- 可选：Docker Compose，用于一键启动 PostgreSQL 和 MinIO
-
-当前仓库带有一个 `runtime/node/node.exe`，它是 Windows 可执行文件，Linux 下不能运行。
-
-## 配置
-
-后端通过环境变量读取配置：
-
-```bash
-PORT=4177
-DATA_ROOT=/path/to/dataset-root
-STORAGE_ROOT=/path/to/det-dashboard-storage
-DATABASE_URL=postgres://det:det_password@localhost:5432/det_dashboard
-MINIO_ENDPOINT=localhost
-MINIO_PORT=9000
-MINIO_USE_SSL=false
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=zbh-datasets
-```
-
-Windows 原环境示例：
-
-```powershell
-$env:DATA_ROOT = "F:\ZBH"
-$env:STORAGE_ROOT = "F:\ZBH\zhuji"
-$env:DATABASE_URL = "postgres://det:det_password@localhost:5432/det_dashboard"
-```
-
-Linux 示例：
-
-```bash
-export DATA_ROOT="$PWD/runtime/data-root"
-export STORAGE_ROOT="$PWD/runtime"
-export DATABASE_URL="postgres://det:det_password@127.0.0.1:55434/det_dashboard"
-```
-
-注意：前端导入时填写的 `sourcePath` 必须位于 `DATA_ROOT` 之内，否则后端会拒绝导入。
-
-## 使用 Docker Compose 启动依赖
-
-复制并按机器情况调整 `.env.example`：
-
-```bash
-cp .env.example .env
-```
-
-启动 PostgreSQL 和 MinIO：
-
-```bash
-docker compose up -d
-```
-
-初始化 schema：
-
-```bash
-psql "$DATABASE_URL" -f db/schema.sql
-```
-
-如果使用 Docker Compose 默认配置，连接串是：
-
-```bash
-export DATABASE_URL="postgres://det:det_password@localhost:5432/det_dashboard"
-```
-
-## 启动后端和前端
-
-安装依赖：
-
-```bash
-npm install
-```
-
-启动正式后端：
-
-```bash
-npm run api:pg
-```
-
-另开终端启动前端：
-
-```bash
-npm run dev
-```
-
-默认访问：
-
-- 前端：`http://localhost:5173`
-- API：`http://localhost:4177`
-- MinIO Console：`http://localhost:9001`
-
-Vite 已把 `/api` 代理到 `http://localhost:4177`。
-
-## 便携 Docker 一体启动
-
-如果希望把项目复制到 U 盘，再放到另一台 Ubuntu 机器运行，推荐使用便携 Compose 配置。核心功能只要求目标机器安装 Docker 和 Docker Compose 插件。
-
-目录约定：
+当前正式运行架构为：
 
 ```text
-Det-DashBoard/
-  datasets/          # 要导入的数据集目录，复制或挂载到这里
-  portable-data/     # PostgreSQL、MinIO 和对象 fallback 数据
+Browser
+   │ http://localhost:5173
+   ▼
+Node.js API + React 静态页面
+   ├── PostgreSQL：项目、资产、标注、任务元数据
+   ├── MinIO：图片、视频、JSON 和导出对象
+   └── Ubuntu 只读目录挂载：浏览并导入本机数据
 ```
 
-启动：
+推荐通过 Docker Compose 运行。开发模式也支持分别启动 PostgreSQL、MinIO、后端和 Vite。
+
+## 功能概览
+
+- 项目管理：新建、删除、回收站、恢复和永久清理。
+- 数据导入：递归导入图片、视频、LabelMe、标准 COCO 和 YOLO 检测/分割标注。
+- 资产去重：按照 SHA-256 去重，避免同一原始文件重复存储。
+- 场景识别：优先读取 JSON 的 `scene`，缺失时从目录层级自动推断场景或日期。
+- 数据浏览：分页缩略图、详情查看、缩放、平移和多条件筛选。
+- 筛选属性：场景、视角、模态、标注类别和导入批次。
+- 标注编辑：绘制、移动、缩放、删除检测框并保存 LabelMe 标注。
+- 导入管理：查看进度、取消导入、删除批次和恢复批次。
+- 数据导出：后台导出 LabelMe、标准 COCO 或 YOLO 检测数据集。
+- 基准数据集：多项目资产去重、IoU 冲突检查和来源优先级合并。
+- 模型平台：模型族、模型版本、训练模板、Python 环境、训练日志和推理任务记录。
+
+## 快速开始
+
+### 1. 环境要求
+
+推荐环境：
+
+- Ubuntu 22.04 或更新版本
+- Docker Engine
+- Docker Compose Plugin（支持 `docker compose`）
+- 至少 4 GB 可用内存
+- 足够容纳 PostgreSQL、MinIO 对象及导出数据的磁盘空间
+
+原生 Ubuntu 文件夹选择器还需要宿主机具有：
+
+- Node.js
+- `zenity`
+- 可用的图形桌面会话
+
+这些组件不是核心依赖；缺失时会自动使用网页文件夹选择器。
+
+### 2. 克隆项目
 
 ```bash
-cd /path/to/Det-DashBoard
+git clone https://github.com/GodBarry/Det-DashBoard.git
+cd Det-DashBoard
+git switch ZBH
+```
+
+### 3. 首次配置
+
+复制便携部署配置：
+
+```bash
 cp .env.portable.example .env.portable
-# 首次运行前修改 .env.portable 中的数据库与 MinIO 密码
+```
+
+编辑 `.env.portable`，至少修改以下密码：
+
+```dotenv
+POSTGRES_PASSWORD=请替换为强密码
+MINIO_ROOT_PASSWORD=请替换为强密码
+```
+
+`.env.portable` 不会提交到 Git。
+
+### 4. 启动
+
+```bash
 bash scripts/portable-start.sh
 ```
 
-访问：
+脚本会完成以下工作：
 
-```text
-http://localhost:5173
-```
+1. 创建运行数据目录。
+2. 构建应用镜像。
+3. 启动 PostgreSQL 和 MinIO。
+4. 迁移旧版 root 数据目录权限。
+5. 等待依赖和应用健康检查通过。
+6. 在条件允许时启动 Ubuntu 原生目录选择桥接。
 
-便携模式下，容器内的数据根目录是：
+启动成功后访问：
 
-```text
-/data/datasets
-```
+- 应用：http://localhost:5173
+- MinIO API：http://localhost:59000
+- MinIO Console：http://localhost:59001
+- PostgreSQL：`127.0.0.1:55432`
 
-如果宿主机同时具备 Node.js、`zenity` 和图形会话，启动脚本会启动一个仅监听 `127.0.0.1:4178` 的文件夹选择桥接服务。“浏览”会优先调用宿主机原生选择器；桥接不可用时直接使用网页目录选择器，因此 Docker 核心功能不依赖宿主机 Node.js。取消原生选择不会触发回退。
+所有端口默认只监听 `127.0.0.1`。
 
-便携模式默认将宿主机 `/` 以只读方式挂载到容器 `/host/browse`，所以网页目录选择器可以浏览整个 Ubuntu 文件系统，页面上仍显示宿主机原始路径。数据集目录另行只读挂载到 `/data/datasets`；PostgreSQL、MinIO 和应用持久数据保存在 `portable-data/`。默认导入会把对象写入 MinIO，移动源文件后仍可使用；只有明确设置 `OBJECT_STORE_WRITE_FALLBACK=true` 时才启用本地链接/回退模式。
-
-导出不向只读的宿主机根挂载写数据，而是统一写入项目的 `exports/` 目录。可通过 `.env.portable` 的 `EXPORTS_DIR` 把该目录映射到其他宿主机位置。导出任务在后台执行，页面的任务进度不会被长时间 HTTP 请求阻塞。
-
-所有端口默认仅绑定 `127.0.0.1`。本应用目前没有用户认证，不应直接暴露到公网或不可信局域网。如需收窄文件浏览范围，在 `.env.portable` 设置 `HOST_BROWSE_ROOT` 和 `BROWSE_ROOT_DISPLAY`。
-
-构建并发布镜像：
+### 5. 查看状态
 
 ```bash
-docker build -t ghcr.io/<owner>/det-dashboard:<version> .
-docker push ghcr.io/<owner>/det-dashboard:<version>
+docker compose --env-file .env.portable -f docker-compose.portable.yml ps
 ```
 
-使用已发布镜像而不在目标机器重新构建：
+正常状态下，`app`、`postgres`、`minio` 应显示为 `healthy`；`permissions` 是一次性初始化服务，正常状态为退出码 `0`。
+
+查看日志：
 
 ```bash
-APP_IMAGE=ghcr.io/<owner>/det-dashboard:<version> \
-BUILD_LOCAL_IMAGE=false \
-bash scripts/portable-start.sh
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f app
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f postgres
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f minio
 ```
 
-仓库内的 GitHub Actions 会在 `main`、`ZBH` 和 Pull Request 上执行前端与 Docker 多架构构建验证；推送 `v*` 标签时会把 `linux/amd64`、`linux/arm64` 镜像发布到当前仓库的 GHCR Package。
-
-停止：
+### 6. 停止
 
 ```bash
 bash scripts/portable-stop.sh
 ```
 
-## 使用 Docker 访问复制来的真实数据
+停止不会删除数据库、对象、导出结果或配置。
 
-如果要访问从另一台机器完整复制来的真实数据，使用专门的 compose 文件：
+## Docker 服务与目录
 
-```bash
-docker compose -f docker-compose.real-data.yml up -d
-```
+### 服务
 
-如果当前机器还没有 Docker，先执行：
+| 服务 | 作用 | 默认宿主端口 |
+| --- | --- | --- |
+| `app` | Node.js API、任务执行和 React 页面 | `5173` |
+| `postgres` | 业务数据库 | `55432` |
+| `minio` | 对象存储 API 和控制台 | `59000`、`59001` |
+| `permissions` | 一次性迁移持久化目录 UID/GID | 无 |
 
-```bash
-bash scripts/install-docker-ubuntu.sh
-newgrp docker
-```
-
-然后启动真实数据容器：
-
-```bash
-bash scripts/start-real-data-docker.sh
-```
-
-这个模式会启动：
-
-- PostgreSQL 16：挂载 `runtime/postgres`，宿主机端口 `55432`
-- MinIO：挂载 `runtime/minio`，API 端口 `9000`，控制台端口 `9001`
-
-这些端口默认只绑定到 `127.0.0.1`，用于本机 API 访问。
-
-启动 API 时切到真实数据连接串：
-
-```bash
-bash scripts/start-real-data-api.sh
-```
-
-真实数据模式下，`scripts/start-real-data-api.sh` 默认设置 `DATA_ROOT=/home/barry/图片`。导入框里填写的路径必须位于这个目录下，例如：
+### 持久化目录
 
 ```text
-/home/barry/图片/最新统计/统计用/山地
-/home/barry/图片/统计用/山地
+Det-DashBoard/
+├── datasets/                 # 默认数据集挂载目录
+├── exports/                  # 导出结果
+└── portable-data/
+    ├── postgres/             # PostgreSQL 数据
+    ├── minio/                # MinIO 对象
+    └── storage/              # 缩略图、临时文件和 fallback 对象
 ```
 
-检查容器状态：
+需要迁移或备份时，至少保存：
 
-```bash
-docker compose -f docker-compose.real-data.yml ps
-docker logs det-dashboard-postgres-real
-docker logs det-dashboard-minio-real
+- `.env.portable`
+- `portable-data/`
+- `exports/`
+- 仍采用链接模式时的原始数据目录
+
+## 配置说明
+
+便携部署配置位于 `.env.portable`。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `APP_BIND_ADDRESS` | `127.0.0.1` | Web 服务监听地址 |
+| `APP_PORT` | `5173` | Web 服务宿主端口 |
+| `APP_IMAGE` | `det-dashboard:local` | 应用镜像名称 |
+| `BUILD_LOCAL_IMAGE` | `true` | 是否在启动时构建镜像 |
+| `DB_PORT` | `55432` | PostgreSQL 宿主端口 |
+| `POSTGRES_DB` | `det_dashboard` | 数据库名称 |
+| `POSTGRES_USER` | `det` | 数据库用户 |
+| `POSTGRES_PASSWORD` | 无安全默认值 | 数据库密码 |
+| `MINIO_HOST_PORT` | `59000` | MinIO API 宿主端口 |
+| `MINIO_CONSOLE_HOST_PORT` | `59001` | MinIO 控制台宿主端口 |
+| `MINIO_ROOT_USER` | `minioadmin` | MinIO 管理用户 |
+| `MINIO_ROOT_PASSWORD` | 无安全默认值 | MinIO 管理密码 |
+| `MINIO_BUCKET` | `zbh-datasets` | 对象 bucket |
+| `HOST_BROWSE_ROOT` | `/` | 容器允许浏览的宿主目录 |
+| `BROWSE_ROOT_DISPLAY` | `/` | 页面显示的浏览根路径 |
+| `EXPORTS_DIR` | `./exports` | 宿主机导出目录 |
+| `OBJECT_STORE_WRITE_FALLBACK` | `false` | 是否使用本地链接/fallback 写入模式 |
+
+### 收窄文件系统访问范围
+
+默认配置将 Ubuntu `/` 只读挂载到容器，便于浏览整个本机文件系统。若只需访问指定数据目录，建议改为：
+
+```dotenv
+HOST_BROWSE_ROOT=/home/barry/图片
+BROWSE_ROOT_DISPLAY=/home/barry/图片
 ```
 
-检查 PostgreSQL：
+该挂载始终为只读；应用只会写入专用的 `portable-data/storage` 和 `exports` 挂载。
 
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" \
-psql "postgres://det:det_password@127.0.0.1:55432/det_dashboard" -c "select current_database(), current_user;"
+### 独立对象模式与链接模式
+
+默认设置：
+
+```dotenv
+OBJECT_STORE_WRITE_FALLBACK=false
 ```
 
-注意：
+导入对象会写入 MinIO，移动或删除原始文件后仍能使用，更适合备份和迁移。
 
-- `runtime/postgres` 是 PostgreSQL 16 数据目录，必须用 PostgreSQL 16 容器或 PG16 程序启动。
-- `docker-compose.real-data.yml` 使用 `db/pg_hba.real-data.conf` 覆盖容器内认证配置，不直接修改 `runtime/postgres/pg_hba.conf`。该配置只用于本机开发，默认 trust 认证。
-- 容器启动时会移除复制残留的 `runtime/postgres/postmaster.pid`，并把 `runtime/postgres` 目录权限改成 `700`，这是 PostgreSQL 接管复制数据目录所必需的。
-- compose 默认用 `LOCAL_UID=1000` 和 `LOCAL_GID=1000` 运行 PostgreSQL，匹配当前 Linux 用户，避免 Docker 自动把复制来的数据目录改成容器用户所有。
-- 如果当前机器没有 Docker，需要先安装 Docker 或换到已有 Docker 的机器运行这些命令。
+设置为 `true` 时，后端优先创建硬链接或符号链接，减少大数据集的重复占用：
 
-## 当前 Linux 本地无 sudo 启动方式
-
-如果机器没有系统级 Node.js、Docker 或 PostgreSQL，可以使用项目内 Conda 环境启动。本仓库当前已按这种方式验证过。
-
-确认运行时：
-
-```bash
-cd /home/barry/projects/det-dashboard
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" node --version
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" npm --version
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" psql --version
+```dotenv
+OBJECT_STORE_WRITE_FALLBACK=true
 ```
 
-安装/修复 Linux 原生依赖：
+链接模式依赖原文件路径；移动、重命名或删除源数据会造成对象不可读。
 
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" npm install
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" npm install --no-save --prefer-offline \
-  @rolldown/binding-linux-x64-gnu@1.1.3 \
-  lightningcss-linux-x64-gnu@1.32.0 \
-  @img/sharp-linux-x64@0.35.2 \
-  @img/sharp-libvips-linux-x64@1.3.1
-```
+## 数据导入
 
-当前复制来的 `runtime/postgres` 是 PostgreSQL 16 数据目录，而本地 Conda 提供的是 PostgreSQL 17，不要用 PG17 强行启动旧目录。没有 PostgreSQL 16 可执行文件时，使用新的开发目录：
+### 基本流程
 
-```bash
-mkdir -p runtime/postgres17-local runtime/pg-run-local runtime/data-root
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" initdb -D "$PWD/runtime/postgres17-local" --encoding=UTF8 --locale=C --auth=trust
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" pg_ctl \
-  -D "$PWD/runtime/postgres17-local" \
-  -l "$PWD/runtime/postgres17-local.log" \
-  -o "-p 55434 -k $PWD/runtime/pg-run-local -c listen_addresses=127.0.0.1" \
-  start
-```
+1. 打开 http://localhost:5173。
+2. 新建项目并进入项目。
+3. 点击“导入数据”。
+4. 点击“浏览”或输入 Ubuntu 文件夹路径。
+5. 确认目录后点击“开始导入”。
+6. 在页面查看扫描与导入进度。
 
-创建本地数据库并导入 schema：
+同一项目同一时间只允许一个导入任务。服务重启会将未完成任务标记为失败，避免任务永久停留在 `running`。
 
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" psql -h 127.0.0.1 -p 55434 -d postgres \
-  -c "CREATE ROLE det LOGIN PASSWORD 'det_password';" \
-  -c "CREATE DATABASE det_dashboard OWNER det;"
+### 支持的文件
 
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" psql -h 127.0.0.1 -p 55434 -U det -d det_dashboard -f db/schema.sql
-```
-
-启动 API：
-
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" \
-PORT=4177 \
-DATA_ROOT="$PWD/runtime/data-root" \
-STORAGE_ROOT="$PWD/runtime" \
-DATABASE_URL="postgres://det:det_password@127.0.0.1:55434/det_dashboard" \
-MINIO_DATA_DIR="$PWD/runtime/minio" \
-MINIO_ENDPOINT=127.0.0.1 \
-MINIO_PORT=9000 \
-MINIO_USE_SSL=false \
-MINIO_ACCESS_KEY=minioadmin \
-MINIO_SECRET_KEY=minioadmin \
-MINIO_BUCKET=zbh-datasets \
-TRAINING_WORKER_ENABLED=false \
-npm run api:pg
-```
-
-启动前端：
-
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" npm run dev -- --host 0.0.0.0
-```
-
-已验证地址：
-
-- 前端：`http://localhost:5173/`
-- API：`http://localhost:4177/api/projects`
-
-如果 MinIO 服务未启动，API 会打印 `MinIO unavailable, using local object files for reads and fallback for new objects`。读取时会直接查找 `runtime/minio/zbh-datasets/<object_key>` 和 `object-store-fallback/`；新写入对象会进入 `runtime/object-store-fallback/`。如果 MinIO 服务可用但单次读写失败，例如触发 MinIO 最低空闲磁盘阈值，API 也会退回本地 fallback。
-
-真实数据模式下，`scripts/start-real-data-api.sh` 默认设置 `OBJECT_STORE_WRITE_FALLBACK=true`。导入本机已有图片时，fallback 会优先创建硬链接；如果系统策略不允许硬链接，会创建符号链接，避免把 `/home/barry/图片` 下的大图再复制一份到项目目录。
-
-如果导入中途因为磁盘空间失败，可以先查看最近导入批次：
-
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" \
-psql "postgres://det:det_password@127.0.0.1:55432/det_dashboard" \
-  -c "select id, source_path, status, total_files, processed_files, message from import_batches order by created_at desc limit 5;"
-```
-
-确认某个失败批次只需要清理半成品后，可先 dry-run：
-
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" node scripts/cleanup-failed-import.js <import_batch_id>
-```
-
-再执行清理：
-
-```bash
-PATH="$PWD/.conda-det-dashboard/bin:$PATH" node scripts/cleanup-failed-import.js <import_batch_id> --apply
-```
-
-## 不使用 MinIO 的本地 fallback 模式
-
-`server/object-store.js` 会在 MinIO 服务不可用时先读取复制来的 MinIO 磁盘布局：
+图片：
 
 ```text
-runtime/minio/zbh-datasets/<object_key>
+.jpg .jpeg .png .bmp .webp
 ```
 
-它同时兼容 MinIO 的 `part.1` 对象布局。新对象会写入：
+视频：
 
 ```text
-<STORAGE_ROOT>/object-store-fallback/
+.mp4 .avi .mov .mkv .wmv
 ```
 
-这适合本地开发和抢救启动。已经写入数据库的对象 key 必须能在 MinIO、`runtime/minio/zbh-datasets` 或 fallback 目录中找到，否则预览会出现对象缺失错误。
+标注：当前支持以下格式：
 
-## 数据导入流程
+- LabelMe：每张图片一个 JSON，矩形或其他点集会统一转换为检测框。
+- COCO：单个 JSON 中包含 `images`、`categories`、`annotations`；读取 `bbox`，同时保留 `segmentation` 等原始属性。
+- YOLO：支持归一化检测框和多边形分割行；分割多边形导入后使用其外接检测框。类别名从 `data.yaml`、`dataset.yaml` 或 `.names` 读取。
 
-1. 新建项目。
-2. 打开项目，点击“导入数据”。
-3. 输入服务端可访问的目录，例如 `F:\ZBH\统计用\山地` 或 Linux 下的 `$DATA_ROOT/统计用/山地`。
-4. 后端递归扫描图片、JSON 和视频。
-5. JSON 优先按 `imagePath`、同名文件、`images/` 子目录等规则匹配图片。
-6. 场景属性优先使用 JSON 的 `scene`；缺失时从图片目录向上推断，自动跳过 `images`、`jsons`、`annotations`、`train`、`val`、`visible`、`infrared` 等结构目录，采用最近的场景/日期分类目录。
-7. 启动时会对结构明确的历史 `UnknownScene` 批次做保守回填；多场景且无法无歧义定位的旧批次不会被猜测性覆盖。
-8. 每次导入生成新的 `label_versions`，并设置为项目 active label version。
+LabelMe JSON 会按照以下顺序尝试匹配图片：
 
-支持的 LabelMe JSON 关键字段：
+1. `imagePath` 相对路径。
+2. JSON 同目录或上级目录中的图片。
+3. 相邻 `images/` 目录。
+4. 同名图片和 JSON。
+
+支持类似 COCO 的目录组织方式，例如：
+
+```text
+2026-07-01/
+├── images/
+│   ├── 000001.jpg
+│   └── 000002.jpg
+└── jsons/
+    ├── 000001.json
+    └── 000002.json
+```
+
+同样支持标准 COCO 单文件，例如 `annotations/instances_train.json`。系统通过 COCO 的 `file_name` 匹配图片；当文件名重复且无法唯一确定时会跳过并记录警告，不会猜测错误图片。
+
+典型 YOLO 目录：
+
+```text
+2026-07-01/
+├── data.yaml
+├── images/
+│   ├── train/000001.jpg
+│   └── val/000002.jpg
+└── labels/
+    ├── train/000001.txt
+    └── val/000002.txt
+```
+
+### LabelMe JSON 示例
 
 ```json
 {
-  "shapes": [
-    {
-      "label": "gaoshepao",
-      "points": [[1914, 770], [2251, 770], [2251, 903], [1914, 903]],
-      "shape_type": "rectangle"
-    }
-  ],
-  "imagePath": "../images/example.jpg",
+  "imagePath": "../images/000001.jpg",
   "imageHeight": 2160,
   "imageWidth": 3840,
-  "view": "Aerial View",
+  "view": "AerialView",
   "scene": "Grassland",
-  "keyword": ""
+  "keyword": "",
+  "shapes": [
+    {
+      "label": "target",
+      "points": [[1914, 770], [2251, 903]],
+      "shape_type": "rectangle"
+    }
+  ]
 }
 ```
 
-## 训练队列说明
+### 场景属性自动识别
 
-训练任务由 `server/postgres-app.js` 内置 worker 轮询执行，默认启用：
+场景识别优先级：
 
-```bash
-TRAINING_WORKER_ENABLED=true npm run api:pg
+1. 使用 JSON 中非空的 `scene`。
+2. 从图片所在目录向上查找最近的语义目录。
+3. 自动跳过结构目录，例如 `images`、`jsons`、`annotations`、`train`、`val`、`test`、`visible`、`infrared`、`可见光`、`红外`。
+4. 对结构明确的历史 `UnknownScene` 批次进行保守回填。
+
+例如：
+
+```text
+山地/2026-07-01/images/000001.jpg
 ```
 
-如果只想启动 API，不自动执行训练：
+系统会将场景识别为 `2026-07-01`。该值会自动出现在左侧“场景”筛选中。
 
-```bash
-TRAINING_WORKER_ENABLED=false npm run api:pg
+## 数据导出
+
+在项目工作台先选择 LabelMe、COCO 或 YOLO，再点击“导出数据集”。任务会在后台执行，结果写入带格式后缀的目录：
+
+```text
+exports/<项目名>_<时间戳>_<格式>/
 ```
 
-训练目前按 Ultralytics YOLO 路径生成 YOLO 格式快照，并调用配置的 Python 解释器执行训练。要真正跑训练，Python 环境需要能导入 `ultralytics` 和 `torch`。
+- LabelMe：`images/` + `jsons/`，每张图片一个 JSON。
+- COCO：`images/` + `annotations/instances.json`。
+- YOLO：`images/` + `labels/` + `data.yaml`。
 
-## 已知接手风险
+当前内部标注模型是矩形检测框，因此 COCO/YOLO 分割导入会转换为外接框；再次导出时不会恢复原始多边形轮廓。
 
-- `README` 旧版描述的是 `server.js` 原型，不是当前正式主线；本文件已按当前代码更新。
-- `db/schema.sql` 不是完整迁移系统，很多新表由后端启动时动态创建。
-- 当前没有认证、租户隔离和 TLS，发布配置因此默认只监听 `127.0.0.1`；公网部署前必须增加反向代理认证与授权。
-- 导入、导出和训练仍由 API 进程内后台任务执行；本次已支持重启失败收敛，但尚不是可跨节点恢复的持久任务队列。
-- 当前日志里出现过 MinIO `NoSuchKey` 和 `XMinioStorageFull`，需要检查对象存储是否缺对象或底层磁盘是否已满。
-- `server/postgres-app.js` 很大，聚合了导入、导出、基线、训练、推理和静态文件服务，后续建议拆分模块。
-- `docker-compose.yml` 默认使用本仓库下的 `runtime/minio`；生产或大数据集场景应改到容量充足的磁盘。
+通过 `.env.portable` 修改导出位置：
 
-## 快速排障
-
-后端启动失败，先确认：
-
-```bash
-node --version
-npm --version
-psql "$DATABASE_URL" -c "select 1"
+```dotenv
+EXPORTS_DIR=/mnt/datasets/exports
+EXPORT_ROOT_DISPLAY=/mnt/datasets/exports
 ```
 
-图片预览报 `NoSuchKey`：
+不要把整个宿主机文件系统以可写方式挂载给应用；自定义导出应始终使用专用挂载目录。
 
-- 检查 MinIO bucket `zbh-datasets` 是否存在。
-- 检查数据库里的 `image_assets.object_key` 是否在 MinIO 或 `<STORAGE_ROOT>/object-store-fallback/` 中有对应文件。
-- 如果导入时 MinIO 报 `XMinioStorageFull`，先清理或迁移 MinIO 数据目录，再重新导入缺失批次。
+## 健康检查
 
-前端空白或 API 404：
+应用提供：
 
-- 确认运行的是 `npm run api:pg`，不是早期的 `node server.js`。
-- 确认 Vite 代理端口和 `PORT` 一致，默认都是 `4177`。
+```text
+GET /api/health/live
+GET /api/health/ready
+```
+
+检查：
+
+```bash
+curl -fsS http://localhost:5173/api/health/live
+curl -fsS http://localhost:5173/api/health/ready
+```
+
+正常返回：
+
+```json
+{"status":"ok"}
+```
+
+## 备份与恢复
+
+### 备份
+
+先停止服务，保证文件一致性：
+
+```bash
+bash scripts/portable-stop.sh
+tar -czf det-dashboard-backup.tar.gz .env.portable portable-data exports
+```
+
+如果启用了链接模式，还必须同时备份原始数据目录。
+
+### 恢复
+
+```bash
+tar -xzf det-dashboard-backup.tar.gz
+bash scripts/portable-start.sh
+```
+
+启动脚本会自动处理旧版 root 容器遗留的持久化目录权限。
+
+## 升级
+
+```bash
+bash scripts/portable-stop.sh
+git pull --ff-only
+bash scripts/portable-start.sh
+```
+
+升级前建议先备份 `.env.portable`、`portable-data/` 和 `exports/`。
+
+当前数据库新增结构由后端启动时补齐，但仓库尚未引入正式的版本化 migration 工具；跨大版本升级必须先备份。
+
+## 使用已发布镜像
+
+默认启动脚本会在本机构建镜像。若镜像已发布到 registry：
+
+```bash
+APP_IMAGE=ghcr.io/godbarry/det-dashboard:<version> \
+BUILD_LOCAL_IMAGE=false \
+bash scripts/portable-start.sh
+```
+
+手动构建和推送：
+
+```bash
+docker build -t ghcr.io/godbarry/det-dashboard:<version> .
+docker push ghcr.io/godbarry/det-dashboard:<version>
+```
+
+GitHub Actions 会验证 `main`、`ZBH` 和 Pull Request；推送 `v*` 标签时发布 `linux/amd64` 和 `linux/arm64` 镜像到 GHCR。
+
+## 本地开发
+
+### 要求
+
+- Node.js `>=22.12.0`
+- npm
+- PostgreSQL
+- MinIO，或允许本地 fallback
+
+### 安装依赖
+
+```bash
+npm ci
+```
+
+### 启动开发依赖
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+基础 schema 只会在全新 PostgreSQL 数据目录初始化时自动导入；已有独立数据库可手动执行：
+
+```bash
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+### 启动后端
+
+```bash
+npm run api:pg
+```
+
+默认 API 地址：
+
+```text
+http://localhost:4177
+```
+
+### 启动前端
+
+另开终端：
+
+```bash
+npm run dev
+```
+
+默认地址：
+
+```text
+http://localhost:5173
+```
+
+Vite 会把 `/api` 代理到 `http://localhost:4177`。
+
+## 常用命令
+
+```bash
+# 构建前端
+npm run build
+
+# 运行快速单元测试
+npm test
+
+# 构建隔离 Docker 栈并运行 API + Chrome 端到端测试
+PLAYWRIGHT_CHANNEL=chrome npm run test:docker
+
+# 启动正式 Node.js 服务
+npm start
+
+# 查看容器状态
+docker compose --env-file .env.portable -f docker-compose.portable.yml ps
+
+# 查看应用日志
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f app
+
+# 重启应用
+docker compose --env-file .env.portable -f docker-compose.portable.yml restart app
+
+# 停止完整栈
+bash scripts/portable-stop.sh
+```
+
+## 故障排查
+
+### Docker 权限不足
+
+错误：
+
+```text
+permission denied while trying to connect to the Docker daemon socket
+```
+
+处理：
+
+```bash
+sudo usermod -aG docker "$USER"
+newgrp docker
+docker info
+```
+
+### 5173 无法访问
+
+```bash
+docker compose --env-file .env.portable -f docker-compose.portable.yml ps
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 100 app
+curl -v http://localhost:5173/api/health/ready
+```
+
+### 文件夹选择器没有弹出
+
+检查宿主机：
+
+```bash
+command -v node
+command -v zenity
+echo "$DISPLAY"
+cat portable-data/folder-dialog.log
+```
+
+原生桥接失败时网页会自动使用内置目录选择器，不影响导入。
+
+### “上一级”按钮不可用
+
+网页选择器只能导航到 `BROWSE_ROOT_DISPLAY` 对应的浏览根。默认值是 `/`；如果配置为 `/home/barry/图片`，到达该目录后按钮按安全边界禁用。
+
+### 场景显示 `UnknownScene`
+
+- 检查 LabelMe JSON 是否包含 `scene`。
+- 检查图片上级目录是否只有 `images`、`train` 等结构名称。
+- 新导入会按目录自动推断；历史数据只在目录结构无歧义时回填。
+- 查看项目导入批次的 `source_path` 是否仍能在宿主机访问。
+
+### 图片显示失败或出现 `NoSuchKey`
+
+表示数据库记录存在，但 MinIO 和 fallback 中都没有对应对象：
+
+```bash
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 200 app
+docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 200 minio
+```
+
+检查 `portable-data/minio`、`portable-data/storage/object-store-fallback` 和源文件是否完整。
+
+### 磁盘空间不足
+
+```bash
+df -h
+du -sh portable-data/* exports
+```
+
+默认独立对象模式会把导入文件写入 MinIO；请为 `portable-data/minio` 预留足够空间。
+
+### 清理失败导入
+
+先 dry-run：
+
+```bash
+node scripts/cleanup-failed-import.js <import_batch_id>
+```
+
+确认后执行：
+
+```bash
+node scripts/cleanup-failed-import.js <import_batch_id> --apply
+```
+
+使用该脚本前需要设置正确的 `DATABASE_URL`。
+
+## 安全边界
+
+- 当前应用没有账号认证、权限模型、租户隔离和 TLS。
+- Docker 发布配置默认只允许本机访问，不要直接暴露到公网或不可信局域网。
+- 如需远程部署，应在前方增加带认证和 TLS 的反向代理，并收窄 `HOST_BROWSE_ROOT`。
+- PostgreSQL 和 MinIO 管理端口也默认只绑定 `127.0.0.1`。
+- 不要提交 `.env`、`.env.portable`、数据库目录或访问密钥。
+
+## 已知架构限制
+
+- `server/postgres-app.js` 仍是较大的单体模块，后续应拆分导入、导出、标注和训练域。
+- 数据库结构尚未采用版本化 migration 工具。
+- 导入、导出和训练任务在 API 进程内执行，重启会安全标记为失败，但不能跨节点续跑。
+- 内部标注模型当前只保存矩形框；COCO/YOLO 多边形会转换为外接框。
+- 视频可以导入、去重和纳入项目统计，但尚无完整的浏览器内时间轴标注工作台。
+- 训练依赖宿主或容器中可访问的 Python、Ultralytics、PyTorch 和模型文件路径；便携 Compose 默认关闭训练 worker。
+
+## 项目结构
+
+```text
+Det-DashBoard/
+├── src/                          # React 前端
+├── server/
+│   ├── postgres-app.js           # 正式 API 与任务入口
+│   ├── dataset-formats.js        # LabelMe/COCO/YOLO 导入适配器
+│   ├── export-formats.js         # LabelMe/COCO/YOLO 导出适配器
+│   ├── config.js                 # 环境配置
+│   ├── db.js                     # PostgreSQL 连接池
+│   ├── object-store.js           # MinIO 与 fallback
+│   └── utils.js                  # 文件扫描和属性推断
+├── db/schema.sql                 # 基础数据库 schema
+├── scripts/
+│   ├── portable-start.sh         # Docker 一键启动
+│   ├── portable-stop.sh          # Docker 一键停止
+│   ├── folder-dialog-bridge.js   # Ubuntu 原生目录选择桥接
+│   └── cleanup-failed-import.js  # 失败导入清理工具
+├── test/
+│   ├── unit/                     # 格式、导出和场景推断单元测试
+│   ├── integration/              # 真实 PostgreSQL/MinIO API 流程
+│   └── e2e/                      # Playwright 浏览器流程
+├── playwright.config.js          # 浏览器测试配置
+├── Dockerfile                    # 多阶段生产镜像
+├── docker-compose.portable.yml   # 推荐发布拓扑
+├── docker-compose.yml            # 本地开发依赖
+├── .env.portable.example         # 发布配置模板
+└── .github/workflows/ci.yml      # CI 与 GHCR 发布
+```
+
+## License
+
+仓库当前未声明开源许可证。对外分发、商业使用或接受外部贡献前，请由仓库所有者补充明确的 `LICENSE` 文件。

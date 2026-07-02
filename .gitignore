@@ -23,6 +23,8 @@ exports/
 *.log
 *.err.log
 *.out.log
+test-results/
+playwright-report/
 
 # OS/editor noise
 .DS_Store

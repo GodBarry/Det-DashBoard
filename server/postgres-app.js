@@ -14,15 +14,14 @@ const {
   walkAsync,
   hashFile,
   quickHash,
-  safeReadJson,
-  basenameNoExt,
-  bboxFromPoints,
   inferModality,
   inferSceneFromPath,
   inferSceneFromImportRoot,
   exportBaseName,
   cleanName,
 } = require("./utils");
+const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats");
+const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 
 function sendJson(res, data, code = 200) {
   res.writeHead(code, {
@@ -170,10 +169,19 @@ function toDisplayDataPath(value) {
   return resolved;
 }
 
+function toScopedInternalPath(value, internalRoot, displayRoot) {
+  const resolved = path.resolve(value || displayRoot);
+  if (isInsideRoot(internalRoot, resolved)) return resolved;
+  if (isInsideRoot(displayRoot, resolved)) {
+    return path.resolve(internalRoot, path.relative(displayRoot, resolved));
+  }
+  return resolved;
+}
+
 function listFolders(target, scope = "browse") {
   const root = scope === "data" ? dataRoot : browseRoot;
   const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
-  const current = toInternalDataPath(target || displayRoot);
+  const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
   if (!isInsideRoot(root, current)) throw new Error(`路径必须位于浏览根目录内：${displayRoot}`);
   const stat = fs.statSync(current);
   if (!stat.isDirectory()) throw new Error("路径必须是文件夹");
@@ -580,11 +588,26 @@ async function upsertImageAsset(client, filePath, meta = {}) {
   const qh = quickHash(filePath);
   const sha = await hashFile(filePath);
   const ext = path.extname(filePath).toLowerCase() || ".jpg";
+  let width = Number(meta.imageWidth) || null;
+  let height = Number(meta.imageHeight) || null;
+  if (!width || !height) {
+    try {
+      const imageMeta = await sharp(filePath).metadata();
+      width = width || Number(imageMeta.width) || null;
+      height = height || Number(imageMeta.height) || null;
+    } catch {}
+  }
   const existing = await client.query("SELECT * FROM image_assets WHERE sha256=$1", [sha]);
   if (existing.rows[0]) {
-    const row = existing.rows[0];
+    let row = existing.rows[0];
     const storedSize = await store.objectSize(row.object_key);
     if (storedSize !== Number(row.file_size || stat.size)) await store.putFile(row.object_key, filePath);
+    if ((!row.width && width) || (!row.height && height)) {
+      row = (await client.query(
+        "UPDATE image_assets SET width=COALESCE(width,$1), height=COALESCE(height,$2) WHERE id=$3 RETURNING *",
+        [width, height, row.id],
+      )).rows[0];
+    }
     return row;
   }
   const objectKey = imageObjectKey(sha, ext);
@@ -592,7 +615,7 @@ async function upsertImageAsset(client, filePath, meta = {}) {
   const inserted = await client.query(
     `INSERT INTO image_assets (sha256, quick_hash, object_key, original_ext, width, height, file_size)
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [sha, qh, objectKey, ext, meta.imageWidth || null, meta.imageHeight || null, stat.size],
+    [sha, qh, objectKey, ext, width, height, stat.size],
   );
   return inserted.rows[0];
 }
@@ -617,36 +640,6 @@ async function upsertVideoAsset(client, filePath) {
     [sha, qh, objectKey, ext, stat.size],
   );
   return inserted.rows[0];
-}
-
-function buildJsonMatches(jsons, images) {
-  const imageByBase = new Map(images.map((file) => [basenameNoExt(file), file]));
-  const imageByName = new Map(images.map((file) => [path.basename(file).toLowerCase(), file]));
-  const matches = new Map();
-  const unresolvedJsons = [];
-  for (const jsonFile of jsons) {
-    const meta = safeReadJson(jsonFile);
-    if (!meta) {
-      unresolvedJsons.push({ jsonFile, reason: "invalid_json" });
-      continue;
-    }
-    const jsonDir = path.dirname(jsonFile);
-    const candidates = [];
-    if (meta.imagePath) {
-      candidates.push(path.resolve(jsonDir, meta.imagePath));
-      candidates.push(path.resolve(jsonDir, "..", meta.imagePath));
-      candidates.push(path.resolve(jsonDir, "..", "images", path.basename(meta.imagePath)));
-      candidates.push(imageByName.get(path.basename(meta.imagePath).toLowerCase()));
-    }
-    candidates.push(imageByBase.get(basenameNoExt(jsonFile)));
-    const imageFile = candidates.filter(Boolean).find((file) => fs.existsSync(file));
-    if (!imageFile) {
-      unresolvedJsons.push({ jsonFile, reason: "image_not_found" });
-      continue;
-    }
-    matches.set(path.resolve(imageFile).toLowerCase(), { jsonFile, meta });
-  }
-  return { matches, unresolvedJsons };
 }
 
 async function createProject(body) {
@@ -753,13 +746,12 @@ async function runImportBatch(batchId, project, body) {
     return;
   }
   const images = files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
-  const jsons = files.filter((file) => path.extname(file).toLowerCase() === ".json");
   const videos = files.filter((file) => VIDEO_EXTS.has(path.extname(file).toLowerCase()));
-  const { matches, unresolvedJsons } = buildJsonMatches(jsons, images);
+  const { matches, unresolved, usedLabelFiles, formatCounts } = buildDatasetMatches({ files, images, sourceRoot: sourcePath });
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
-    [images.length + videos.length, `扫描完成，发现 ${images.length} 张图片、${videos.length} 个视频、${jsons.length} 个标注文件`, batchId],
+    [images.length + videos.length, `扫描完成：${images.length} 图片，${videos.length} 视频；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`, batchId],
   );
   if (await importCancelled(batchId)) {
     await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
@@ -773,6 +765,11 @@ async function runImportBatch(batchId, project, body) {
     [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
   )).rows[0];
 
+  for (const labelFile of usedLabelFiles) {
+    const relative = path.relative(sourcePath, labelFile).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
+    await store.putFile(rawLabelObjectKey(projectId, version.id, relative || path.basename(labelFile)), labelFile);
+  }
+
   let imageCount = 0;
   let annCount = 0;
   let unlabeledImageCount = 0;
@@ -781,7 +778,7 @@ async function runImportBatch(batchId, project, body) {
       await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [imageCount, "导入已取消", batchId]);
       return;
     }
-    const matched = matches.get(path.resolve(imageFile).toLowerCase());
+    const matched = matches.get(imageKey(imageFile));
     const meta = matched?.meta || {};
     const scene = inferSceneFromPath(meta, imageFile, sourcePath);
     const asset = await upsertImageAsset(client, imageFile, meta);
@@ -799,11 +796,14 @@ async function runImportBatch(batchId, project, body) {
       modality,
       keyword: meta.keyword || "",
     });
-    if (matched?.jsonFile) await store.putJson(rawLabelObjectKey(projectId, version.id, path.basename(matched.jsonFile)), meta);
     const shapes = Array.isArray(meta.shapes) ? meta.shapes : [];
     if (!shapes.length) unlabeledImageCount += 1;
     for (const shape of shapes) {
-      const box = bboxFromPoints(shape.points || []);
+      const box = shapeToBox(shape, asset.width, asset.height);
+      if (!box) {
+        unresolved.push({ labelFile: matched?.labelFile || "", reason: "invalid_shape", imageFile });
+        continue;
+      }
       await client.query(
         `INSERT INTO image_annotations
          (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
@@ -835,7 +835,7 @@ async function runImportBatch(batchId, project, body) {
   }
 
   await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
-  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 未标注图片，${videoCount} 视频，${annCount} 标注，${unresolvedJsons.length} 未匹配JSON`;
+  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`;
   await query("UPDATE import_batches SET status='done', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videos.length, message, batchId]);
 }
 
@@ -2114,35 +2114,25 @@ async function streamProjectImage(res, projectImageId, thumb) {
   stream.pipe(res);
 }
 
-function labelmeJson(meta, shapes, exportImageName) {
-  return {
-    version: "3.2.3",
-    flags: {},
-    shapes,
-    imagePath: `../images/${exportImageName}`,
-    imageData: null,
-    imageHeight: meta.height || 1,
-    imageWidth: meta.width || 1,
-    description: "",
-    view: meta.view || "",
-    scene: meta.scene || "",
-    keyword: meta.keyword || "",
-  };
-}
-
-async function exportProject(projectId) {
+async function exportProject(projectId, options = {}) {
   if (shuttingDown) {
     const error = new Error("服务正在关闭，暂不接受新的导出任务");
     error.statusCode = 503;
     throw error;
   }
+  const format = normalizeExportFormat(options.format);
+  if (!format) {
+    const error = new Error("导出格式仅支持 labelme、coco 或 yolo");
+    error.statusCode = 400;
+    throw error;
+  }
   const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
   if (!project) throw new Error("project not found");
   fs.mkdirSync(exportRoot, { recursive: true });
-  const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,'正在导出',now()) RETURNING *", [{ projectId, outputPath: exportRootDisplay }])).rows[0];
+  const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,$2,now()) RETURNING *", [{ projectId, outputPath: exportRootDisplay, format }, `正在导出 ${format.toUpperCase()}`])).rows[0];
 
   setImmediate(() => {
-    const task = runExportProject(project, job).catch(async (error) => {
+    const task = runExportProject(project, job, format).catch(async (error) => {
       console.error("export failed", error);
       await query(
         "UPDATE jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
@@ -2152,10 +2142,10 @@ async function exportProject(projectId) {
     activeExportTasks.add(task);
   });
 
-  return { jobId: job.id, status: job.status, outputRoot: exportRootDisplay };
+  return { jobId: job.id, status: job.status, outputRoot: exportRootDisplay, format };
 }
 
-async function runExportProject(project, job) {
+async function runExportProject(project, job, format) {
   const projectId = project.id;
   const rows = (await query(
     `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
@@ -2163,23 +2153,35 @@ async function runExportProject(project, job) {
      WHERE pi.project_id=$1 AND pi.deleted_at IS NULL ORDER BY pi.created_at`,
     [projectId],
   )).rows;
+  const annotationRows = project.active_label_version_id && rows.length
+    ? (await query(
+      "SELECT * FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) ORDER BY id",
+      [project.active_label_version_id, rows.map((row) => row.id)],
+    )).rows
+    : [];
+  const annotationsByImage = new Map();
+  for (const annotation of annotationRows) {
+    if (!annotationsByImage.has(annotation.project_image_id)) annotationsByImage.set(annotation.project_image_id, []);
+    annotationsByImage.get(annotation.project_image_id).push(annotation);
+  }
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
-  const exportPrefix = `exports/${project.id}/export_${stamp}`;
-  const localRoot = path.join(exportRoot, `${cleanName(project.name, "dataset")}_${stamp}`);
+  const exportPrefix = `exports/${project.id}/${format}_${stamp}`;
+  const localRoot = path.join(exportRoot, `${cleanName(project.name, "dataset")}_${format}_${stamp}`);
   const displayLocalRoot = path.join(exportRootDisplay, path.basename(localRoot));
   const localImagesDir = path.join(localRoot, "images");
-  const localJsonsDir = path.join(localRoot, "jsons");
+  const localLabelsDir = path.join(localRoot, format === "labelme" ? "jsons" : format === "coco" ? "annotations" : "labels");
   const tempDir = path.join(storageRoot, "tmp", job.id);
   fs.mkdirSync(localImagesDir, { recursive: true });
-  fs.mkdirSync(localJsonsDir, { recursive: true });
+  fs.mkdirSync(localLabelsDir, { recursive: true });
   fs.mkdirSync(tempDir, { recursive: true });
+  const entries = [];
   try {
     for (let i = 0; i < rows.length; i += 1) {
       const item = rows[i];
       const base = exportBaseName(item, i + 1);
       const ext = item.original_ext || ".jpg";
       const exportImageName = `${base}${ext}`;
-      const exportJsonName = `${base}.json`;
+      const exportLabelName = format === "yolo" ? `${base}.txt` : format === "coco" ? "instances.json" : `${base}.json`;
       const imageStream = await store.getStream(item.object_key);
       const tempImage = path.join(tempDir, exportImageName);
       await new Promise((resolve, reject) => {
@@ -2190,37 +2192,37 @@ async function runExportProject(project, job) {
       });
       await store.putFile(`${exportPrefix}/images/${exportImageName}`, tempImage);
       fs.copyFileSync(tempImage, path.join(localImagesDir, exportImageName));
-      const anns = (await query(
-        "SELECT * FROM image_annotations WHERE label_version_id=$1 AND project_image_id=$2 ORDER BY id",
-        [project.active_label_version_id, item.id],
-      )).rows;
-      const shapes = anns.map((ann) => ({
-        label: ann.label,
-        score: ann.score,
-        points: [
-          [Number(ann.bbox_x), Number(ann.bbox_y)],
-          [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y)],
-          [Number(ann.bbox_x) + Number(ann.bbox_w), Number(ann.bbox_y) + Number(ann.bbox_h)],
-          [Number(ann.bbox_x), Number(ann.bbox_y) + Number(ann.bbox_h)],
-        ],
-        group_id: null,
-        description: "",
-        difficult: ann.difficult,
-        shape_type: ann.shape_type,
-        flags: {},
-        attributes: ann.attributes_json || {},
-        kie_linking: [],
-      }));
-      const exportJson = labelmeJson(item, shapes, exportImageName);
-      await store.putJson(`${exportPrefix}/jsons/${exportJsonName}`, exportJson);
-      fs.writeFileSync(path.join(localJsonsDir, exportJsonName), JSON.stringify(exportJson, null, 2), "utf8");
-      await query("INSERT INTO export_items (job_id, project_image_id, export_image_name, export_json_name) VALUES ($1,$2,$3,$4)", [job.id, item.id, exportImageName, exportJsonName]);
-      await query("UPDATE jobs SET progress=$1, message=$2 WHERE id=$3", [Math.round(((i + 1) / Math.max(1, rows.length)) * 100), `导出 ${i + 1}/${rows.length}`, job.id]);
+      const annotations = annotationsByImage.get(item.id) || [];
+      entries.push({ item, annotations, imageName: exportImageName, labelName: exportLabelName });
+      if (format === "labelme") {
+        const document = labelmeDocument(item, annotations, exportImageName);
+        await store.putJson(`${exportPrefix}/jsons/${exportLabelName}`, document);
+        fs.writeFileSync(path.join(localLabelsDir, exportLabelName), JSON.stringify(document, null, 2), "utf8");
+      }
+      await query("INSERT INTO export_items (job_id, project_image_id, export_image_name, export_json_name) VALUES ($1,$2,$3,$4)", [job.id, item.id, exportImageName, exportLabelName]);
+      await query("UPDATE jobs SET progress=$1, message=$2 WHERE id=$3", [Math.round(((i + 1) / Math.max(1, rows.length)) * 95), `导出 ${format.toUpperCase()} ${i + 1}/${rows.length}`, job.id]);
+    }
+
+    if (format === "coco") {
+      const document = cocoDocument(entries);
+      const target = path.join(localLabelsDir, "instances.json");
+      fs.writeFileSync(target, JSON.stringify(document, null, 2), "utf8");
+      await store.putJson(`${exportPrefix}/annotations/instances.json`, document);
+    } else if (format === "yolo") {
+      const documents = yoloDocuments(entries);
+      for (const [name, content] of documents.labelFiles) {
+        const target = path.join(localLabelsDir, name);
+        fs.writeFileSync(target, content, "utf8");
+        await store.putFile(`${exportPrefix}/labels/${name}`, target);
+      }
+      const yamlTarget = path.join(localRoot, "data.yaml");
+      fs.writeFileSync(yamlTarget, documents.dataYaml, "utf8");
+      await store.putFile(`${exportPrefix}/data.yaml`, yamlTarget);
     }
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  const message = `导出完成：${displayLocalRoot}`;
+  const message = `${format.toUpperCase()} 导出完成：${displayLocalRoot}`;
   await query("UPDATE jobs SET status='done', progress=100, message=$1, finished_at=now() WHERE id=$2", [message, job.id]);
   return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
 }

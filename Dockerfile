@@ -9,6 +9,12 @@ COPY index.html vite.config.js ./
 COPY src ./src
 RUN npm run build
 
+FROM build AS test
+
+COPY server ./server
+COPY test/unit ./test/unit
+RUN npm test
+
 FROM node:22-bookworm-slim@sha256:813a7480f28fdadac1f7f5c824bcdad435b5bc1322a5968bbbdef8d058f9dff4 AS runtime
 
 LABEL org.opencontainers.image.title="Det-DashBoard" \
@@ -20,7 +26,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=node:node server ./server
-COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=test --chown=node:node /app/dist ./dist
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
