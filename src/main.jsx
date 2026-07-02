@@ -203,7 +203,11 @@ function App() {
   }, [currentFolder, projectById]);
 
   function refreshHome() {
-    fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => {});
+    fetch("/api/projects").then((r) => r.json()).then((d) => {
+      const rows = d.projects || [];
+      setProjects(rows);
+      setActiveProject((current) => current ? rows.find((project) => project.id === current.id) || current : null);
+    }).catch(() => {});
     fetch("/api/projects/trash").then((r) => r.json()).then((d) => setTrashProjects(d.projects || [])).catch(() => {});
   }
 
@@ -439,8 +443,17 @@ function App() {
   }
 
   function createProject() {
-    const name = window.prompt("请输入项目名称或路径（最多 3 级，例如：任务A/批次1/样本集）", "新建项目");
+    const creatingChild = Boolean(currentFolderId);
+    if (breadcrumbs.length >= 3) {
+      setError("项目计入第 1 级，最多只能创建到第 3 级文件夹");
+      return;
+    }
+    const name = window.prompt(creatingChild ? "请输入子文件夹名称" : "请输入项目名称", creatingChild ? "新建文件夹" : "新建项目");
     if (!name) return;
+    if (/[\\/]/.test(name)) {
+      setError("请一次只创建一个项目或文件夹，名称不能包含路径分隔符");
+      return;
+    }
     fetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -450,10 +463,7 @@ function App() {
         if (!r.ok) throw new Error(data.error || "新建项目失败");
         return data;
       }))
-      .then((data) => {
-        if (data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
-        refreshHome();
-      })
+      .then(() => refreshHome())
       .catch((err) => setError(err.message));
   }
 
@@ -548,7 +558,7 @@ function App() {
   }
 
   function deleteProject(projectId) {
-    if (!window.confirm("删除后会进入回收站，是否继续？")) return;
+    if (!window.confirm("确定删除该项目或文件夹吗？其下级文件夹会一并进入回收站；可在回收站恢复，清空回收站后将永久删除。")) return;
     fetch(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => refreshHome());
   }
 
@@ -566,10 +576,21 @@ function App() {
 
   function openProject(project) {
     setActiveProject(project);
+    setCurrentFolderId(project.id);
     setView("workspace");
     setPage(1);
     setSelected(null);
     setError(null);
+  }
+
+  function goUpFolder() {
+    if (!activeProject?.parent_id) {
+      goHome();
+      return;
+    }
+    const parent = projectById.get(activeProject.parent_id);
+    if (parent) openProject(parent);
+    else goHome();
   }
 
   function importData() {
@@ -747,7 +768,7 @@ function App() {
             </div>
             <div className="project-grid">
               {visibleProjects.map((project) => (
-                <article className="project-folder" key={project.id} onDoubleClick={() => openProject(project)}>
+                <article className="project-folder" key={project.id} tabIndex={0} aria-label={`文件夹 ${project.name}，双击进入`} onDoubleClick={() => openProject(project)} onKeyDown={(event) => { if (event.key === "Enter") openProject(project); }}>
                   <Folder size={34} />
                   <div>
                     <h3>{project.name}</h3>
@@ -755,8 +776,7 @@ function App() {
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
                   <div className="project-actions">
-                    <button title="进入文件夹" onClick={(event) => { event.stopPropagation(); setCurrentFolderId(project.id); }}><FolderOpen size={16} /></button>
-                    <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                    <button title="删除项目" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
                   </div>
                 </article>
               ))}
@@ -831,11 +851,12 @@ function App() {
     <div className="app-shell">
       <MainNav view="home" goHome={goHome} openPlatform={openPlatform} />
       <header className="app-header">
-        <button className="ghost" onClick={goHome}><ArrowLeft size={16} />返回项目</button>
+        <button className="ghost" onClick={goUpFolder}><ArrowLeft size={16} />返回上一级</button>
         <div>
           <h1>{activeProject?.name}</h1>
           <p>{summary?.image_count || 0} 图片 · {summary?.video_count || 0} 视频 · {summary?.annotation_count || 0} 标注</p>
         </div>
+        <button disabled={breadcrumbs.length >= 3} onClick={createProject}><FolderOpen size={16} />新建文件夹</button>
         <button className="primary" onClick={importData}><Import size={16} />导入数据</button>
         <label className="export-format">导出格式
           <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
@@ -846,6 +867,40 @@ function App() {
         </label>
         <button className="warning" onClick={exportProject}><Upload size={16} />导出数据集</button>
       </header>
+      <section className="folder-browser-panel">
+        <div className="section-title-row">
+          <div>
+            <h2>下级文件夹</h2>
+            <div className="breadcrumbs" aria-label="当前位置">
+              <button onClick={goHome}>根目录</button>
+              {breadcrumbs.map((project) => (
+                <button key={project.id} onClick={() => openProject(project)}>{project.name}</button>
+              ))}
+            </div>
+          </div>
+          <span className="folder-depth">第 {breadcrumbs.length} 级 / 最多 3 级</span>
+        </div>
+        <div className="project-grid compact-folder-grid">
+          {visibleProjects.map((project) => (
+            <article className="project-folder" key={project.id} tabIndex={0} aria-label={`文件夹 ${project.name}，双击进入`} onDoubleClick={() => openProject(project)} onKeyDown={(event) => { if (event.key === "Enter") openProject(project); }}>
+              <Folder size={30} />
+              <div>
+                <h3>{project.name}</h3>
+                <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频 · {project.child_count || 0} 下级</p>
+                <span>双击进入文件夹</span>
+              </div>
+              <div className="project-actions">
+                <button title="删除文件夹" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+              </div>
+            </article>
+          ))}
+          {!visibleProjects.length && <div className="empty-state">该级文件夹无下级文件夹。</div>}
+        </div>
+      </section>
+      <div className="current-level-title">
+        <h2>本级数据</h2>
+        <span>仅显示“{activeProject?.name}”直接包含的数据</span>
+      </div>
       <div className="workspace-layout">
         <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />
         <main className="preview-area">
@@ -873,7 +928,7 @@ function App() {
             <h2>导入数据</h2>
             <p className="muted">输入或选择要导入的数据文件夹路径（浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}）</p>
             <div className="import-path-row">
-              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder='例如: F:\ZBH\统计用\山地' />
+              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="例如：/home/barry/图片/项目数据" />
               <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
             </div>
             {error && <div className="error-msg">{error}</div>}
@@ -1924,6 +1979,10 @@ function ImageGrid({ items, selected, setSelected, page, setPage, openViewer, ch
   });
   return (
     <section className="preview-panel">
+      <div className="file-path-bar" title={selected?.absolute_path || selected?.source_path || ""}>
+        <span>当前文件绝对路径</span>
+        <code>{selected?.absolute_path || selected?.source_path || "尚未选择文件"}</code>
+      </div>
       <div className="preview-head">
         <div><h2>预览结果</h2><p>直接显示当前筛选后的缩略图</p></div>
         <div className="bulk-actions">
@@ -1947,7 +2006,7 @@ function ImageGrid({ items, selected, setSelected, page, setPage, openViewer, ch
             <em>{item.annotation_count || 0} 标注</em>
           </button>
         ))}
-        {!items.length && <div className="empty-state">当前筛选条件下没有数据。</div>}
+        {!items.length && <div className="empty-state">该级文件夹无数据。</div>}
       </div>
       <div className="pager">
         <button disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
@@ -2046,6 +2105,7 @@ function Inspector({ item }) {
     <aside className="inspector-panel">
       <h2>详情</h2>
       <img className="detail-image" src={`/api/project-images/${item.id}/full`} />
+      <div className="kv path-kv"><span>绝对路径</span><b>{item.absolute_path || item.source_path || "未记录"}</b></div>
       <div className="kv"><span>文件名</span><b>{item.display_name}</b></div>
       <div className="kv"><span>场景</span><b>{item.scene}</b></div>
       <div className="kv"><span>视角</span><b>{item.view}</b></div>
@@ -2154,7 +2214,10 @@ function ImageViewer({ items, index, setIndex, onClose, onSaved }) {
     <div className="viewer-overlay" onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
       <div className="viewer-topbar">
         <button className={editMode ? "active-tool edit-toggle" : "edit-toggle"} onClick={() => setEditMode((value) => !value)}>{editMode ? "退出编辑" : "编辑"}</button>
-        <b>{item.display_name}</b>
+        <div className="viewer-file-identity">
+          <b>{item.display_name}</b>
+          <code title={item.absolute_path || item.source_path || ""}>{item.absolute_path || item.source_path || "未记录绝对路径"}</code>
+        </div>
         <span>{index + 1} / {items.length}</span>
         {editMode && (
           <>
@@ -2326,5 +2389,3 @@ function EditableAnnotationLayer({ width, height, annotations, selectedId, setSe
 }
 
 createRoot(document.getElementById("root")).render(<App />);
-
-
