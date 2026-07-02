@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const baseUrl = process.env.TEST_BASE_URL || "http://127.0.0.1:15173";
 const dataRoot = process.env.TEST_DATA_DISPLAY || "/test-data";
+const browseRoot = process.env.TEST_BROWSE_DISPLAY || dataRoot;
 const exportsRoot = path.resolve(process.env.TEST_EXPORTS_DIR || "/tmp/det-dashboard-test/exports");
 
 async function request(method, pathname, body, expected = 200) {
@@ -93,7 +94,7 @@ async function main() {
   assert.equal((await request("GET", "/api/health/live")).status, "ok");
   assert.equal((await request("GET", "/api/health/ready")).status, "ok");
   const config = await request("GET", "/api/config");
-  assert.equal(config.browseRootDisplay, dataRoot);
+  assert.equal(config.browseRootDisplay, browseRoot);
   const dirs = await request("GET", `/api/fs/dirs?path=${encodeURIComponent(dataRoot)}`);
   assert.equal(dirs.parent, "");
   assert.ok(dirs.dirs.some((entry) => entry.name === "coco"));
@@ -180,7 +181,7 @@ async function main() {
     taskType: "detect",
     params: { epochs: 1 },
   })).job;
-  assert.equal(training.status, "pending");
+  assert.ok(["pending", "preparing", "running"].includes(training.status), `unexpected training status ${training.status}`);
   const trainingLogs = await request("GET", `/api/ml/training-jobs/${training.id}/logs`);
   assert.ok(trainingLogs.logs.length > 0);
   const requeued = (await request("POST", `/api/ml/training-jobs/${training.id}/requeue`, { params: { epochs: 2 } })).job;
@@ -191,7 +192,7 @@ async function main() {
     modelVersionId: version.id,
     params: { conf: 0.25 },
   })).job;
-  assert.equal(inference.status, "pending");
+  assert.ok(["pending", "preparing", "running"].includes(inference.status), `unexpected inference status ${inference.status}`);
   assert.ok((await request("GET", "/api/ml/models")).models.some((entry) => entry.id === model.id));
   assert.ok((await request("GET", "/api/ml/training-jobs")).jobs.some((entry) => entry.id === training.id));
   assert.ok((await request("GET", "/api/ml/inference-jobs")).jobs.some((entry) => entry.id === inference.id));

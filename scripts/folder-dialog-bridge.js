@@ -12,13 +12,25 @@ const allowedOrigins = new Set(
     .map((value) => value.trim())
     .filter(Boolean),
 );
+const allowLocalhostOrigins = process.env.FOLDER_DIALOG_ALLOW_LOCALHOST !== "false";
+
+function isAllowedOrigin(origin = "") {
+  if (allowedOrigins.has(origin)) return true;
+  if (!allowLocalhostOrigins) return false;
+  try {
+    const parsed = new URL(origin);
+    return ["http:", "https:"].includes(parsed.protocol) && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 function sendJson(res, statusCode, body, origin = "") {
   const headers = {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
   };
-  if (allowedOrigins.has(origin)) headers["access-control-allow-origin"] = origin;
+  if (isAllowedOrigin(origin)) headers["access-control-allow-origin"] = origin;
   res.writeHead(statusCode, headers);
   res.end(JSON.stringify(body));
 }
@@ -62,7 +74,7 @@ function selectFolder(initialPath, title) {
 
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || "";
-  if (!allowedOrigins.has(origin)) return sendJson(res, 403, { status: "failed", error: "不允许的请求来源" });
+  if (!isAllowedOrigin(origin)) return sendJson(res, 403, { status: "failed", error: "不允许的请求来源" });
   if (req.method !== "GET" || req.url !== "/api/dialog/folder") {
     return sendJson(res, 404, { status: "failed", error: "not found" }, origin);
   }

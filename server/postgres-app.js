@@ -182,7 +182,7 @@ function listFolders(target, scope = "browse") {
   const root = scope === "data" ? dataRoot : browseRoot;
   const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
   const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
-  if (!isInsideRoot(root, current)) throw new Error(`路径必须位于浏览根目录内：${displayRoot}`);
+  if (!isInsideRoot(root, current)) throw httpError(403, `路径必须位于浏览根目录内：${displayRoot}`);
   const stat = fs.statSync(current);
   if (!stat.isDirectory()) throw new Error("路径必须是文件夹");
   const dirs = fs.readdirSync(current, { withFileTypes: true })

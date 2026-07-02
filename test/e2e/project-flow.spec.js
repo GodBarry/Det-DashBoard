@@ -5,11 +5,25 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "数据集管理" })).toBeVisible();
 
+  page.once("dialog", async (dialog) => dialog.accept(`${folderRoot}/level-b/level-c`));
+  await page.getByRole("button", { name: "新建项目" }).click();
+  await expect(page.getByRole("heading", { name: "level-b" })).toBeVisible();
+  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
+  await page.getByRole("button", { name: "根目录" }).click();
+  const rootFolder = page.locator("article.project-folder").filter({ hasText: folderRoot });
+  await expect(rootFolder).toBeVisible();
+  await rootFolder.getByTitle("进入文件夹").click();
+  const middleFolder = page.locator("article.project-folder").filter({ hasText: "level-b" });
+  await expect(middleFolder).toBeVisible();
+  await middleFolder.getByTitle("进入文件夹").click();
+  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
+  await page.getByRole("button", { name: "根目录" }).click();
+
   page.once("dialog", async (dialog) => dialog.accept(projectName));
   await page.getByRole("button", { name: "新建项目" }).click();
   const project = page.locator("article.project-folder").filter({ hasText: projectName });
   await expect(project).toBeVisible();
-  await project.dblclick();
+  await project.getByTitle("打开项目").click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 
   await page.getByRole("button", { name: "导入数据" }).click();
@@ -32,6 +46,7 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await expect(card).toContainText("1 标注");
   await expect(card.locator("img")).toHaveJSProperty("complete", true);
   await expect.poll(async () => card.locator("img").evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(card.locator(".ann-layer.compact rect")).toHaveCount(1);
 
   const categoryFilter = page.locator(".filter-group").filter({ hasText: "类别" });
   await categoryFilter.getByText("vehicle", { exact: true }).click();

@@ -112,6 +112,24 @@ function App() {
       .catch(() => {});
   }, [activeTrainingJobId, trainingJobs]);
 
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
+  const visibleProjects = useMemo(
+    () => projects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
+    [projects, currentFolderId],
+  );
+  const breadcrumbs = useMemo(() => {
+    const rows = [];
+    let cursor = currentFolder;
+    const seen = new Set();
+    while (cursor && !seen.has(cursor.id) && rows.length < 3) {
+      rows.unshift(cursor);
+      seen.add(cursor.id);
+      cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
+    }
+    return rows;
+  }, [currentFolder, projectById]);
+
   function refreshHome() {
     fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => {});
     fetch("/api/projects/trash").then((r) => r.json()).then((d) => setTrashProjects(d.projects || [])).catch(() => {});
@@ -427,7 +445,7 @@ function App() {
   async function browseFolder() {
     setError(null);
     if (appConfig.nativeDialogMode === "disabled") {
-      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      openDataRootPicker(importPath || appConfig.dataRootDisplay || appConfig.browseRootDisplay || "/");
       return;
     }
     setBrowseBusy(true);
@@ -446,7 +464,7 @@ function App() {
       }
     } catch (err) {
       const reason = err.name === "AbortError" ? "打开超时" : err.message;
-      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      openDataRootPicker(importPath || appConfig.dataRootDisplay || appConfig.browseRootDisplay || "/");
       setError(`系统文件夹选择器失败，已切换到网页选择器：${reason}`);
     } finally {
       window.clearTimeout(timer);
@@ -577,9 +595,20 @@ function App() {
         </header>
         <main className="home-page">
           <section className="home-section">
-            <h2>历史项目</h2>
+            <div className="section-title-row">
+              <div>
+                <h2>{currentFolder ? currentFolder.name : "历史项目"}</h2>
+                <div className="breadcrumbs">
+                  <button onClick={() => setCurrentFolderId(null)}>根目录</button>
+                  {breadcrumbs.map((project) => (
+                    <button key={project.id} onClick={() => setCurrentFolderId(project.id)}>{project.name}</button>
+                  ))}
+                </div>
+              </div>
+              {currentFolder && <button onClick={() => setCurrentFolderId(currentFolder.parent_id || null)}><ArrowLeft size={14} />上一级</button>}
+            </div>
             <div className="project-grid">
-              {projects.map((project) => (
+              {visibleProjects.map((project) => (
                 <article className="project-folder" key={project.id} onDoubleClick={() => openProject(project)}>
                   <Folder size={34} />
                   <div>
@@ -587,7 +616,10 @@ function App() {
                     <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频</p>
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
-                  <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  <div className="project-actions">
+                    <button title="进入文件夹" onClick={(event) => { event.stopPropagation(); setCurrentFolderId(project.id); }}><FolderOpen size={16} /></button>
+                    <button title="删除项目" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+                  </div>
                 </article>
               ))}
               {!projects.length && <div className="empty-state">还没有项目，点击右上角新建项目。</div>}
@@ -1367,7 +1399,10 @@ function Inspector({ item }) {
   return (
     <aside className="inspector-panel">
       <h2>详情</h2>
-      <img className="detail-image" src={`/api/project-images/${item.id}/full`} />
+      <div className="detail-image-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}` }}>
+        <img className="detail-image" src={`/api/project-images/${item.id}/full`} />
+        <AnnotationOverlay item={item} compact />
+      </div>
       <div className="kv"><span>文件名</span><b>{item.display_name}</b></div>
       <div className="kv"><span>场景</span><b>{item.scene}</b></div>
       <div className="kv"><span>视角</span><b>{item.view}</b></div>
