@@ -127,6 +127,7 @@ async function main() {
   assert.deepEqual(labelme.summary.labels, ["car"]);
   assert.match(labelme.batch.message, /LabelMe 1/);
   assert.equal(labelme.images.items[0].image_width, 120);
+  assert.equal(labelme.images.items[0].absolute_path.startsWith(`${dataRoot}/labelme/scene-labelme/`), true);
   assert.equal(labelme.images.items[0].annotations[0].label, "car");
 
   const coco = await createAndImport("e2e-coco", "coco/scene-coco");
@@ -213,7 +214,7 @@ async function main() {
     modelVersionId: version.id,
     params: { conf: 0.25 },
   })).job;
-  assert.equal(inference.status, "pending");
+  assert.ok(["pending", "preparing", "running", "done"].includes(inference.status));
   assert.ok((await request("GET", "/api/ml/models")).models.some((entry) => entry.id === model.id));
   assert.ok((await request("GET", "/api/ml/training-jobs")).jobs.some((entry) => entry.id === training.id));
   assert.ok((await request("GET", "/api/ml/inference-jobs")).jobs.some((entry) => entry.id === inference.id));

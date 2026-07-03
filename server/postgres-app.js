@@ -528,7 +528,9 @@ async function ensureRuntimeSchema() {
     "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     `CREATE TABLE IF NOT EXISTS baseline_merge_runs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -718,7 +720,9 @@ async function ensureRuntimeSchema() {
     "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS artifact_sha256 TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE runtime_envs ADD COLUMN IF NOT EXISTS unpack_path TEXT NOT NULL DEFAULT ''",
   ];
-  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 6);
+  // Core project browsing, imports, and baseline generation must always have
+  // their schema available. Only the larger ML platform schema is optional.
+  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 13);
   await query("SET statement_timeout = '5000ms'");
   await query("SET lock_timeout = '2000ms'");
   for (let index = 0; index < runtimeStatements.length; index += 1) {
@@ -893,6 +897,8 @@ async function ensureRuntimeSchema() {
     ];
     const assetRuntimeStatements = [
       mlRuntimeStatements[0],
+      mlRuntimeStatements[1],
+      mlRuntimeStatements[2],
       `CREATE TABLE IF NOT EXISTS runtime_envs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
@@ -1394,6 +1400,7 @@ async function runImportBatch(batchId, project, body) {
       imageAssetId: asset.id,
       importBatchId: batchId,
       displayName,
+      sourcePath: toDisplayDataPath(imageFile),
       scene,
       view: meta.view || "UnknownView",
       modality,
@@ -1429,9 +1436,9 @@ async function runImportBatch(batchId, project, body) {
     }
     const asset = await upsertVideoAsset(client, videoFile);
     await query(
-      `INSERT INTO project_videos (project_id, video_asset_id, import_batch_id, display_name, label_status)
-       VALUES ($1,$2,$3,$4,'unlabeled')`,
-      [projectId, asset.id, batchId, path.basename(videoFile)],
+      `INSERT INTO project_videos (project_id, video_asset_id, import_batch_id, display_name, source_path, label_status)
+       VALUES ($1,$2,$3,$4,$5,'unlabeled')`,
+      [projectId, asset.id, batchId, path.basename(videoFile), toDisplayDataPath(videoFile)],
     );
     videoCount += 1;
     await query("UPDATE import_batches SET processed_files=$1, message=$2 WHERE id=$3", [images.length + videoCount, `正在导入视频 ${videoCount} / ${videos.length}`, batchId]);
@@ -1448,17 +1455,19 @@ async function upsertProjectImage(client, image) {
     image.imageAssetId,
     image.importBatchId,
     image.displayName,
+    image.sourcePath || "",
     image.scene,
     image.view,
     image.modality,
     image.keyword,
   ];
   const upsertSql = `
-    INSERT INTO project_images (project_id, image_asset_id, import_batch_id, display_name, scene, view, modality, keyword)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    INSERT INTO project_images (project_id, image_asset_id, import_batch_id, display_name, source_path, scene, view, modality, keyword)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     ON CONFLICT (project_id, image_asset_id, display_name)
     DO UPDATE SET
       import_batch_id=EXCLUDED.import_batch_id,
+      source_path=EXCLUDED.source_path,
       scene=EXCLUDED.scene,
       view=EXCLUDED.view,
       modality=EXCLUDED.modality,
@@ -1472,10 +1481,11 @@ async function upsertProjectImage(client, image) {
     return (await client.query(
       `UPDATE project_images
        SET import_batch_id=$3,
-           scene=$5,
-           view=$6,
-           modality=$7,
-           keyword=$8,
+           source_path=$5,
+           scene=$6,
+           view=$7,
+           modality=$8,
+           keyword=$9,
            deleted_at=NULL
        WHERE project_id=$1 AND image_asset_id=$2 AND display_name=$4
        RETURNING *`,
@@ -1836,11 +1846,11 @@ async function applyBaselineRun(runId, body = {}) {
       const analysis = applyConflictDecision(group, params, decisionByAsset.get(String(group[0].image_asset_id)));
       const source = analysis.chosenRow;
       const pi = (await client.query(
-        `INSERT INTO project_images (project_id, image_asset_id, display_name, scene, view, modality, keyword)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO project_images (project_id, image_asset_id, display_name, source_path, scene, view, modality, keyword)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (project_id, image_asset_id, display_name) DO UPDATE SET deleted_at=NULL
          RETURNING *`,
-        [project.id, source.image_asset_id, source.display_name, source.scene, source.view, source.modality, source.keyword],
+        [project.id, source.image_asset_id, source.display_name, source.source_path || "", source.scene, source.view, source.modality, source.keyword],
       )).rows[0];
       imageCount += 1;
       for (const ann of analysis.annotations) {
@@ -3155,6 +3165,9 @@ async function listProjectImages(projectId, queryParams) {
   params.push(pageSize, offset);
   const rows = await query(
     `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, ia.object_key,
+      COALESCE(NULLIF(pi.source_path, ''),
+        CASE WHEN ib.source_path IS NOT NULL THEN regexp_replace(ib.source_path, '/+$', '') || '/' || pi.display_name ELSE pi.display_name END
+      ) AS absolute_path,
       (SELECT count(*)::int FROM image_annotations a
        JOIN projects p ON p.active_label_version_id = a.label_version_id
        WHERE p.id = pi.project_id AND a.project_image_id = pi.id) AS annotation_count

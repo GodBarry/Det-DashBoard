@@ -6,18 +6,30 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "数据集管理" })).toBeVisible();
 
-  page.once("dialog", async (dialog) => dialog.accept(`${folderRoot}/level-b/level-c`));
+  page.once("dialog", async (dialog) => dialog.accept(folderRoot));
   await page.getByRole("button", { name: "新建项目" }).click();
-  await expect(page.getByRole("heading", { name: "level-b" })).toBeVisible();
-  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
-  await page.getByRole("button", { name: "根目录" }).click();
   const rootFolder = page.locator("article.project-folder").filter({ hasText: folderRoot });
   await expect(rootFolder).toBeVisible();
-  await rootFolder.getByTitle("进入文件夹").click();
+  await expect(rootFolder.getByTitle("进入文件夹")).toHaveCount(0);
+  await rootFolder.dblclick();
+  await expect(page.getByRole("heading", { name: "下级文件夹" })).toBeVisible();
+  await expect(page.getByText("该级文件夹无数据。")).toBeVisible();
+
+  page.once("dialog", async (dialog) => dialog.accept("level-b"));
+  await page.getByRole("button", { name: "新建文件夹" }).click();
   const middleFolder = page.locator("article.project-folder").filter({ hasText: "level-b" });
   await expect(middleFolder).toBeVisible();
-  await middleFolder.getByTitle("进入文件夹").click();
-  await expect(page.locator("article.project-folder").filter({ hasText: "level-c" })).toBeVisible();
+  await middleFolder.dblclick();
+
+  page.once("dialog", async (dialog) => dialog.accept("level-c"));
+  await page.getByRole("button", { name: "新建文件夹" }).click();
+  const leafFolder = page.locator("article.project-folder").filter({ hasText: "level-c" });
+  await expect(leafFolder).toBeVisible();
+  await leafFolder.dblclick();
+  await expect(page.getByRole("button", { name: "新建文件夹" })).toBeDisabled();
+  await expect(page.getByText("第 3 级 / 最多 3 级")).toBeVisible();
+  await page.getByRole("button", { name: "返回上一级" }).click();
+  await expect(page.getByRole("heading", { name: "level-b" })).toBeVisible();
   await page.getByRole("button", { name: "根目录" }).click();
 
   page.once("dialog", async (dialog) => dialog.accept(projectName));
@@ -34,7 +46,7 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await page.locator(".dir-list button").filter({ hasText: "yolo" }).click();
   await page.locator(".dir-list button").filter({ hasText: "scene-yolo" }).click();
   await expect(page.locator(".dir-current")).toHaveText("/test-data/yolo/scene-yolo");
-  await page.getByRole("button", { name: "上一级" }).click();
+  await page.getByRole("button", { name: "上一级", exact: true }).click();
   await expect(page.locator(".dir-current")).toHaveText("/test-data/yolo");
   await page.locator(".dir-list button").filter({ hasText: "scene-yolo" }).click();
   await page.getByRole("button", { name: "选择当前文件夹" }).click();
@@ -47,6 +59,8 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await expect(card).toContainText("1 标注");
   await expect(card.locator("img")).toHaveJSProperty("complete", true);
   await expect.poll(async () => card.locator("img").evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await card.click();
+  await expect(page.locator(".file-path-bar code")).toContainText("/test-data/yolo/scene-yolo/");
 
   const categoryFilter = page.locator(".filter-group").filter({ hasText: "类别" });
   await categoryFilter.getByText("vehicle", { exact: true }).click();
