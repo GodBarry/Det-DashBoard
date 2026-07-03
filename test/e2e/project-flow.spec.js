@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
 test("creates a project, navigates folders, imports YOLO, filters and exports COCO", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   const projectName = `ui-e2e-${Date.now()}`;
   const folderRoot = `ui-root-${Date.now()}`;
   await page.goto("/");
@@ -63,6 +64,12 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await card.click();
   await expect(page.locator(".file-path-bar code")).toContainText("/test-data/yolo/scene-yolo/");
   await expect(page.getByRole("heading", { name: "标签（1）" })).toBeVisible();
+  const previewBounds = await page.locator(".preview-area").boundingBox();
+  const inspectorBounds = await page.locator(".inspector-panel").boundingBox();
+  expect(previewBounds).not.toBeNull();
+  expect(inspectorBounds).not.toBeNull();
+  expect(previewBounds.x + previewBounds.width).toBeLessThanOrEqual(inspectorBounds.x + 1);
+  expect(inspectorBounds.x + inspectorBounds.width).toBeLessThanOrEqual(1281);
 
   const categoryFilter = page.locator(".filter-group").filter({ hasText: "标签" });
   await categoryFilter.locator("summary").click();
