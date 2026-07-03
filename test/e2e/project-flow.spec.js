@@ -53,16 +53,19 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await expect(page.locator(".import-path-row input")).toHaveValue("/test-data/yolo/scene-yolo");
   await page.getByRole("button", { name: "开始导入" }).click();
 
-  await expect(page.locator(".filter-group").filter({ hasText: "场景" }).getByText("scene-yolo", { exact: true })).toBeVisible();
+  const sceneFilter = page.locator(".filter-group").filter({ hasText: "场景" });
+  await sceneFilter.locator("summary").click();
+  await expect(sceneFilter.getByText("scene-yolo", { exact: true })).toBeVisible();
   const card = page.locator(".asset-card").filter({ hasText: "scene-yolo" });
   await expect(card).toHaveCount(1);
-  await expect(card).toContainText("1 标注");
   await expect(card.locator("img")).toHaveJSProperty("complete", true);
   await expect.poll(async () => card.locator("img").evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
   await card.click();
   await expect(page.locator(".file-path-bar code")).toContainText("/test-data/yolo/scene-yolo/");
+  await expect(page.getByRole("heading", { name: "标签（1）" })).toBeVisible();
 
-  const categoryFilter = page.locator(".filter-group").filter({ hasText: "类别" });
+  const categoryFilter = page.locator(".filter-group").filter({ hasText: "标签" });
+  await categoryFilter.locator("summary").click();
   await categoryFilter.getByText("vehicle", { exact: true }).click();
   await expect(card).toHaveCount(1);
 

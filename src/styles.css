@@ -2081,6 +2081,12 @@ button:disabled:hover {
   max-width: none;
 }
 
+.workspace-folder-title {
+  margin: 0 0 12px;
+  color: var(--text-strong);
+  font-size: 20px;
+}
+
 .workspace-sidebar {
   position: sticky;
   top: calc(var(--chrome-h) + var(--header-h) + 16px);

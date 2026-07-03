@@ -500,7 +500,7 @@ function App() {
     fetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId, createDefaultSplits: !isWorkspace }),
+      body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId, createDefaultSplits: false }),
     })
       .then((r) => r.json().then((data) => {
         if (!r.ok) throw new Error(data.error || "新建项目失败");
@@ -853,7 +853,6 @@ function App() {
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
                   <div className="project-actions">
-                    <button title="重命名" onClick={(event) => { event.stopPropagation(); renameProject(project); }}><Edit3 size={16} /></button>
                     <button title="删除项目" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
                   </div>
                 </article>
@@ -934,7 +933,7 @@ function App() {
         <div className="workspace-path-row">
           <button className="icon-only ghost" title="返回项目" onClick={goHome}><ArrowLeft size={16} /></button>
           <FolderOpen size={16} />
-          <button onClick={goHome}>项目</button>
+          <button onClick={goHome}>根目录</button>
           {activeBreadcrumbs.map((project) => (
             <React.Fragment key={project.id}>
               <ChevronRight size={14} />
@@ -943,9 +942,10 @@ function App() {
           ))}
         </div>
         <div className="workspace-commandbar">
-          <button onClick={goHome}><ArrowLeft size={16} />返回</button>
-          <button onClick={createProject}><FolderPlus size={16} />新建文件夹</button>
-          <button onClick={importData}><Import size={16} />导入数据集</button>
+          <button onClick={goUpFolder}><ArrowLeft size={16} />返回上一级</button>
+          <button onClick={createProject} disabled={activeBreadcrumbs.length >= 3} title={activeBreadcrumbs.length >= 3 ? "第 3 级 / 最多 3 级" : undefined}><FolderPlus size={16} />新建文件夹</button>
+          <span className="folder-depth-indicator">第 {Math.min(3, activeBreadcrumbs.length)} 级 / 最多 3 级</span>
+          <button onClick={importData}><Import size={16} />导入数据</button>
           <button onClick={exportProject}><Upload size={16} />导出数据集</button>
           <button onClick={openWorkspaceTrash}><Trash2 size={16} />回收站</button>
           <label className="export-format">导出格式：
@@ -963,33 +963,27 @@ function App() {
           activeProject={activeProject}
           projects={projects}
           openProject={openProject}
-          createProject={createProject}
           summary={summary}
         />
         <main className="preview-area">
+          <h1 className="workspace-folder-title">{activeProject?.name}</h1>
           {hasCurrentImages && <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />}
           <ProgressStrip latestImport={latestImport} jobs={jobs} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
-          <WorkspaceFolders projects={activeChildProjects} openProject={openProject} deleteProject={deleteProject} renameProject={renameProject} />
-          {hasCurrentImages ? (
-            <>
-              <ImageGrid
-                items={items}
-                selected={selected}
-                setSelected={setSelected}
-                page={page}
-                setPage={setPage}
-                openViewer={(item) => setViewerIndex(items.findIndex((x) => x.id === item.id))}
-                checkedIds={checkedIds}
-                setCheckedIds={setCheckedIds}
-                lastCheckedId={lastCheckedId}
-                setLastCheckedId={setLastCheckedId}
-                deleteCheckedImages={deleteCheckedImages}
-              />
-              <ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
-            </>
-          ) : (
-            !activeChildProjects.length && !latestImport && <div className="empty-state folder-empty">当前文件夹为空。可以新建文件夹，或点击上方“导入数据”。</div>
-          )}
+          <WorkspaceFolders projects={activeChildProjects} openProject={openProject} deleteProject={deleteProject} />
+          <ImageGrid
+            items={items}
+            selected={selected}
+            setSelected={setSelected}
+            page={page}
+            setPage={setPage}
+            openViewer={(item) => setViewerIndex(items.findIndex((x) => x.id === item.id))}
+            checkedIds={checkedIds}
+            setCheckedIds={setCheckedIds}
+            lastCheckedId={lastCheckedId}
+            setLastCheckedId={setLastCheckedId}
+            deleteCheckedImages={deleteCheckedImages}
+          />
+          {hasCurrentImages && <ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />}
         </main>
         <Inspector item={hasCurrentImages ? selected : null} summary={summary} />
       </div>
@@ -1965,7 +1959,7 @@ function FilterPanel({ summary, filters, setFilters, imports }) {
   );
 }
 
-function WorkspaceSidebar({ root, activeProject, projects, openProject, createProject, summary }) {
+function WorkspaceSidebar({ root, activeProject, projects, openProject, summary }) {
   const childrenByParent = useMemo(() => {
     const map = new Map();
     for (const project of projects || []) {
@@ -1984,7 +1978,6 @@ function WorkspaceSidebar({ root, activeProject, projects, openProject, createPr
           <span>文件夹树</span>
           <b>{root?.name || activeProject?.name || "当前项目"}</b>
         </div>
-        <button title="新建文件夹" onClick={createProject}><FolderPlus size={15} /></button>
       </div>
       <div className="tree-list">
         {rootRows.map((project) => (
@@ -2034,12 +2027,11 @@ function TreeNode({ project, childrenByParent, activeProject, openProject, depth
   );
 }
 
-function WorkspaceFolders({ projects, openProject, deleteProject, renameProject }) {
-  if (!projects.length) return null;
+function WorkspaceFolders({ projects, openProject, deleteProject }) {
   return (
     <section className="workspace-folders">
       <div className="section-title-row compact-title">
-        <h2>文件夹</h2>
+        <h2>下级文件夹</h2>
         <span className="muted">{projects.length} 个</span>
       </div>
       <div className="project-grid workspace-folder-grid">
@@ -2052,11 +2044,11 @@ function WorkspaceFolders({ projects, openProject, deleteProject, renameProject 
               <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
             </div>
             <div className="project-actions">
-              <button title="重命名" onClick={(event) => { event.stopPropagation(); renameProject(project); }}><Edit3 size={16} /></button>
               <button title="删除文件夹" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
             </div>
           </article>
         ))}
+        {!projects.length && <div className="empty-state">当前目录没有下级文件夹。</div>}
       </div>
     </section>
   );
