@@ -15,7 +15,8 @@
     "test": "node --test test/unit/*.test.js",
     "test:unit": "node --test test/unit/*.test.js",
     "test:e2e": "playwright test",
-    "test:docker": "bash test/run-docker-e2e.sh"
+    "test:docker": "bash test/run-docker-e2e.sh",
+    "release:offline": "bash scripts/build-offline-release.sh"
   },
   "dependencies": {
     "sharp": "0.35.2",

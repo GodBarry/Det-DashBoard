@@ -1,0 +1,109 @@
+name: ${COMPOSE_PROJECT_NAME:-det-dashboard}
+
+services:
+  app:
+    image: ${APP_IMAGE:-det-dashboard:release}
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+      minio:
+        condition: service_healthy
+        restart: true
+      permissions:
+        condition: service_completed_successfully
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4177
+      DATA_ROOT: /data/datasets
+      DATA_ROOT_DISPLAY: ${DATASETS_DIR:-./datasets}
+      BROWSE_ROOT: /host/browse
+      BROWSE_ROOT_DISPLAY: ${HOST_BROWSE_ROOT:-/home}
+      HOST_DIALOG_URL: ""
+      NATIVE_DIALOG_MODE: disabled
+      STORAGE_ROOT: /data/storage
+      FALLBACK_STORAGE_ROOT: /data/storage
+      EXPORT_ROOT: /data/exports
+      EXPORT_ROOT_DISPLAY: ${EXPORTS_DIR:-./exports}
+      DATABASE_URL: postgres://${POSTGRES_USER:-det}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-det_dashboard}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-det-dashboard}
+      OBJECT_STORE_WRITE_FALLBACK: "false"
+      TRAINING_WORKER_ENABLED: ${TRAINING_WORKER_ENABLED:-false}
+      INFERENCE_WORKER_ENABLED: ${INFERENCE_WORKER_ENABLED:-true}
+      PYTHON: /usr/bin/python3
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-5173}:4177"
+    volumes:
+      - ${DATASETS_DIR:-./datasets}:/data/datasets:ro
+      - ${HOST_BROWSE_ROOT:-/home}:/host/browse:ro
+      - ${APP_STORAGE_DIR:-./portable-data/storage}:/data/storage
+      - ${EXPORTS_DIR:-./exports}:/data/exports
+      - ${HOST_MODEL_ROOT:-./runtime-assets/models}:${HOST_MODEL_ROOT:-./runtime-assets/models}:ro
+      - ${HOST_PYTHON_ROOT:-./runtime-assets/python-envs}:${HOST_PYTHON_ROOT:-./runtime-assets/python-envs}:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  permissions:
+    image: ${POSTGRES_IMAGE:-det-dashboard-postgres:16}
+    user: "0:0"
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - >-
+        chown -R ${LOCAL_UID:-1000}:${LOCAL_GID:-1000} /data/storage /data/exports;
+        touch /data/storage/.owner-${LOCAL_UID:-1000}-${LOCAL_GID:-1000};
+        touch /data/exports/.owner-${LOCAL_UID:-1000}-${LOCAL_GID:-1000}
+    volumes:
+      - ${APP_STORAGE_DIR:-./portable-data/storage}:/data/storage
+      - ${EXPORTS_DIR:-./exports}:/data/exports
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-det-dashboard-postgres:16}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-det_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-det}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${POSTGRES_DATA_DIR:-./portable-data/postgres}:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    image: ${MINIO_IMAGE:-det-dashboard-minio:2025-09-07}
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ${MINIO_DATA_DIR:-./portable-data/minio}:/data
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped

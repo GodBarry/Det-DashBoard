@@ -25,6 +25,7 @@ exports/
 *.out.log
 test-results/
 playwright-report/
+release-dist/
 
 # OS/editor noise
 .DS_Store
