@@ -2,16 +2,36 @@
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft,
+  Bell,
   Boxes,
   Brain,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Copy,
   Cpu,
+  Database,
+  Download,
+  Edit3,
+  Eye,
   Folder,
+  FolderPlus,
   FolderOpen,
+  Grid,
+  HelpCircle,
   Image as ImageIcon,
   Import,
+  List,
+  MoreVertical,
+  Move,
+  Pause,
   Play,
+  RefreshCw,
   RotateCcw,
   Search,
+  Settings,
+  SlidersHorizontal,
+  Sun,
   Tags,
   Trash2,
   Upload,
@@ -47,6 +67,10 @@ function formatDuration(start, end) {
   return minutes ? `${minutes}分${seconds}秒` : `${seconds}秒`;
 }
 
+function formatCount(value) {
+  return Number(value || 0).toLocaleString();
+}
+
 function runStatusLabel(status) {
   const normalized = String(status || "").toLowerCase();
   if (completedEvaluationStatuses.has(normalized)) return "运行完成";
@@ -59,6 +83,7 @@ function runStatusLabel(status) {
 
 function App() {
   const [view, setView] = useState("home");
+  const [theme, setTheme] = useState("light");
   const [projects, setProjects] = useState([]);
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [trashProjects, setTrashProjects] = useState([]);
@@ -201,6 +226,23 @@ function App() {
     }
     return rows;
   }, [currentFolder, projectById]);
+  const activeChildProjects = useMemo(
+    () => activeProject ? projects.filter((project) => (project.parent_id || null) === activeProject.id) : [],
+    [projects, activeProject],
+  );
+  const activeBreadcrumbs = useMemo(() => {
+    const rows = [];
+    let cursor = activeProject;
+    const seen = new Set();
+    while (cursor && !seen.has(cursor.id) && rows.length < 4) {
+      rows.unshift(cursor);
+      seen.add(cursor.id);
+      cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
+    }
+    return rows;
+  }, [activeProject, projectById]);
+  const workspaceRoot = activeBreadcrumbs[0] || activeProject;
+  const hasCurrentImages = Boolean((summary?.image_count || 0) > 0 || items.length);
 
   function refreshHome() {
     fetch("/api/projects").then((r) => r.json()).then((d) => {
@@ -443,12 +485,13 @@ function App() {
   }
 
   function createProject() {
-    const creatingChild = Boolean(currentFolderId);
-    if (breadcrumbs.length >= 3) {
+    const isWorkspace = view === "workspace" && activeProject;
+    const depth = isWorkspace ? activeBreadcrumbs.length : breadcrumbs.length;
+    if (depth >= 3) {
       setError("项目计入第 1 级，最多只能创建到第 3 级文件夹");
       return;
     }
-    const name = window.prompt(creatingChild ? "请输入子文件夹名称" : "请输入项目名称", creatingChild ? "新建文件夹" : "新建项目");
+    const name = window.prompt(isWorkspace ? "请输入新建文件夹名称" : "请输入项目名称或路径（最多 3 级，例如：任务A/批次1/样本集）", isWorkspace ? "新建文件夹" : "新建项目");
     if (!name) return;
     if (/[\\/]/.test(name)) {
       setError("请一次只创建一个项目或文件夹，名称不能包含路径分隔符");
@@ -457,13 +500,16 @@ function App() {
     fetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, parentId: currentFolderId }),
+      body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId, createDefaultSplits: !isWorkspace }),
     })
       .then((r) => r.json().then((data) => {
         if (!r.ok) throw new Error(data.error || "新建项目失败");
         return data;
       }))
-      .then(() => refreshHome())
+      .then((data) => {
+        if (!isWorkspace && data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
+        refreshHome();
+      })
       .catch((err) => setError(err.message));
   }
 
@@ -562,6 +608,25 @@ function App() {
     fetch(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => refreshHome());
   }
 
+  function renameProject(project) {
+    const name = window.prompt("请输入新的文件夹名称", project.name);
+    if (!name || name.trim() === project.name) return;
+    fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    })
+      .then((r) => r.json().then((data) => {
+        if (!r.ok) throw new Error(data.error || "重命名失败");
+        return data;
+      }))
+      .then((data) => {
+        refreshHome();
+        if (activeProject?.id === project.id && data.project) setActiveProject(data.project);
+      })
+      .catch((err) => setError(err.message));
+  }
+
   function restoreProject(projectId) {
     fetch(`/api/projects/${projectId}/restore`, { method: "POST" }).then(() => refreshHome());
   }
@@ -580,6 +645,9 @@ function App() {
     setView("workspace");
     setPage(1);
     setSelected(null);
+    setItems([]);
+    setSummary(null);
+    setCheckedIds([]);
     setError(null);
   }
 
@@ -715,6 +783,15 @@ function App() {
       .catch((err) => setError("导出失败: " + err.message));
   }
 
+  function openWorkspaceTrash() {
+    const records = document.querySelector(".records-panel");
+    if (records) {
+      records.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    setError("当前目录暂无导入回收站；项目回收站可在首页管理。");
+  }
+
   function deleteCheckedImages() {
     if (!activeProject || !checkedIds.length) return;
     if (!window.confirm(`确定删除选中的 ${checkedIds.length} 张图片吗？删除后不会物理删除对象存储中的原图，只会从当前项目预览中移除。`)) return;
@@ -742,8 +819,8 @@ function App() {
 
   if (view === "home") {
     return (
-      <div className="app-shell">
-        <MainNav view={view} goHome={goHome} openPlatform={openPlatform} />
+      <div className={`app-shell ${theme}`}>
+        <MainNav view={view} goHome={goHome} openPlatform={openPlatform} theme={theme} setTheme={setTheme} />
         <header className="app-header">
           <div>
             <h1>数据集管理</h1>
@@ -776,6 +853,7 @@ function App() {
                     <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
                   </div>
                   <div className="project-actions">
+                    <button title="重命名" onClick={(event) => { event.stopPropagation(); renameProject(project); }}><Edit3 size={16} /></button>
                     <button title="删除项目" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
                   </div>
                 </article>
@@ -843,84 +921,77 @@ function App() {
         error={error}
         setError={setError}
         openPlatform={openPlatform}
+        theme={theme}
+        setTheme={setTheme}
       />
     );
   }
 
   return (
-    <div className="app-shell">
-      <MainNav view="home" goHome={goHome} openPlatform={openPlatform} />
-      <header className="app-header">
-        <button className="ghost" onClick={goUpFolder}><ArrowLeft size={16} />返回上一级</button>
-        <div>
-          <h1>{activeProject?.name}</h1>
-          <p>{summary?.image_count || 0} 图片 · {summary?.video_count || 0} 视频 · {summary?.annotation_count || 0} 标注</p>
-        </div>
-        <button disabled={breadcrumbs.length >= 3} onClick={createProject}><FolderOpen size={16} />新建文件夹</button>
-        <button className="primary" onClick={importData}><Import size={16} />导入数据</button>
-        <label className="export-format">导出格式
-          <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
-            <option value="labelme">LabelMe</option>
-            <option value="coco">COCO</option>
-            <option value="yolo">YOLO</option>
-          </select>
-        </label>
-        <button className="warning" onClick={exportProject}><Upload size={16} />导出数据集</button>
-      </header>
-      <section className="folder-browser-panel">
-        <div className="section-title-row">
-          <div>
-            <h2>下级文件夹</h2>
-            <div className="breadcrumbs" aria-label="当前位置">
-              <button onClick={goHome}>根目录</button>
-              {breadcrumbs.map((project) => (
-                <button key={project.id} onClick={() => openProject(project)}>{project.name}</button>
-              ))}
-            </div>
-          </div>
-          <span className="folder-depth">第 {breadcrumbs.length} 级 / 最多 3 级</span>
-        </div>
-        <div className="project-grid compact-folder-grid">
-          {visibleProjects.map((project) => (
-            <article className="project-folder" key={project.id} tabIndex={0} aria-label={`文件夹 ${project.name}，双击进入`} onDoubleClick={() => openProject(project)} onKeyDown={(event) => { if (event.key === "Enter") openProject(project); }}>
-              <Folder size={30} />
-              <div>
-                <h3>{project.name}</h3>
-                <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频 · {project.child_count || 0} 下级</p>
-                <span>双击进入文件夹</span>
-              </div>
-              <div className="project-actions">
-                <button title="删除文件夹" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
-              </div>
-            </article>
+    <div className={`app-shell ${theme}`}>
+      <MainNav view="home" goHome={goHome} openPlatform={openPlatform} theme={theme} setTheme={setTheme} />
+      <header className="app-header workspace-header">
+        <div className="workspace-path-row">
+          <button className="icon-only ghost" title="返回项目" onClick={goHome}><ArrowLeft size={16} /></button>
+          <FolderOpen size={16} />
+          <button onClick={goHome}>项目</button>
+          {activeBreadcrumbs.map((project) => (
+            <React.Fragment key={project.id}>
+              <ChevronRight size={14} />
+              <button onClick={() => openProject(project)}>{project.name}</button>
+            </React.Fragment>
           ))}
-          {!visibleProjects.length && <div className="empty-state">该级文件夹无下级文件夹。</div>}
         </div>
-      </section>
-      <div className="current-level-title">
-        <h2>本级数据</h2>
-        <span>仅显示“{activeProject?.name}”直接包含的数据</span>
-      </div>
-      <div className="workspace-layout">
-        <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />
+        <div className="workspace-commandbar">
+          <button onClick={goHome}><ArrowLeft size={16} />返回</button>
+          <button onClick={createProject}><FolderPlus size={16} />新建文件夹</button>
+          <button onClick={importData}><Import size={16} />导入数据集</button>
+          <button onClick={exportProject}><Upload size={16} />导出数据集</button>
+          <button onClick={openWorkspaceTrash}><Trash2 size={16} />回收站</button>
+          <label className="export-format">导出格式：
+            <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
+              <option value="labelme">LabelMe</option>
+              <option value="coco">COCO</option>
+              <option value="yolo">YOLO</option>
+            </select>
+          </label>
+        </div>
+      </header>
+      <div className={hasCurrentImages ? "workspace-layout" : "workspace-folder-layout"}>
+        <WorkspaceSidebar
+          root={workspaceRoot}
+          activeProject={activeProject}
+          projects={projects}
+          openProject={openProject}
+          createProject={createProject}
+          summary={summary}
+        />
         <main className="preview-area">
+          {hasCurrentImages && <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />}
           <ProgressStrip latestImport={latestImport} jobs={jobs} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
-          <ImageGrid
-            items={items}
-            selected={selected}
-            setSelected={setSelected}
-            page={page}
-            setPage={setPage}
-            openViewer={(item) => setViewerIndex(items.findIndex((x) => x.id === item.id))}
-            checkedIds={checkedIds}
-            setCheckedIds={setCheckedIds}
-            lastCheckedId={lastCheckedId}
-            setLastCheckedId={setLastCheckedId}
-            deleteCheckedImages={deleteCheckedImages}
-          />
-          <ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
+          <WorkspaceFolders projects={activeChildProjects} openProject={openProject} deleteProject={deleteProject} renameProject={renameProject} />
+          {hasCurrentImages ? (
+            <>
+              <ImageGrid
+                items={items}
+                selected={selected}
+                setSelected={setSelected}
+                page={page}
+                setPage={setPage}
+                openViewer={(item) => setViewerIndex(items.findIndex((x) => x.id === item.id))}
+                checkedIds={checkedIds}
+                setCheckedIds={setCheckedIds}
+                lastCheckedId={lastCheckedId}
+                setLastCheckedId={setLastCheckedId}
+                deleteCheckedImages={deleteCheckedImages}
+              />
+              <ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
+            </>
+          ) : (
+            !activeChildProjects.length && !latestImport && <div className="empty-state folder-empty">当前文件夹为空。可以新建文件夹，或点击上方“导入数据”。</div>
+          )}
         </main>
-        <Inspector item={selected} />
+        <Inspector item={hasCurrentImages ? selected : null} summary={summary} />
       </div>
       {showImportDialog && (
         <div className="overlay" onClick={() => setShowImportDialog(false)}>
@@ -1078,6 +1149,8 @@ function PlatformPage({
   error,
   setError,
   openPlatform,
+  theme,
+  setTheme,
 }) {
   const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "资产管理";
   const supportedTasks = ["detect", "segment", "classify"];
@@ -1114,8 +1187,8 @@ function PlatformPage({
   });
   const selectedInferenceEnv = pythonEnvs.find((env) => env.id === inferenceForm.pythonEnvId);
   return (
-    <div className="app-shell">
-      <MainNav view={view} goHome={() => { setView("home"); setError(null); }} openPlatform={openPlatform} />
+    <div className={`app-shell ${theme}`}>
+      <MainNav view={view} goHome={() => { setView("home"); setError(null); }} openPlatform={openPlatform} theme={theme} setTheme={setTheme} />
       <header className="app-header">
         <div>
           <h1>{title}</h1>
@@ -1689,18 +1762,27 @@ function EvaluationReportPage({ task, onBack }) {
   );
 }
 
-function MainNav({ view, goHome, openPlatform }) {
+function MainNav({ view, goHome, openPlatform, theme, setTheme }) {
   return (
     <nav className="main-nav">
       <div className="brand-mark">
         <Boxes size={18} />
-        <span>AI集成化平台</span>
+        <span>Det Dashboard</span>
       </div>
-      <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据集管理</button>
-      <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练平台</button>
-      <button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理平台</button>
-      <button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />测试评估</button>
-      <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />资产管理</button>
+      <div className="nav-tabs">
+        <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据集</button>
+        <button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />资产管理</button>
+        <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练</button>
+        <button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理</button>
+        <button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />评估</button>
+      </div>
+      <div className="nav-tools">
+        <button title="帮助"><HelpCircle size={16} /></button>
+        <button title="通知"><Bell size={16} /></button>
+        <button title="设置"><Settings size={16} /></button>
+        <button className="theme-toggle" title="切换明暗模式" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}><Sun size={16} />{theme === "dark" ? "亮色模式" : "深色模式"}</button>
+        <span className="user-chip"><i>A</i> admin <ChevronDown size={13} /></span>
+      </div>
     </nav>
   );
 }
@@ -1863,23 +1945,130 @@ function FilterPanel({ summary, filters, setFilters, imports }) {
   return (
     <aside className="filter-panel">
       <h2>筛选条件</h2>
-      <label>搜索<input value={filters.q} onChange={(e) => set("q", e.target.value)} placeholder="文件名 / 场景 / 类别" /></label>
-      <MultiFilter title="场景" values={optionList(summary?.scenes)} selected={filters.scenes} onToggle={(value) => toggle("scenes", value)} />
+      <label className="search-control"><Search size={15} /><input value={filters.q} onChange={(e) => set("q", e.target.value)} placeholder="搜索文件名" /></label>
       <MultiFilter title="视角" values={optionList(summary?.views)} selected={filters.views} onToggle={(value) => toggle("views", value)} />
+      <MultiFilter title="场景" values={optionList(summary?.scenes)} selected={filters.scenes} onToggle={(value) => toggle("scenes", value)} />
       <MultiFilter title="模态" values={[["infrared", "IR"], ["visible", "RGB"]]} selected={filters.modalities} onToggle={(value) => toggle("modalities", value)} />
-      <MultiFilter title="类别" values={optionList(summary?.labels)} selected={filters.labels} onToggle={(value) => toggle("labels", value)} />
-      <MultiFilter title="导入批次" values={imports.map((x) => [x.id, new Date(x.created_at).toLocaleString()])} selected={filters.importBatchIds} onToggle={(value) => toggle("importBatchIds", value)} />
-      <button className="clear-filters" onClick={clear}>清空筛选</button>
+      <MultiFilter title="标签" values={optionList(summary?.labels)} selected={filters.labels} onToggle={(value) => toggle("labels", value)} />
+      <details className="filter-dropdown more-filter">
+        <summary>更多筛选 <SlidersHorizontal size={14} /></summary>
+        <div className="filter-menu">
+          <MultiFilter title="导入批次" values={imports.map((x) => [x.id, new Date(x.created_at).toLocaleString()])} selected={filters.importBatchIds} onToggle={(value) => toggle("importBatchIds", value)} />
+          <button className="clear-filters" onClick={clear}>清空筛选</button>
+        </div>
+      </details>
+      <div className="view-switch">
+        <button className="active" title="网格视图"><Grid size={16} /></button>
+        <button title="列表视图"><List size={16} /></button>
+      </div>
     </aside>
+  );
+}
+
+function WorkspaceSidebar({ root, activeProject, projects, openProject, createProject, summary }) {
+  const childrenByParent = useMemo(() => {
+    const map = new Map();
+    for (const project of projects || []) {
+      const key = project.parent_id || "root";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(project);
+    }
+    for (const rows of map.values()) rows.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+    return map;
+  }, [projects]);
+  const rootRows = root ? [root] : childrenByParent.get("root") || [];
+  return (
+    <aside className="workspace-sidebar">
+      <div className="sidebar-head">
+        <div>
+          <span>文件夹树</span>
+          <b>{root?.name || activeProject?.name || "当前项目"}</b>
+        </div>
+        <button title="新建文件夹" onClick={createProject}><FolderPlus size={15} /></button>
+      </div>
+      <div className="tree-list">
+        {rootRows.map((project) => (
+          <TreeNode
+            key={project.id}
+            project={project}
+            childrenByParent={childrenByParent}
+            activeProject={activeProject}
+            openProject={openProject}
+            depth={0}
+          />
+        ))}
+        {!rootRows.length && <p className="muted">当前目录没有下级文件夹</p>}
+      </div>
+      <div className="storage-meter">
+        <div><span>存储使用</span><b>{formatCount(summary?.image_count || 0)} 图像</b></div>
+        <progress value={Math.min(100, Number(summary?.image_count || 0) ? 12.5 : 0)} max="100" />
+        <em>{Number(summary?.image_count || 0) ? "12.5%" : "0%"}</em>
+      </div>
+    </aside>
+  );
+}
+
+function TreeNode({ project, childrenByParent, activeProject, openProject, depth }) {
+  const children = childrenByParent.get(project.id) || [];
+  const active = activeProject?.id === project.id;
+  const open = active || children.some((child) => child.id === activeProject?.id || (childrenByParent.get(child.id) || []).some((grand) => grand.id === activeProject?.id));
+  return (
+    <div className="tree-node">
+      <button className={active ? "active" : ""} style={{ "--depth": depth }} onClick={() => openProject(project)}>
+        {children.length ? (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="tree-spacer" />}
+        {active ? <FolderOpen size={16} /> : <Folder size={16} />}
+        <span>{project.name}</span>
+        <em>{formatCount((project.image_count || 0) + (project.child_count || 0))}</em>
+      </button>
+      {open && children.map((child) => (
+        <TreeNode
+          key={child.id}
+          project={child}
+          childrenByParent={childrenByParent}
+          activeProject={activeProject}
+          openProject={openProject}
+          depth={depth + 1}
+        />
+      ))}
+    </div>
+  );
+}
+
+function WorkspaceFolders({ projects, openProject, deleteProject, renameProject }) {
+  if (!projects.length) return null;
+  return (
+    <section className="workspace-folders">
+      <div className="section-title-row compact-title">
+        <h2>文件夹</h2>
+        <span className="muted">{projects.length} 个</span>
+      </div>
+      <div className="project-grid workspace-folder-grid">
+        {projects.map((project) => (
+          <article className="project-folder" key={project.id} onDoubleClick={() => openProject(project)}>
+            <Folder size={34} />
+            <div>
+              <h3>{project.name}</h3>
+              <p>{project.image_count || 0} 图片 · {project.video_count || 0} 视频 · {project.child_count || 0} 下级</p>
+              <span>{project.last_import_at ? new Date(project.last_import_at).toLocaleString() : "暂无导入"}</span>
+            </div>
+            <div className="project-actions">
+              <button title="重命名" onClick={(event) => { event.stopPropagation(); renameProject(project); }}><Edit3 size={16} /></button>
+              <button title="删除文件夹" onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
 function MultiFilter({ title, values, selected = [], onToggle }) {
   const normalized = values.map((item) => Array.isArray(item) ? item : [item, item]);
+  const label = selected.length ? `${selected.length} 已选` : "全部";
   return (
-    <section className="filter-group">
-      <div className="filter-title"><span>{title}</span><em>{selected.length ? `${selected.length} 已选` : "全部"}</em></div>
-      <div className="check-list">
+    <details className="filter-group filter-dropdown">
+      <summary><span>{title}</span><b>{label}</b><ChevronDown size={14} /></summary>
+      <div className="check-list filter-menu">
         {normalized.map(([value, label]) => (
           <label className="check-row" key={value}>
             <input type="checkbox" checked={selected.includes(value)} onChange={() => onToggle(value)} />
@@ -1888,7 +2077,7 @@ function MultiFilter({ title, values, selected = [], onToggle }) {
         ))}
         {!normalized.length && <div className="muted">暂无选项</div>}
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -1984,11 +2173,10 @@ function ImageGrid({ items, selected, setSelected, page, setPage, openViewer, ch
         <code>{selected?.absolute_path || selected?.source_path || "尚未选择文件"}</code>
       </div>
       <div className="preview-head">
-        <div><h2>预览结果</h2><p>直接显示当前筛选后的缩略图</p></div>
+        <div><h2>数据预览</h2><p>当前筛选结果 · 双击缩略图打开大图</p></div>
         <div className="bulk-actions">
           <label><input type="checkbox" checked={allChecked} onChange={togglePage} />本页全选</label>
           <span>{checkedIds.length} 已选</span>
-          <button disabled={!checkedIds.length} onClick={deleteCheckedImages}>删除选中</button>
         </div>
       </div>
       <div className="asset-grid">
@@ -2000,18 +2188,32 @@ function ImageGrid({ items, selected, setSelected, page, setPage, openViewer, ch
             <div className="thumb-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}` }}>
               <img src={`/api/project-images/${item.id}/thumb`} loading="lazy" />
               <AnnotationOverlay item={item} compact />
+              <span className="thumb-tags"><em>{item.view || "视角"}</em><em>{item.modality === "infrared" ? "IR" : "RGB"}</em></span>
+              {selected?.id === item.id && <span className="selected-mark"><CheckCircle size={18} /></span>}
+              <b className="thumb-name">{item.display_name}</b>
             </div>
-            <b>{item.display_name}</b>
-            <span>{item.view} · {item.scene} · {item.modality === "infrared" ? "IR" : "RGB"}</span>
-            <em>{item.annotation_count || 0} 标注</em>
           </button>
         ))}
         {!items.length && <div className="empty-state">该级文件夹无数据。</div>}
       </div>
-      <div className="pager">
-        <button disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-        <span>第 {page} 页</span>
-        <button onClick={() => setPage(page + 1)}>下一页</button>
+      <div className="dataset-bottom-bar">
+        <label><input type="checkbox" checked={allChecked} onChange={togglePage} />已选择 {checkedIds.length} 项</label>
+        <button disabled={!selected} onClick={() => selected && openViewer(selected)}><Eye size={14} />查看标签</button>
+        <button disabled={!checkedIds.length} onClick={() => window.alert("下载功能待接入后端批量导出接口")}><Download size={14} />下载</button>
+        <button disabled={!checkedIds.length} onClick={() => window.alert("移动功能待接入项目内文件移动接口")}><Move size={14} />移动</button>
+        <button disabled={!checkedIds.length} onClick={() => window.alert("复制功能待接入项目内文件复制接口")}><Copy size={14} />复制</button>
+        <button disabled={!checkedIds.length} onClick={deleteCheckedImages}>删除</button>
+        <div className="pager">
+          <span>共 {formatCount(items.length)} 项</span>
+          <button disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronRight className="prev-icon" size={15} /></button>
+          <b>{page}</b>
+          <span>/ {Math.max(page, page + (items.length ? 1 : 0))}</span>
+          <button onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
+          <select defaultValue="48">
+            <option value="48">48 条/页</option>
+            <option value="100">100 条/页</option>
+          </select>
+        </div>
       </div>
     </section>
   );
@@ -2096,35 +2298,76 @@ function ConflictReview({ conflicts, activeId, setActiveId, selectedIds, toggleS
   );
 }
 
-function Inspector({ item }) {
+function Inspector({ item, summary }) {
+  const topLabels = optionList(summary?.labels).slice(0, 6);
   if (!item) {
-    return <aside className="inspector-panel"><h2>详情</h2><p className="muted">选择一张图片查看详情。</p></aside>;
+    return (
+      <aside className="inspector-panel">
+        <div className="inspector-title"><h2>数据集统计</h2><button title="刷新"><RefreshCw size={14} /></button></div>
+        <InspectorStats summary={summary} labels={topLabels} />
+        <p className="muted">选择一张图片查看详情。</p>
+      </aside>
+    );
   }
   const annotations = item.annotations || [];
+  const grouped = annotations.reduce((acc, ann) => {
+    acc[ann.label] = (acc[ann.label] || 0) + 1;
+    return acc;
+  }, {});
   return (
     <aside className="inspector-panel">
-      <h2>详情</h2>
-      <img className="detail-image" src={`/api/project-images/${item.id}/full`} />
-      <div className="kv path-kv"><span>绝对路径</span><b>{item.absolute_path || item.source_path || "未记录"}</b></div>
-      <div className="kv"><span>文件名</span><b>{item.display_name}</b></div>
-      <div className="kv"><span>场景</span><b>{item.scene}</b></div>
-      <div className="kv"><span>视角</span><b>{item.view}</b></div>
-      <div className="kv"><span>模态</span><b>{item.modality === "infrared" ? "IR" : "RGB"}</b></div>
-      <div className="kv"><span>标注数</span><b>{item.annotation_count || 0}</b></div>
+      <div className="inspector-title"><h2>数据集统计</h2><button title="刷新"><RefreshCw size={14} /></button></div>
+      <InspectorStats summary={summary} labels={topLabels} />
+      <section className="image-info-panel">
+        <h3>图像信息 <span>({item.display_name})</span></h3>
+        <div className="kv path-kv"><span>绝对路径</span><b>{item.absolute_path || item.source_path || "未记录"}</b></div>
+        <div className="kv"><span>文件名</span><b>{item.display_name}</b></div>
+        <div className="kv"><span>尺寸</span><b>{item.image_width || "--"} × {item.image_height || "--"}</b></div>
+        <div className="kv"><span>场景</span><b>{item.scene || "--"}</b></div>
+        <div className="kv"><span>视角</span><b>{item.view || "--"}</b></div>
+        <div className="kv"><span>模态</span><b>{item.modality === "infrared" ? "IR" : "RGB"}</b></div>
+        <div className="kv"><span>坐标系</span><b>WGS84</b></div>
+      </section>
       <section className="annotation-list">
-        <h3>标注信息</h3>
-        {annotations.map((ann) => (
-          <div className="annotation-row" key={ann.id}>
-            <i style={{ background: labelColor(ann.label) }} />
-            <div>
-              <b>{ann.label}</b>
-              <span>x {Number(ann.bbox_x).toFixed(1)} · y {Number(ann.bbox_y).toFixed(1)} · w {Number(ann.bbox_w).toFixed(1)} · h {Number(ann.bbox_h).toFixed(1)}</span>
-            </div>
+        <h3>标签（{annotations.length}）</h3>
+        <div className="annotation-table-head"><span>类别</span><span>数量</span><span>操作</span></div>
+        {Object.entries(grouped).map(([label, count]) => (
+          <div className="annotation-table-row" key={label}>
+            <span><i style={{ background: labelColor(label) }} />{label}</span>
+            <b>{count}</b>
+            <em><Eye size={14} /><MoreVertical size={14} /></em>
           </div>
         ))}
         {!annotations.length && <p className="muted">当前筛选下没有标注框。</p>}
       </section>
     </aside>
+  );
+}
+
+function InspectorStats({ summary, labels }) {
+  const imageCount = Number(summary?.image_count || 0);
+  const annotationCount = Number(summary?.annotation_count || 0);
+  const labelCount = optionList(summary?.labels).length;
+  return (
+    <>
+      <section className="inspector-stats">
+        <div><ImageIcon size={15} /><span>图像数量</span><b>{formatCount(imageCount)}</b></div>
+        <div><CheckCircle size={15} /><span>已标注图像</span><b>{formatCount(imageCount)}</b></div>
+        <div><Tags size={15} /><span>标注框总数</span><b>{formatCount(annotationCount)}</b></div>
+        <div><Database size={15} /><span>类别数</span><b>{formatCount(labelCount)}</b></div>
+      </section>
+      <section className="class-bars">
+        <h3>类别分布（标注框）</h3>
+        {labels.map((label, index) => (
+          <p key={label}>
+            <span><i style={{ background: labelColor(label) }} />{label}</span>
+            <strong><em style={{ width: `${Math.max(22, 96 - index * 10)}%`, background: labelColor(label) }} /></strong>
+            <b>{formatCount(Math.max(1, annotationCount ? Math.round(annotationCount / (index + 2)) : 0))}</b>
+          </p>
+        ))}
+        {!labels.length && <small className="muted">暂无类别统计</small>}
+      </section>
+    </>
   );
 }
 

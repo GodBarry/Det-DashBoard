@@ -1144,6 +1144,7 @@ async function createProject(body) {
   const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
   if (!segments.length) throw httpError(400, "项目名称不能为空");
   let parentId = body.parentId || body.parent_id || null;
+  const originalParentId = parentId;
   const parentDepth = parentId ? await projectDepth(parentId) : 0;
   if (parentDepth + segments.length > 3) throw httpError(400, "项目文件夹最多支持 3 级");
   let project = null;
@@ -1164,7 +1165,35 @@ async function createProject(body) {
     }
     parentId = project.id;
   }
+  if ((body.createDefaultSplits || body.create_default_splits) && !originalParentId && project?.id) {
+    for (const splitName of ["train", "val", "test"]) {
+      await query(
+        `INSERT INTO projects (name, description, project_type, parent_id)
+         SELECT $1, '', 'normal', $2
+         WHERE NOT EXISTS (
+           SELECT 1 FROM projects
+           WHERE deleted_at IS NULL AND name=$1 AND parent_id IS NOT DISTINCT FROM $2
+         )`,
+        [splitName, project.id],
+      );
+    }
+  }
   return project;
+}
+
+async function renameProject(projectId, body = {}) {
+  const name = String(body.name || "").trim();
+  if (!name) throw httpError(400, "文件夹名称不能为空");
+  if (/[\\/]/.test(name)) throw httpError(400, "文件夹名称不能包含路径分隔符");
+  const project = (await query("SELECT * FROM projects WHERE id=$1 AND deleted_at IS NULL", [projectId])).rows[0];
+  if (!project) throw httpError(404, "项目或文件夹不存在");
+  const duplicate = (await query(
+    "SELECT id FROM projects WHERE deleted_at IS NULL AND id<>$1 AND name=$2 AND parent_id IS NOT DISTINCT FROM $3 LIMIT 1",
+    [projectId, name, project.parent_id],
+  )).rows[0];
+  if (duplicate) throw httpError(409, "同级目录下已存在同名文件夹");
+  const updated = await query("UPDATE projects SET name=$1, updated_at=now() WHERE id=$2 RETURNING *", [name, projectId]);
+  return updated.rows[0];
 }
 
 async function projectDepth(projectId) {
@@ -3394,6 +3423,7 @@ async function route(req, res) {
   if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") return sendJson(res, await emptyProjectTrash());
   if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req)) });
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (method === "PATCH" && deleteProject) return sendJson(res, { project: await renameProject(deleteProject[1], await readBody(req)) });
   if (method === "DELETE" && deleteProject) {
     await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
