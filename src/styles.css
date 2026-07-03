@@ -68,6 +68,7 @@ button { cursor: pointer; }
 h1, h2, h3, p { margin: 0; }
 .app-header h1 { font-size: 19px; }
 .app-header p, .muted { color: #8fa3ae; font-size: 12px; }
+.app-header button:disabled { opacity: .45; cursor: not-allowed; }
 .export-format {
   height: 38px;
   display: inline-flex;
@@ -172,12 +173,40 @@ button {
   background: rgba(15, 23, 31, .86);
 }
 .project-folder svg { color: #5eead4; }
+.project-folder:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
+}
 .project-folder h3 { font-size: 15px; margin-bottom: 6px; }
 .project-folder p, .project-folder span { display: block; color: #8fa3ae; font-size: 12px; }
 .project-actions {
   display: grid;
   gap: 6px;
 }
+.folder-browser-panel {
+  margin: 14px 14px 0;
+  padding: 14px;
+  border: 1px solid rgba(94, 234, 212, .18);
+  border-radius: 8px;
+  background: rgba(13, 22, 30, .82);
+}
+.folder-depth {
+  color: #8fa3ae;
+  font-size: 12px;
+}
+.compact-folder-grid .project-folder {
+  min-height: 88px;
+  cursor: default;
+  user-select: none;
+}
+.current-level-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+.current-level-title h2 { font-size: 16px; }
+.current-level-title span { color: #8fa3ae; font-size: 12px; }
 .project-folder button, .trash-row button, .record-row button {
   height: 30px;
   padding: 0 9px;
@@ -981,6 +1010,26 @@ button {
   background: rgba(127, 29, 29, .2);
 }
 .preview-panel, .records-panel { padding: 14px; }
+.file-path-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(94, 234, 212, .22);
+  border-radius: 7px;
+  background: rgba(15, 23, 31, .86);
+}
+.file-path-bar span { color: #8fa3ae; font-size: 12px; }
+.file-path-bar code {
+  min-width: 0;
+  overflow: hidden;
+  color: #dffcf7;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .preview-head {
   display: flex;
   align-items: baseline;
@@ -1114,6 +1163,7 @@ button {
 }
 .kv span { color: #8fa3ae; font-size: 12px; }
 .kv b { overflow-wrap: anywhere; font-size: 13px; }
+.path-kv b { font-family: Consolas, "Courier New", monospace; font-size: 11px; }
 .annotation-list {
   margin-top: 14px;
 }
@@ -1174,6 +1224,21 @@ button {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.viewer-file-identity {
+  flex: 1 1 420px;
+  min-width: 240px;
+  display: grid;
+  gap: 2px;
+}
+.viewer-topbar .viewer-file-identity b { flex: none; }
+.viewer-file-identity code {
+  max-width: 100%;
+  overflow: hidden;
+  color: #8fa3ae;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .viewer-topbar span { color: #8fa3ae; font-size: 12px; }
 .viewer-topbar button {
