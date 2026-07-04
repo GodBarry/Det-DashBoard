@@ -17,10 +17,19 @@ RUN npm test
 
 FROM node:22-bookworm-slim@sha256:813a7480f28fdadac1f7f5c824bcdad435b5bc1322a5968bbbdef8d058f9dff4 AS runtime
 
+ARG APP_VERSION=dev
+
 LABEL org.opencontainers.image.title="Det-DashBoard" \
-      org.opencontainers.image.description="Local visual dataset management dashboard"
+      org.opencontainers.image.description="Local visual dataset management dashboard" \
+      org.opencontainers.image.version="${APP_VERSION}"
 
 WORKDIR /app
+
+# Python is the portable baseline for built-in workers. Larger CUDA/ML
+# environments remain mounted, versioned assets rather than image-global state.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force

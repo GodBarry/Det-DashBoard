@@ -8,6 +8,7 @@ tmp/
 portable-data/
 datasets/
 exports/
+release-dist/
 object-store-fallback/
 *.log
 *.err.log

@@ -16,6 +16,25 @@ Node.js API + React 静态页面
 
 推荐通过 Docker Compose 运行。开发模式也支持分别启动 PostgreSQL、MinIO、后端和 Vite。
 
+## 对外发布：完整离线压缩包
+
+发布维护者在联网构建机执行：
+
+```bash
+npm run release:offline -- 0.1.0
+bash scripts/verify-release-archive.sh release-dist/det-dashboard-0.1.0-linux-amd64.tar.gz
+```
+
+产物包含应用、PostgreSQL、MinIO 三个 Docker 镜像及全部部署脚本。目标 Ubuntu 机器只需要 Docker Engine 与 Docker Compose：
+
+```bash
+tar -xzf det-dashboard-0.1.0-linux-amd64.tar.gz
+cd det-dashboard-0.1.0-linux-amd64
+./start.sh
+```
+
+无需克隆源码、Node.js、npm 或互联网。备份、恢复、GPU 和发布结构详见 [`docs/release-architecture.md`](./docs/release-architecture.md)，完整审查见 [`docs/code-audit-2026-07-03.md`](./docs/code-audit-2026-07-03.md)。
+
 第一次接触本项目，建议直接阅读 [`0702使用说明.md`](./0702使用说明.md)，其中包含本次改动前后对比、零基础安装、完整操作流程、数据格式、备份和故障排查。
 
 ## 功能概览
