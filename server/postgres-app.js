@@ -23,6 +23,7 @@ const {
 } = require("./utils");
 const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats");
 const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
+const { evaluateDetections } = require("./evaluation-metrics");
 
 function sendJson(res, data, code = 200) {
   res.writeHead(code, {
@@ -189,7 +190,6 @@ function listFolders(target, scope = "browse") {
   const root = scope === "data" ? dataRoot : browseRoot;
   const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
   const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
-  if (!isInsideRoot(root, current)) throw httpError(403, `路径必须位于浏览根目录内：${displayRoot}`);
   const stat = fs.statSync(current);
   if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
   const dirs = fs.readdirSync(current, { withFileTypes: true })
@@ -199,11 +199,11 @@ function listFolders(target, scope = "browse") {
       return { name: entry.name, path: toDisplayDataPath(fullPath) };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-  const parent = current === root ? "" : path.dirname(current);
+  const parent = path.dirname(current);
   return {
     root: displayRoot,
     current: toDisplayDataPath(current),
-    parent: current === root || !isInsideRoot(root, parent) ? "" : toDisplayDataPath(parent),
+    parent: parent && parent !== current ? toDisplayDataPath(parent) : "",
     dirs,
   };
 }
@@ -327,7 +327,7 @@ function inspectPythonEnv(pythonPath) {
   const version = detectPythonVersion(pythonPath);
   const script = [
     "import json, importlib.util",
-    "info={'ultralytics': bool(importlib.util.find_spec('ultralytics')), 'torch': False, 'torch_version': '', 'cuda_available': False, 'cuda_version': '', 'device_count': 0}",
+    "info={'ultralytics': bool(importlib.util.find_spec('ultralytics')), 'mmdet': bool(importlib.util.find_spec('mmdet')), 'mmcv': bool(importlib.util.find_spec('mmcv')), 'detectron2': bool(importlib.util.find_spec('detectron2')), 'cv2': bool(importlib.util.find_spec('cv2')), 'numpy': bool(importlib.util.find_spec('numpy')), 'torch': False, 'torch_version': '', 'cuda_available': False, 'cuda_version': '', 'device_count': 0}",
     "spec=importlib.util.find_spec('torch')",
     "if spec:",
     "    import torch",
@@ -347,7 +347,7 @@ function inspectPythonEnv(pythonPath) {
   }
   const platform = inferPlatform(pythonPath);
   const accelerator = packages.cuda_available ? "cuda" : "cpu";
-  const status = packages.ultralytics ? "ready" : "missing_ultralytics";
+  const status = packages.torch && (packages.ultralytics || packages.mmdet || packages.detectron2) ? "ready" : "missing_detection_runtime";
   return { version, packages, platform, accelerator, status };
 }
 
@@ -673,6 +673,26 @@ async function ensureRuntimeSchema() {
       artifact_path TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    `CREATE TABLE IF NOT EXISTS runtime_asset_links (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      algorithm_asset_id UUID,
+      model_id UUID,
+      model_version_id UUID,
+      python_env_id UUID,
+      dataset_project_id UUID,
+      last_success_job_id UUID,
+      success_count INT NOT NULL DEFAULT 0,
+      last_metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_success_at TIMESTAMPTZ
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_asset_links_unique
+      ON runtime_asset_links (
+        COALESCE(algorithm_asset_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE(model_version_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE(python_env_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE(dataset_project_id, '00000000-0000-0000-0000-000000000000'::uuid)
+      )`,
     `CREATE TABLE IF NOT EXISTS training_templates (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
@@ -894,6 +914,26 @@ async function ensureRuntimeSchema() {
         artifact_path TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`,
+      `CREATE TABLE IF NOT EXISTS runtime_asset_links (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        algorithm_asset_id UUID,
+        model_id UUID,
+        model_version_id UUID,
+        python_env_id UUID,
+        dataset_project_id UUID,
+        last_success_job_id UUID,
+        success_count INT NOT NULL DEFAULT 0,
+        last_metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_success_at TIMESTAMPTZ
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_asset_links_unique
+        ON runtime_asset_links (
+          COALESCE(algorithm_asset_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(model_version_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(python_env_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(dataset_project_id, '00000000-0000-0000-0000-000000000000'::uuid)
+        )`,
     ];
     const assetRuntimeStatements = [
       mlRuntimeStatements[0],
@@ -1028,6 +1068,26 @@ async function ensureRuntimeSchema() {
         artifact_path TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`,
+      `CREATE TABLE IF NOT EXISTS runtime_asset_links (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        algorithm_asset_id UUID,
+        model_id UUID,
+        model_version_id UUID,
+        python_env_id UUID,
+        dataset_project_id UUID,
+        last_success_job_id UUID,
+        success_count INT NOT NULL DEFAULT 0,
+        last_metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_success_at TIMESTAMPTZ
+      )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_asset_links_unique
+        ON runtime_asset_links (
+          COALESCE(algorithm_asset_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(model_version_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(python_env_id, '00000000-0000-0000-0000-000000000000'::uuid),
+          COALESCE(dataset_project_id, '00000000-0000-0000-0000-000000000000'::uuid)
+        )`,
     ];
     const enabledMlRuntimeStatements = process.env.RUN_ML_SCHEMA === "true" ? mlRuntimeStatements : assetRuntimeStatements;
     for (let index = 0; index < enabledMlRuntimeStatements.length; index += 1) {
@@ -1258,12 +1318,46 @@ async function restoreProjectTree(projectId) {
 
 async function listProjects(trash = false) {
   const result = await query(
-    `SELECT p.*,
-      (SELECT count(*)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS image_count,
-      (SELECT count(*)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS video_count,
-      (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND c.deleted_at IS NULL) AS child_count,
-      (SELECT max(created_at) FROM import_batches ib WHERE ib.project_id=p.id) AS last_import_at
+    `WITH RECURSIVE scoped_projects AS (
+       SELECT id FROM projects WHERE ${trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"}
+     ),
+     subtree AS (
+       SELECT p.id AS root_id, p.id AS project_id
+       FROM projects p
+       JOIN scoped_projects sp ON sp.id = p.id
+       UNION ALL
+       SELECT subtree.root_id, c.id
+       FROM subtree
+       JOIN projects c ON c.parent_id = subtree.project_id
+       JOIN scoped_projects sp ON sp.id = c.id
+     ),
+     image_counts AS (
+       SELECT subtree.root_id, count(pi.id)::int AS image_count
+       FROM subtree
+       JOIN project_images pi ON pi.project_id = subtree.project_id AND pi.deleted_at IS NULL
+       GROUP BY subtree.root_id
+     ),
+     video_counts AS (
+       SELECT subtree.root_id, count(pv.id)::int AS video_count
+       FROM subtree
+       JOIN project_videos pv ON pv.project_id = subtree.project_id AND pv.deleted_at IS NULL
+       GROUP BY subtree.root_id
+     ),
+     import_times AS (
+       SELECT subtree.root_id, max(ib.created_at) AS last_import_at
+       FROM subtree
+       JOIN import_batches ib ON ib.project_id = subtree.project_id
+       GROUP BY subtree.root_id
+     )
+     SELECT p.*,
+      COALESCE(ic.image_count, 0)::int AS image_count,
+      COALESCE(vc.video_count, 0)::int AS video_count,
+      (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND ${trash ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}) AS child_count,
+      it.last_import_at
      FROM projects p
+     LEFT JOIN image_counts ic ON ic.root_id = p.id
+     LEFT JOIN video_counts vc ON vc.root_id = p.id
+     LEFT JOIN import_times it ON it.root_id = p.id
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
      ORDER BY p.created_at DESC`,
   );
@@ -1278,13 +1372,17 @@ async function importPath(body) {
     error.statusCode = 503;
     throw error;
   }
-  const sourcePath = toInternalDataPath(body.sourcePath || "");
-  if (!sourcePath || !fs.existsSync(sourcePath)) throw httpError(400, "导入路径不存在");
-  if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "导入路径必须是文件夹");
-  if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(browseRoot, sourcePath)) {
-    throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
+  const rawSourcePaths = Array.isArray(body.sourcePaths)
+    ? body.sourcePaths
+    : String(body.sourcePath || "").split(";").map((item) => item.trim()).filter(Boolean);
+  const sourcePaths = Array.from(new Set(rawSourcePaths.map((item) => toInternalDataPath(item)).filter(Boolean)));
+  if (!sourcePaths.length) throw httpError(400, "请输入或选择数据文件夹路径");
+  for (const sourcePath of sourcePaths) {
+    if (!fs.existsSync(sourcePath)) throw httpError(400, `导入路径不存在：${sourcePath}`);
+    if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, `导入路径必须是文件夹：${sourcePath}`);
   }
-  body.sourcePath = sourcePath;
+  body.sourcePath = sourcePaths[0];
+  body.sourcePaths = sourcePaths;
 
   const { project, batch } = await transaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [String(projectId)]);
@@ -1302,7 +1400,7 @@ async function importPath(body) {
     const batchRow = (await client.query(
       `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
        VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
-      [projectId, toDisplayDataPath(sourcePath), "正在扫描文件"],
+      [projectId, sourcePaths.map((sourcePath) => toDisplayDataPath(sourcePath)).join(";"), "正在扫描文件"],
     )).rows[0];
     return { project: projectRow, batch: batchRow };
   });
@@ -1336,27 +1434,42 @@ async function cancelImport(importId) {
 
 async function runImportBatch(batchId, project, body) {
   const projectId = project.id;
-  const sourcePath = path.resolve(body.sourcePath || "");
+  const sourceRoots = Array.from(new Set((Array.isArray(body.sourcePaths) && body.sourcePaths.length ? body.sourcePaths : [body.sourcePath])
+    .map((item) => path.resolve(item || ""))
+    .filter(Boolean)));
   let lastCancellationCheck = 0;
-  let files;
+  const sourceGroups = [];
   try {
-    files = await walkAsync(sourcePath, {
-      shouldStop: async () => {
-        if (shuttingDown) return true;
-        const now = Date.now();
-        if (now - lastCancellationCheck < 500) return false;
-        lastCancellationCheck = now;
-        return importCancelled(batchId);
-      },
-    });
+    for (const sourceRoot of sourceRoots) {
+      const files = await walkAsync(sourceRoot, {
+        shouldStop: async () => {
+          if (shuttingDown) return true;
+          const now = Date.now();
+          if (now - lastCancellationCheck < 500) return false;
+          lastCancellationCheck = now;
+          return importCancelled(batchId);
+        },
+      });
+      const images = files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
+      const videos = files.filter((file) => VIDEO_EXTS.has(path.extname(file).toLowerCase()));
+      const parsed = buildDatasetMatches({ files, images, sourceRoot });
+      sourceGroups.push({ sourceRoot, files, images, videos, ...parsed });
+    }
   } catch (error) {
     if (error.code !== "SCAN_CANCELLED") throw error;
     await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
     return;
   }
-  const images = files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
-  const videos = files.filter((file) => VIDEO_EXTS.has(path.extname(file).toLowerCase()));
-  const { matches, unresolved, usedLabelFiles, formatCounts } = buildDatasetMatches({ files, images, sourceRoot: sourcePath });
+  const images = sourceGroups.flatMap((group) => group.images.map((file) => ({ file, sourceRoot: group.sourceRoot, matches: group.matches })));
+  const videos = sourceGroups.flatMap((group) => group.videos.map((file) => ({ file, sourceRoot: group.sourceRoot })));
+  const unresolved = sourceGroups.flatMap((group) => group.unresolved || []);
+  const usedLabelFiles = sourceGroups.flatMap((group) => (group.usedLabelFiles || []).map((file) => ({ file, sourceRoot: group.sourceRoot })));
+  const formatCounts = sourceGroups.reduce((acc, group) => {
+    acc.labelme += group.formatCounts?.labelme || 0;
+    acc.coco += group.formatCounts?.coco || 0;
+    acc.yolo += group.formatCounts?.yolo || 0;
+    return acc;
+  }, { labelme: 0, coco: 0, yolo: 0 });
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
@@ -1374,22 +1487,23 @@ async function runImportBatch(batchId, project, body) {
     [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
   )).rows[0];
 
-  for (const labelFile of usedLabelFiles) {
-    const relative = path.relative(sourcePath, labelFile).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
-    await store.putFile(rawLabelObjectKey(projectId, version.id, relative || path.basename(labelFile)), labelFile);
+  for (const item of usedLabelFiles) {
+    const relative = path.relative(item.sourceRoot, item.file).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
+    await store.putFile(rawLabelObjectKey(projectId, version.id, relative || path.basename(item.file)), item.file);
   }
 
   let imageCount = 0;
   let annCount = 0;
   let unlabeledImageCount = 0;
-  for (const imageFile of images) {
+  for (const imageEntry of images) {
+    const imageFile = imageEntry.file;
     if (imageCount % 5 === 0 && await importCancelled(batchId)) {
       await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [imageCount, "导入已取消", batchId]);
       return;
     }
-    const matched = matches.get(imageKey(imageFile));
+    const matched = imageEntry.matches.get(imageKey(imageFile));
     const meta = matched?.meta || {};
-    const scene = inferSceneFromPath(meta, imageFile, sourcePath);
+    const scene = inferSceneFromPath(meta, imageFile, imageEntry.sourceRoot);
     const asset = await upsertImageAsset(client, imageFile, meta);
     const modality = inferModality(meta, imageFile);
     const displayName = body.rename
@@ -1429,7 +1543,8 @@ async function runImportBatch(batchId, project, body) {
   }
 
   let videoCount = 0;
-  for (const videoFile of videos) {
+  for (const videoEntry of videos) {
+    const videoFile = videoEntry.file;
     if (await importCancelled(batchId)) {
       await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videoCount, "导入已取消", batchId]);
       return;
@@ -2015,8 +2130,8 @@ async function ensureBuiltinAlgorithmAssets() {
     const manifestKey = algorithmManifestKey(asset.algorithmKey, version);
     const adapterKey = algorithmAdapterKey(asset.algorithmKey, version);
     const manifest = algorithmManifest(asset);
-    await store.putJson(manifestKey, manifest);
-    await store.putText(adapterKey, asset.adapter || "", "text/x-python");
+    if (!(await store.objectExists(manifestKey))) await store.putJson(manifestKey, manifest);
+    if (!(await store.objectExists(adapterKey))) await store.putText(adapterKey, asset.adapter || "", "text/x-python");
     await query(
       `INSERT INTO algorithm_assets
        (name, algorithm_key, framework, task_type, version, source_type, minio_prefix, manifest_key, adapter_key, source_prefix, capabilities_json, default_params_json, description, status)
@@ -2053,9 +2168,83 @@ async function ensureBuiltinAlgorithmAssets() {
   }
 }
 
+async function objectText(objectKey) {
+  const stream = await store.getStream(objectKey);
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readAlgorithmManifest(objectKey) {
+  try {
+    return JSON.parse(await objectText(objectKey));
+  } catch (error) {
+    console.error(`Invalid algorithm manifest ${objectKey}:`, error.message);
+    return null;
+  }
+}
+
+function algorithmKeyFromManifestKey(manifestKey) {
+  const parts = String(manifestKey || "").split("/");
+  const index = parts.indexOf("algorithms");
+  return {
+    algorithmKey: parts[index + 1] || "custom_algorithm",
+    version: parts[index + 2] || "custom",
+  };
+}
+
+async function syncMinioAlgorithmAssets() {
+  const manifestKeys = (await store.listObjectKeys("code-assets/algorithms/"))
+    .filter((key) => key.endsWith("/manifest.json"));
+  for (const manifestKey of manifestKeys) {
+    const manifest = await readAlgorithmManifest(manifestKey);
+    if (!manifest) continue;
+    const fallback = algorithmKeyFromManifestKey(manifestKey);
+    const algorithmKey = cleanName(manifest.algorithmKey || manifest.algorithm_key || fallback.algorithmKey, "algorithm").toLowerCase();
+    const version = cleanName(manifest.version || fallback.version || "custom", "version").toLowerCase();
+    const minioPrefix = manifestKey.replace(/\/manifest\.json$/, "");
+    const adapterKey = manifest.adapterKey || manifest.adapter_key || manifest.entry?.adapterKey || `${minioPrefix}/${manifest.entry?.adapter || "adapter.py"}`;
+    const taskType = manifest.task_type || manifest.taskType || manifest.tasks?.[0] || "detect";
+    await query(
+      `INSERT INTO algorithm_assets
+       (name, algorithm_key, framework, task_type, version, source_type, minio_prefix, manifest_key, adapter_key, source_prefix, capabilities_json, default_params_json, description, status)
+       VALUES ($1,$2,$3,$4,$5,'minio',$6,$7,$8,$9,$10,$11,$12,'ready')
+       ON CONFLICT (algorithm_key, version) DO UPDATE SET
+         name=EXCLUDED.name,
+         framework=EXCLUDED.framework,
+         task_type=EXCLUDED.task_type,
+         source_type=CASE WHEN algorithm_assets.source_type='builtin' THEN algorithm_assets.source_type ELSE EXCLUDED.source_type END,
+         minio_prefix=EXCLUDED.minio_prefix,
+         manifest_key=EXCLUDED.manifest_key,
+         adapter_key=EXCLUDED.adapter_key,
+         source_prefix=EXCLUDED.source_prefix,
+         capabilities_json=EXCLUDED.capabilities_json,
+         default_params_json=EXCLUDED.default_params_json,
+         description=EXCLUDED.description,
+         status='ready',
+         deleted_at=NULL,
+         updated_at=now()`,
+      [
+        manifest.name || algorithmKey,
+        algorithmKey,
+        manifest.framework || "custom",
+        taskType,
+        version,
+        minioPrefix,
+        manifestKey,
+        adapterKey,
+        `${minioPrefix}/source/`,
+        JSON.stringify({ ...(manifest.capabilities || {}), tasks: manifest.tasks || manifest.capabilities?.tasks || [taskType], minioSynced: true }),
+        JSON.stringify(manifest.params || manifest.defaultParams || manifest.default_params || {}),
+        manifest.description || "从 MinIO 算法资产 manifest 自动登记",
+      ],
+    );
+  }
+}
 async function listAlgorithmAssets() {
   try {
     await ensureBuiltinAlgorithmAssets();
+    await syncMinioAlgorithmAssets();
     const rows = await query(
       `SELECT * FROM algorithm_assets
        WHERE deleted_at IS NULL
@@ -2122,6 +2311,18 @@ async function listPythonEnvs() {
   return (await query("SELECT * FROM runtime_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
 }
 
+function defaultPythonEnvName(info = {}, accelerator = "cpu", fallback = "python-env") {
+  const versionText = String(info.version || "").match(/(\d+\.\d+)/)?.[1] || String(info.python_version || "").match(/(\d+\.\d+)/)?.[1] || "";
+  const torchText = String(info.packages?.torch_version || info.torch_version || "").match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] || "";
+  const accel = String(accelerator || (info.cuda_available ? "cuda" : "cpu") || "cpu").toLowerCase();
+  const parts = [
+    versionText ? `py${versionText}` : fallback,
+    torchText ? `torch${torchText}` : "torch-unknown",
+    accel,
+  ];
+  return parts.join("-");
+}
+
 async function createPythonEnv(body = {}) {
   const sourceType = body.sourceType || body.source_type || "server_python";
   if (sourceType === "conda_pack") {
@@ -2152,7 +2353,7 @@ async function createPythonEnv(body = {}) {
         packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
-        body.name || path.basename(sourcePath).replace(/\.(tar\.gz|tgz)$/i, ""),
+        body.name || defaultPythonEnvName(info, accelerator, path.basename(sourcePath).replace(/\.(tar\.gz|tgz)$/i, "")),
         pythonPath,
         "conda-pack",
         platform.osType,
@@ -2195,7 +2396,12 @@ async function createPythonEnv(body = {}) {
     inspectedAt: new Date().toISOString(),
     version: info.version,
     packages: info.packages,
-    capabilities: { ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) },
+    capabilities: {
+      ultralytics_detect: Boolean(info.packages.ultralytics),
+      mmdetection_detect: Boolean(info.packages.mmdet && info.packages.mmcv),
+      detectron2_detect: Boolean(info.packages.detectron2),
+      torch: Boolean(info.packages.torch),
+    },
   };
   const sha = crypto.createHash("sha256").update(JSON.stringify(metadata)).digest("hex");
   const artifactKey = serverPythonEnvObjectKey(sha);
@@ -2207,7 +2413,7 @@ async function createPythonEnv(body = {}) {
       packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [
-      body.name || info.version || path.basename(pythonPath),
+      body.name || defaultPythonEnvName(info, accelerator, path.basename(pythonPath)),
       pythonPath,
       envType,
       osType,
@@ -2219,7 +2425,12 @@ async function createPythonEnv(body = {}) {
       Boolean(info.packages.cuda_available),
       info.packages.cuda_version || "",
       JSON.stringify(info.packages),
-      JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
+      JSON.stringify({
+        ultralytics_detect: Boolean(info.packages.ultralytics),
+        mmdetection_detect: Boolean(info.packages.mmdet && info.packages.mmcv),
+        detectron2_detect: Boolean(info.packages.detectron2),
+        torch: Boolean(info.packages.torch),
+      }),
       "server_python",
       artifactKey,
       "metadata.json",
@@ -2408,7 +2619,19 @@ async function listInferenceJobs() {
        ORDER BY ij.created_at DESC
        LIMIT 200`,
     );
-    return rows.rows;
+    return rows.rows.map((row) => {
+      const params = typeof row.params_json === "string" ? JSON.parse(row.params_json || "{}") : (row.params_json || {});
+      const metrics = params?.output?.metrics || {};
+      return {
+        ...row,
+        metrics_json: metrics,
+        image_count: Number(metrics.images || params?.output?.resultCount || 0) || null,
+        prediction_count: Number(metrics.predictions || params?.output?.predictionCount || 0) || null,
+        algorithm_asset_id: params.algorithmAssetId || params.templateId || null,
+        algorithm_name: params.templateName || params.algorithmKey || "",
+        python_env_id: params.pythonEnvId || null,
+      };
+    });
   } catch (error) {
     if (!["42P01", "XX002"].includes(error.code)) throw error;
     return [];
@@ -2417,15 +2640,151 @@ async function listInferenceJobs() {
 
 async function listInferenceResults(jobId) {
   const rows = await query(
-    `SELECT ir.*, pi.display_name, pi.scene, pi.view, pi.modality
+    `SELECT ir.*, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
+            ia.width AS image_width, ia.height AS image_height
      FROM runtime_inference_results ir
      LEFT JOIN project_images pi ON pi.id=ir.project_image_id
+     LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
      WHERE ir.inference_job_id=$1
      ORDER BY ir.created_at, ir.id
      LIMIT 500`,
     [jobId],
   );
-  return rows.rows;
+  return rows.rows.map((row) => ({
+    ...row,
+    thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
+    image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
+  }));
+}
+
+async function getInferenceEvaluation(jobId) {
+  const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw httpError(404, "inference job not found");
+  const resultRows = await listInferenceResults(jobId);
+  const predictionRows = resultRows.map((row) => ({
+    projectImageId: row.project_image_id,
+    predictions: Array.isArray(row.predictions_json) ? row.predictions_json : [],
+  }));
+  const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
+  const project = job.dataset_project_id
+    ? (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0]
+    : null;
+  let groundTruthRows = [];
+  if (project?.active_label_version_id && imageIds.length) {
+    groundTruthRows = (await query(
+      "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])",
+      [project.active_label_version_id, imageIds],
+    )).rows;
+  }
+  const evaluation = evaluateDetections({ predictionRows, groundTruthRows, iouThreshold: 0.5 });
+  const resultByImage = new Map(resultRows.map((row) => [row.project_image_id, row]));
+  return {
+    ...evaluation,
+    jobId,
+    labelVersionId: project?.active_label_version_id || null,
+    reason: groundTruthRows.length ? "" : "当前数据集没有可用于评估的活动标签版本或标注",
+    errors: evaluation.errors.map((row) => {
+      const source = resultByImage.get(row.projectImageId) || {};
+      return {
+        ...row,
+        display_name: source.display_name || source.project_image_id || "图片结果",
+        thumb_url: source.thumb_url || "",
+        image_url: source.image_url || "",
+        predictions_json: source.predictions_json || [],
+        image_width: source.image_width || 0,
+        image_height: source.image_height || 0,
+      };
+    }),
+  };
+}
+async function recordRuntimeAssetLink(job, metrics = {}) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const algorithmAssetId = params.algorithmAssetId || params.templateId || null;
+  const pythonEnvId = params.pythonEnvId || params.python_env_id || null;
+  const modelVersionId = job.model_version_id || null;
+  const datasetProjectId = job.dataset_project_id || null;
+  let modelId = params.modelId || null;
+  if (!modelId && modelVersionId) {
+    modelId = (await query("SELECT model_id FROM model_revisions WHERE id=$1", [modelVersionId])).rows[0]?.model_id || null;
+  }
+  const existing = (await query(
+    `SELECT id FROM runtime_asset_links
+     WHERE algorithm_asset_id IS NOT DISTINCT FROM $1
+       AND model_version_id IS NOT DISTINCT FROM $2
+       AND python_env_id IS NOT DISTINCT FROM $3
+       AND dataset_project_id IS NOT DISTINCT FROM $4
+     LIMIT 1`,
+    [algorithmAssetId, modelVersionId, pythonEnvId, datasetProjectId],
+  )).rows[0];
+  if (existing) {
+    await query(
+      `UPDATE runtime_asset_links
+       SET model_id=$1, last_success_job_id=$2, success_count=success_count+1,
+           last_metrics_json=$3, last_success_at=now()
+       WHERE id=$4`,
+      [modelId, job.id, JSON.stringify(metrics || {}), existing.id],
+    );
+    return;
+  }
+  await query(
+    `INSERT INTO runtime_asset_links
+     (algorithm_asset_id, model_id, model_version_id, python_env_id, dataset_project_id, last_success_job_id, success_count, last_metrics_json, last_success_at)
+     VALUES ($1,$2,$3,$4,$5,$6,1,$7,now())`,
+    [algorithmAssetId, modelId, modelVersionId, pythonEnvId, datasetProjectId, job.id, JSON.stringify(metrics || {})],
+  );
+}
+
+async function backfillRuntimeAssetLinks() {
+  const rows = (await query(
+    `SELECT * FROM runtime_inference_jobs
+     WHERE status IN ('done','completed','succeeded','success')
+     ORDER BY finished_at DESC NULLS LAST
+     LIMIT 100`,
+  )).rows;
+  for (const job of rows) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    if (!(params.algorithmAssetId || params.templateId) || !params.pythonEnvId || !job.model_version_id) continue;
+    const existing = (await query(
+      `SELECT id FROM runtime_asset_links
+       WHERE algorithm_asset_id IS NOT DISTINCT FROM $1
+         AND model_version_id IS NOT DISTINCT FROM $2
+         AND python_env_id IS NOT DISTINCT FROM $3
+         AND dataset_project_id IS NOT DISTINCT FROM $4
+       LIMIT 1`,
+      [params.algorithmAssetId || params.templateId || null, job.model_version_id || null, params.pythonEnvId || null, job.dataset_project_id || null],
+    )).rows[0];
+    if (existing) continue;
+    const metrics = params?.output?.metrics || {};
+    await recordRuntimeAssetLink(job, metrics).catch(() => {});
+  }
+}
+
+async function listRuntimeAssetLinks() {
+  try {
+    await backfillRuntimeAssetLinks();
+    const rows = await query(
+      `SELECT ral.*,
+        aa.name AS algorithm_name, aa.algorithm_key, aa.version AS algorithm_version,
+        mc.name AS model_name, mc.framework AS model_algorithm_name,
+        mv.version_name, mv.stage AS model_stage, mv.created_at AS model_created_at,
+        re.name AS python_env_name, re.python_version, re.torch_version, re.cuda_version, re.cuda_available, re.accelerator, re.created_at AS python_env_created_at,
+        p.name AS dataset_project_name,
+        ij.name AS last_success_job_name
+       FROM runtime_asset_links ral
+       LEFT JOIN algorithm_assets aa ON aa.id=ral.algorithm_asset_id
+       LEFT JOIN model_clusters mc ON mc.id=ral.model_id
+       LEFT JOIN model_revisions mv ON mv.id=ral.model_version_id
+       LEFT JOIN runtime_envs re ON re.id=ral.python_env_id
+       LEFT JOIN projects p ON p.id=ral.dataset_project_id
+       LEFT JOIN runtime_inference_jobs ij ON ij.id=ral.last_success_job_id
+       ORDER BY ral.last_success_at DESC NULLS LAST, ral.success_count DESC
+       LIMIT 200`,
+    );
+    return rows.rows;
+  } catch (error) {
+    if (!["42P01", "XX002"].includes(error.code)) throw error;
+    return [];
+  }
 }
 
 async function deleteInferenceJob(jobId) {
@@ -2453,10 +2812,13 @@ async function createInferenceJob(body = {}) {
     params.algorithmAssetId = algorithm.id;
     params.templateId = algorithm.id;
     params.algorithmKey = algorithm.algorithm_key || algorithm.template_key;
+    params.templateKey = algorithm.algorithm_key || algorithm.template_key;
     params.templateName = algorithm.name;
     params.manifestKey = algorithm.manifest_key;
     params.adapterKey = algorithm.adapter_key;
     params.algorithmMinioPrefix = algorithm.minio_prefix;
+  } else {
+    throw new Error("请选择算法名称：推理任务必须绑定一个算法资产");
   }
   const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const inserted = await query(
@@ -2708,7 +3070,8 @@ async function claimInferenceJob(workerId) {
 
 function isDummyInferenceJob(job) {
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
-  return params.templateKey === "dummy_empty_detector" || (!job.model_version_id && params.templateKey === "dinov3_faster_rcnn");
+  const key = params.algorithmKey || params.templateKey;
+  return key === "dummy_empty_detector";
 }
 
 async function runDummyInferenceJob(job) {
@@ -2766,12 +3129,302 @@ async function runDummyInferenceJob(job) {
   });
 }
 
+function boxIou(a, b) {
+  const ax1 = Number(a.bbox_x || 0);
+  const ay1 = Number(a.bbox_y || 0);
+  const ax2 = ax1 + Number(a.bbox_w || 0);
+  const ay2 = ay1 + Number(a.bbox_h || 0);
+  const bx1 = Number(b.bbox_x || 0);
+  const by1 = Number(b.bbox_y || 0);
+  const bx2 = bx1 + Number(b.bbox_w || 0);
+  const by2 = by1 + Number(b.bbox_h || 0);
+  const iw = Math.max(0, Math.min(ax2, bx2) - Math.max(ax1, bx1));
+  const ih = Math.max(0, Math.min(ay2, by2) - Math.max(ay1, by1));
+  const intersection = iw * ih;
+  const union = Math.max(0, ax2 - ax1) * Math.max(0, ay2 - ay1) + Math.max(0, bx2 - bx1) * Math.max(0, by2 - by1) - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function metricLabel(item = {}) {
+  const label = String(item.label || item.normalized_label || "").trim();
+  if (label) return label;
+  if (item.class_id !== undefined && item.class_id !== null && item.class_id !== "") return "class_" + Number(item.class_id);
+  return "unknown";
+}
+function averagePrecision(points, totalGt) {
+  if (!totalGt) return null;
+  let tp = 0;
+  let fp = 0;
+  const curve = points.map((point) => {
+    if (point.tp) tp += 1;
+    else fp += 1;
+    const recall = tp / totalGt;
+    const precision = tp / Math.max(1, tp + fp);
+    return { recall, precision };
+  });
+  let ap = 0;
+  for (let threshold = 0; threshold <= 100; threshold += 1) {
+    const recallThreshold = threshold / 100;
+    const best = curve.reduce((max, point) => point.recall >= recallThreshold ? Math.max(max, point.precision) : max, 0);
+    ap += best / 101;
+  }
+  return ap;
+}
+
+async function computeDetectionMetrics(job, predictionRows) {
+  const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
+  if (!imageIds.length) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "没有可评估的图片 ID" };
+  const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
+  if (!project?.active_label_version_id) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "项目没有 active_label_version_id" };
+  const gtRows = (await query(
+    `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
+     FROM image_annotations
+     WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
+    [project.active_label_version_id, imageIds],
+  )).rows.map((row) => ({
+    ...row,
+    metricLabel: metricLabel(row),
+  }));
+  const gtByImage = new Map();
+  for (const gt of gtRows) {
+    const list = gtByImage.get(gt.project_image_id) || [];
+    list.push(gt);
+    gtByImage.set(gt.project_image_id, list);
+  }
+  const detections = [];
+  for (const row of predictionRows) {
+    for (const prediction of row.predictions || []) {
+      detections.push({
+        ...prediction,
+        projectImageId: row.projectImageId,
+        metricLabel: metricLabel(prediction),
+        score: Number(prediction.score ?? 0),
+      });
+    }
+  }
+  const labels = Array.from(new Set([...gtRows.map((row) => row.metricLabel), ...detections.map((row) => row.metricLabel)].filter(Boolean)));
+  const thresholds = Array.from({ length: 10 }, (_, index) => Number((0.5 + index * 0.05).toFixed(2)));
+  const apByThreshold = [];
+  let precision50 = 0;
+  let recall50 = 0;
+  for (const threshold of thresholds) {
+    let thresholdTp = 0;
+    let thresholdFp = 0;
+    let thresholdGt = 0;
+    const labelAps = [];
+    for (const label of labels) {
+      const labelGts = gtRows.filter((gt) => gt.metricLabel === label);
+      const labelPreds = detections.filter((prediction) => prediction.metricLabel === label).sort((a, b) => b.score - a.score);
+      thresholdGt += labelGts.length;
+      const used = new Set();
+      const points = [];
+      for (const prediction of labelPreds) {
+        const candidates = (gtByImage.get(prediction.projectImageId) || []).filter((gt) => gt.metricLabel === label);
+        let best = null;
+        let bestIou = 0;
+        for (const gt of candidates) {
+          const key = `${gt.project_image_id}:${gt.label}:${gt.bbox_x}:${gt.bbox_y}:${gt.bbox_w}:${gt.bbox_h}`;
+          if (used.has(key)) continue;
+          const iou = boxIou(prediction, gt);
+          if (iou > bestIou) {
+            bestIou = iou;
+            best = key;
+          }
+        }
+        const matched = best && bestIou >= threshold;
+        if (matched) {
+          used.add(best);
+          thresholdTp += 1;
+        } else {
+          thresholdFp += 1;
+        }
+        points.push({ tp: Boolean(matched) });
+      }
+      if (labelGts.length) {
+        const ap = averagePrecision(points, labelGts.length);
+        if (ap !== null) labelAps.push(ap);
+      }
+    }
+    const map = labelAps.length ? labelAps.reduce((sum, value) => sum + value, 0) / labelAps.length : null;
+    apByThreshold.push({ threshold, map });
+    if (threshold === 0.5) {
+      precision50 = thresholdTp / Math.max(1, thresholdTp + thresholdFp);
+      recall50 = thresholdTp / Math.max(1, thresholdGt);
+    }
+  }
+  const validMaps = apByThreshold.map((item) => item.map).filter((value) => value !== null);
+  const map50 = apByThreshold.find((item) => item.threshold === 0.5)?.map ?? null;
+  const map5095 = validMaps.length ? validMaps.reduce((sum, value) => sum + value, 0) / validMaps.length : null;
+  return {
+    images: predictionRows.length,
+    predictions: detections.length,
+    groundTruth: gtRows.length,
+    labels: labels.length,
+    precision: precision50,
+    recall: recall50,
+    map50,
+    map: map5095,
+    evaluated: true,
+    iouThreshold: 0.5,
+  };
+}
+
+function runChildProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true, ...options });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) return resolve({ stdout, stderr, code });
+      const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
+      error.code = code;
+      error.stdout = stdout;
+      error.stderr = stderr;
+      reject(error);
+    });
+  });
+}
+
+async function runUltralyticsInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const envId = params.pythonEnvId || params.python_env_id;
+  if (!envId) throw new Error("YOLO 推理缺少运行环境资产");
+  const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+  if (!env) throw new Error("YOLO 推理运行环境不存在");
+  if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);
+  const capabilities = env.capabilities_json || {};
+  if (!capabilities.ultralytics_detect) throw new Error("所选运行环境未检测到 ultralytics，不能执行 YOLO 推理");
+  const weightPath = await findWeightArtifact(job.model_version_id);
+  if (!weightPath) throw new Error("YOLO 推理缺少可用模型权重文件");
+
+  const input = params.input || {};
+  const manifestPath = input.manifestPath || path.join(job.output_root, "input-cache", "manifest.json");
+  if (!fs.existsSync(manifestPath)) throw new Error("推理输入 manifest 不存在");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+  const outputDir = path.join(outputRoot, "output");
+  fs.mkdirSync(outputDir, { recursive: true });
+  const predictionsPath = path.join(outputDir, "predictions.json");
+  const runnerPath = path.join(outputRoot, "run_ultralytics_inference.py");
+  const device = env.cuda_available ? String(params.device ?? "0") : "cpu";
+  const runnerConfig = {
+    jobId: job.id,
+    weights: weightPath,
+    manifestPath,
+    outputPath: predictionsPath,
+    conf: Number(params.conf ?? 0.25),
+    iou: Number(params.iou ?? 0.7),
+    imgsz: Number(params.imgsz ?? 640),
+    batch: Math.max(1, Number(params.batch ?? 1)),
+    device,
+  };
+  const runner = [
+    "import json, os, sys",
+    "from ultralytics import YOLO",
+    `cfg = json.loads(${JSON.stringify(JSON.stringify(runnerConfig))})`,
+    "with open(cfg['manifestPath'], 'r', encoding='utf-8') as f:",
+    "    manifest = json.load(f)",
+    "images = manifest.get('images') or []",
+    "root = manifest.get('cacheRoot') or os.path.dirname(cfg['manifestPath'])",
+    "image_paths = []",
+    "by_abs = {}",
+    "for item in images:",
+    "    local_path = item.get('localPath') or item.get('cachedFileName')",
+    "    abs_path = local_path if os.path.isabs(str(local_path)) else os.path.join(root, str(local_path))",
+    "    abs_path = os.path.normpath(abs_path)",
+    "    image_paths.append(abs_path)",
+    "    by_abs[os.path.abspath(abs_path)] = item",
+    "model = YOLO(cfg['weights'])",
+    "rows = []",
+    "names = getattr(model, 'names', {}) or {}",
+    "for abs_path in image_paths:",
+    "    results = model.predict(source=abs_path, conf=cfg['conf'], iou=cfg['iou'], imgsz=cfg['imgsz'], batch=1, device=cfg['device'], verbose=False, stream=True)",
+    "    result = next(iter(results))",
+    "    source_path = os.path.abspath(str(getattr(result, 'path', '') or ''))",
+    "    item = by_abs.get(source_path) or by_abs.get(os.path.abspath(os.path.normpath(source_path))) or {}",
+    "    preds = []",
+    "    boxes = getattr(result, 'boxes', None)",
+    "    if boxes is not None:",
+    "        xyxy = boxes.xyxy.cpu().tolist() if getattr(boxes, 'xyxy', None) is not None else []",
+    "        confs = boxes.conf.cpu().tolist() if getattr(boxes, 'conf', None) is not None else [None] * len(xyxy)",
+    "        clss = boxes.cls.cpu().tolist() if getattr(boxes, 'cls', None) is not None else [None] * len(xyxy)",
+    "        for index, coords in enumerate(xyxy):",
+    "            x1, y1, x2, y2 = [float(v) for v in coords]",
+    "            cls_id = int(clss[index]) if clss[index] is not None else -1",
+    "            label = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)",
+    "            preds.append({'label': label, 'score': None if confs[index] is None else float(confs[index]), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2 - x1), 'bbox_h': max(0.0, y2 - y1), 'class_id': cls_id})",
+    "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(source_path), 'width': item.get('width'), 'height': item.get('height'), 'predictions': preds})",
+    "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'ultralytics_yolo', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
+    "os.makedirs(os.path.dirname(cfg['outputPath']), exist_ok=True)",
+    "with open(cfg['outputPath'], 'w', encoding='utf-8') as f:",
+    "    json.dump(payload, f, ensure_ascii=False, indent=2)",
+    "print(json.dumps({'imageCount': payload['imageCount'], 'predictionCount': payload['predictionCount'], 'outputPath': cfg['outputPath']}, ensure_ascii=False))",
+  ].join("\n");
+  fs.writeFileSync(runnerPath, runner, "utf8");
+  await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`正在执行 YOLO 推理：${env.python_path}`, job.id]);
+  const result = await runChildProcess(env.python_path, [runnerPath], { cwd: outputRoot, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+  const summaryLine = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "{}";
+  let summary = {};
+  try { summary = JSON.parse(summaryLine); } catch { summary = {}; }
+  if (!fs.existsSync(predictionsPath)) throw new Error("YOLO 推理未生成 predictions.json");
+  const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
+  const rows = Array.isArray(predictions.images) ? predictions.images : [];
+  const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
+  const metrics = await computeDetectionMetrics(job, rows);
+
+  await transaction(async (client) => {
+    await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
+    for (const row of rows) {
+      await client.query(
+        `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
+         VALUES ($1,$2,$3,$4)`,
+        [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), predictionsPath],
+      );
+    }
+    const nextParams = {
+      ...params,
+      output: {
+        ...(params.output || {}),
+        predictionsPath,
+        resultCount: rows.length,
+        predictionCount,
+        completedAt: new Date().toISOString(),
+        metrics,
+        runnerSummary: summary,
+      },
+    };
+    await client.query(
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
+      [JSON.stringify(nextParams), `YOLO 推理完成：${rows.length} 张图片，${predictionCount} 个预测框`, job.id],
+    );
+  });
+  await recordRuntimeAssetLink(job, metrics);
+}
+
 async function runInferenceJob(job, workerId) {
   try {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    const algorithmKey = params.algorithmKey || params.templateKey || "";
+    if (algorithmKey === "ultralytics_yolo") {
+      await runUltralyticsInferenceJob(job);
+      return;
+    }
     if (!isDummyInferenceJob(job)) {
+      const missing = [];
+      if (!algorithmKey) missing.push("算法资产");
+      if (!params.pythonEnvId) missing.push("运行环境资产");
+      if (!job.model_version_id) missing.push("模型权重版本");
+      const message = missing.length
+        ? `推理任务无法执行：缺少${missing.join("、")}。请在推理平台选择算法、运行环境和权重后重新提交。`
+        : `算法 ${params.templateName || algorithmKey} 已登记，但当前内置 worker 尚未接入该算法的执行器。请先使用“空检测模型推理”验证流程，或接入对应 Python 适配器。`;
       await query(
-        "UPDATE runtime_inference_jobs SET status='pending', progress=5, message=$1 WHERE id=$2",
-        ["等待外部推理 worker：当前内置 worker 只执行空模型任务", job.id],
+        "UPDATE runtime_inference_jobs SET status='failed', progress=100, message=$1, finished_at=now() WHERE id=$2",
+        [message, job.id],
       );
       return;
     }
@@ -2789,7 +3442,7 @@ function startInferenceWorker() {
   if (String(process.env.INFERENCE_WORKER_ENABLED || "true").toLowerCase() === "false") return;
   const workerId = `local-infer-${process.pid}`;
   let busy = false;
-  setInterval(async () => {
+  const tick = async () => {
     if (busy) return;
     busy = true;
     try {
@@ -2800,7 +3453,9 @@ function startInferenceWorker() {
     } finally {
       busy = false;
     }
-  }, Number(process.env.INFERENCE_WORKER_INTERVAL_MS || 2500));
+  };
+  setInterval(tick, Number(process.env.INFERENCE_WORKER_INTERVAL_MS || 2500));
+  setTimeout(tick, 250);
 }
 
 async function appendTrainingLog(jobId, stream, line) {
@@ -3036,7 +3691,7 @@ function startTrainingWorker() {
   if (String(process.env.TRAINING_WORKER_ENABLED || "true").toLowerCase() === "false") return;
   const workerId = `local-${process.pid}`;
   let busy = false;
-  setInterval(async () => {
+  const tick = async () => {
     if (busy) return;
     busy = true;
     try {
@@ -3047,7 +3702,9 @@ function startTrainingWorker() {
     } finally {
       busy = false;
     }
-  }, Number(process.env.TRAINING_WORKER_INTERVAL_MS || 3000));
+  };
+  setInterval(tick, Number(process.env.TRAINING_WORKER_INTERVAL_MS || 3000));
+  setTimeout(tick, 250);
 }
 
 async function saveImageAnnotations(projectImageId, body = {}) {
@@ -3215,14 +3872,25 @@ async function listProjectImages(projectId, queryParams) {
 
 async function projectSummary(projectId) {
   const rows = await query(
-    `SELECT
-      (SELECT count(*)::int FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS image_count,
-      (SELECT count(*)::int FROM project_videos WHERE project_id=$1 AND deleted_at IS NULL) AS video_count,
-      (SELECT count(*)::int FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS annotation_count,
-      (SELECT json_agg(DISTINCT scene) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS scenes,
-      (SELECT json_agg(DISTINCT view) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS views,
-      (SELECT json_agg(DISTINCT modality) FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS modalities,
-      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS labels`,
+    `WITH RECURSIVE subtree AS (
+       SELECT id, active_label_version_id FROM projects WHERE id=$1 AND deleted_at IS NULL
+       UNION ALL
+       SELECT p.id, p.active_label_version_id
+       FROM projects p
+       JOIN subtree ON p.parent_id = subtree.id
+       WHERE p.deleted_at IS NULL
+     )
+     SELECT
+      (SELECT count(*)::int FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS direct_image_count,
+      (SELECT count(*)::int FROM project_videos WHERE project_id=$1 AND deleted_at IS NULL) AS direct_video_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS direct_annotation_count,
+      (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS image_count,
+      (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE pv.deleted_at IS NULL) AS video_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.active_label_version_id=a.label_version_id) AS annotation_count,
+      (SELECT json_agg(DISTINCT scene) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS scenes,
+      (SELECT json_agg(DISTINCT view) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS views,
+      (SELECT json_agg(DISTINCT modality) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS modalities,
+      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN subtree s ON s.active_label_version_id=a.label_version_id) AS labels`,
     [projectId],
   );
   return rows.rows[0];
@@ -3439,6 +4107,7 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets() });
+  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await listRuntimeAssetLinks() });
   if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates() });
   if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs() });
@@ -3466,6 +4135,8 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
   const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
   if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
+  const inferenceEvaluationMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/evaluation$/);
+  if (method === "GET" && inferenceEvaluationMatch) return sendJson(res, { evaluation: await getInferenceEvaluation(inferenceEvaluationMatch[1]) });
   const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
   if (method === "GET" && inferenceResultsMatch) return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) });
   if (method === "POST" && parsed.pathname === "/api/baselines/preview") return sendJson(res, await createBaselinePreview(await readBody(req)));
@@ -3624,10 +4295,8 @@ async function main() {
     console.log(`BROWSE_ROOT_DISPLAY=${browseRootDisplay}`);
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
-  if (process.env.RUN_EXTENDED_SCHEMA === "true") {
-    startTrainingWorker();
-    startInferenceWorker();
-  }
+  startTrainingWorker();
+  startInferenceWorker();
   return server;
 }
 
@@ -3658,6 +4327,10 @@ main()
     console.error(error);
     process.exit(1);
   });
+
+
+
+
 
 
 
