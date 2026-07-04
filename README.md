@@ -25,7 +25,7 @@ npm run release:offline -- 0.1.0
 bash scripts/verify-release-archive.sh release-dist/det-dashboard-0.1.0-linux-amd64.tar.gz
 ```
 
-产物包含应用、PostgreSQL、MinIO 三个 Docker 镜像及全部部署脚本。目标 Ubuntu 机器只需要 Docker Engine 与 Docker Compose：
+产物包含应用、PostgreSQL、MinIO 三个 Docker 镜像及全部部署脚本。目标 Ubuntu 机器只需要 Docker Engine 与 Docker Compose 即可运行；若要调用部署机原生文件选择器，再安装 Python 3 与 Zenity：
 
 ```bash
 tar -xzf det-dashboard-0.1.0-linux-amd64.tar.gz

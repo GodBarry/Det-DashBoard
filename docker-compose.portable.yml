@@ -19,6 +19,7 @@ services:
       BROWSE_ROOT: /host/browse
       BROWSE_ROOT_DISPLAY: ${BROWSE_ROOT_DISPLAY:-/}
       HOST_DIALOG_URL: ${HOST_DIALOG_URL:-}
+      HOST_DIALOG_TOKEN: ${HOST_DIALOG_TOKEN:-}
       NATIVE_DIALOG_MODE: ${NATIVE_DIALOG_MODE:-disabled}
       STORAGE_ROOT: /data/storage
       FALLBACK_STORAGE_ROOT: /data/storage
@@ -35,6 +36,8 @@ services:
       TRAINING_WORKER_ENABLED: "false"
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-5173}:4177"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${DATASETS_DIR:-./datasets}:/data/datasets:ro
       - ${HOST_BROWSE_ROOT:-/}:/host/browse:ro

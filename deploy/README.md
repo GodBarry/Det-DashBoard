@@ -1,6 +1,12 @@
 # Det-DashBoard 离线发布包
 
-目标机器只需要 Ubuntu、Docker Engine 和 Docker Compose Plugin。
+目标机器需要 Ubuntu、Docker Engine 和 Docker Compose Plugin。要弹出部署机原生文件选择器，还需要桌面会话、Python 3 和 Zenity：
+
+```bash
+sudo apt install -y python3 zenity
+```
+
+无桌面环境时应用仍可运行，并会保留手动绝对路径和网页文件夹浏览作为降级方式。
 
 ## 启动
 
@@ -9,6 +15,8 @@
 ```
 
 首次启动会自动生成数据库和 MinIO 密码、载入离线镜像、创建持久化目录，并等待全部服务健康。访问 `http://localhost:5173`。
+
+点击“导入数据”会在部署本应用的 Ubuntu 机器上打开系统选择器，支持文件夹、单文件和多文件。局域网客户端访问时，窗口仍弹在服务器桌面，不会弹在客户端电脑。
 
 默认只允许应用浏览当前用户主目录，且为只读。需要浏览其他磁盘时，编辑 `.env`：
 

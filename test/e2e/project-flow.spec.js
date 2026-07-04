@@ -51,7 +51,7 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   await expect(page.locator(".dir-current")).toHaveText("/test-data/yolo");
   await page.locator(".dir-list button").filter({ hasText: "scene-yolo" }).click();
   await page.getByRole("button", { name: "选择当前文件夹" }).click();
-  await expect(page.locator(".import-path-row input")).toHaveValue("/test-data/yolo/scene-yolo");
+  await expect(page.locator(".import-path-row textarea")).toHaveValue("/test-data/yolo/scene-yolo");
   await page.getByRole("button", { name: "开始导入" }).click();
 
   const sceneFilter = page.locator(".filter-group").filter({ hasText: "场景" });
@@ -70,6 +70,14 @@ test("creates a project, navigates folders, imports YOLO, filters and exports CO
   expect(inspectorBounds).not.toBeNull();
   expect(previewBounds.x + previewBounds.width).toBeLessThanOrEqual(inspectorBounds.x + 1);
   expect(inspectorBounds.x + inspectorBounds.width).toBeLessThanOrEqual(1281);
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  const compactPreviewBounds = await page.locator(".preview-area").boundingBox();
+  const compactInspectorBounds = await page.locator(".inspector-panel").boundingBox();
+  expect(compactInspectorBounds.y).toBeGreaterThanOrEqual(compactPreviewBounds.y + compactPreviewBounds.height - 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
+  await expect(page.locator(".theme-toggle")).toHaveCSS("white-space", "nowrap");
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   const categoryFilter = page.locator(".filter-group").filter({ hasText: "标签" });
   await categoryFilter.locator("summary").click();

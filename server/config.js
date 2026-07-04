@@ -35,6 +35,7 @@ module.exports = {
   browseRoot: path.resolve(process.env.BROWSE_ROOT || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
   browseRootDisplay: path.resolve(process.env.BROWSE_ROOT_DISPLAY || process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
   hostDialogUrl: process.env.HOST_DIALOG_URL || "",
+  hostDialogToken: process.env.HOST_DIALOG_TOKEN || "",
   nativeDialogMode: process.env.NATIVE_DIALOG_MODE || "server",
   maxRequestBodyBytes: Number(process.env.MAX_REQUEST_BODY_BYTES || 1024 * 1024),
   storageRoot: path.resolve(process.env.STORAGE_ROOT || path.join(projectRoot, "tmp", "local-storage")),

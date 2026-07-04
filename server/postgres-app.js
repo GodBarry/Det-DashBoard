@@ -5,7 +5,7 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay } = require("./config");
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, hostDialogToken, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay } = require("./config");
 const { pool, query, transaction } = require("./db");
 const store = require("./object-store");
 const {
@@ -76,17 +76,40 @@ function runFolderDialog(command, args, timeoutMs = 120000) {
   });
 }
 
-async function selectFolder(defaultPath, description) {
+async function requestHostDialog(mode, defaultPath) {
+  const endpoint = new URL("/api/dialog/select", hostDialogUrl);
+  endpoint.searchParams.set("mode", mode);
+  endpoint.searchParams.set("initialPath", defaultPath || browseRootDisplay);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 125000);
+  try {
+    const response = await fetch(endpoint, {
+      headers: { "x-dialog-token": hostDialogToken },
+      signal: controller.signal,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "宿主机系统选择器不可用");
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function selectNativePaths(mode, defaultPath, description) {
   if (process.platform === "linux") {
     const initialDir = fs.existsSync(defaultPath || "") ? defaultPath : dataRoot;
-    return runFolderDialog("zenity", [
+    const args = [
       "--file-selection",
-      "--directory",
       "--title",
       description || "选择数据文件夹",
       "--filename",
       path.join(initialDir, path.sep),
-    ]);
+    ];
+    if (mode === "folder") args.splice(1, 0, "--directory");
+    if (mode === "files") args.splice(1, 0, "--multiple", "--separator=\n");
+    const result = await runFolderDialog("zenity", args);
+    const selectedPaths = String(result.selectedPath || "").split(/\r?\n/).filter(Boolean);
+    return { ...result, selectedPath: selectedPaths[0] || "", selectedPaths };
   }
 
   if (process.platform === "win32") {
@@ -98,7 +121,8 @@ async function selectFolder(defaultPath, description) {
       `$dialog.SelectedPath = ${psQuote(defaultPath || dataRoot)}`,
       "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath; exit 0 } else { exit 1 }",
     ].join("; ");
-    return runFolderDialog("powershell.exe", ["-NoProfile", "-STA", "-Command", script]);
+    const result = await runFolderDialog("powershell.exe", ["-NoProfile", "-STA", "-Command", script]);
+    return { ...result, selectedPaths: result.selectedPath ? [result.selectedPath] : [] };
   }
 
   return { status: "unavailable", selectedPath: "", error: `暂不支持 ${process.platform} 系统文件夹选择器` };
@@ -1270,6 +1294,30 @@ async function listProjects(trash = false) {
   return result.rows;
 }
 
+function commonSourceRoot(paths) {
+  const directories = paths.map((entry) => fs.statSync(entry).isDirectory() ? entry : path.dirname(entry));
+  let root = path.resolve(directories[0]);
+  while (!directories.every((entry) => isInsideRoot(root, path.resolve(entry)))) {
+    const parent = path.dirname(root);
+    if (parent === root) break;
+    root = parent;
+  }
+  return root;
+}
+
+function normalizeImportSources(body) {
+  const values = Array.isArray(body.sourcePaths) ? body.sourcePaths : [body.sourcePath];
+  const sources = [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean).map(toInternalDataPath))];
+  if (!sources.length) throw httpError(400, "请选择至少一个导入文件或文件夹");
+  for (const source of sources) {
+    if (!fs.existsSync(source)) throw httpError(400, `导入路径不存在：${toDisplayDataPath(source)}`);
+    if (!isInsideRoot(dataRoot, source) && !isInsideRoot(browseRoot, source)) {
+      throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
+    }
+  }
+  return sources;
+}
+
 async function importPath(body) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
@@ -1278,12 +1326,9 @@ async function importPath(body) {
     error.statusCode = 503;
     throw error;
   }
-  const sourcePath = toInternalDataPath(body.sourcePath || "");
-  if (!sourcePath || !fs.existsSync(sourcePath)) throw httpError(400, "导入路径不存在");
-  if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "导入路径必须是文件夹");
-  if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(browseRoot, sourcePath)) {
-    throw httpError(403, `导入路径必须位于浏览根目录内：${browseRootDisplay}`);
-  }
+  const sourcePaths = normalizeImportSources(body);
+  const sourcePath = commonSourceRoot(sourcePaths);
+  body.sourcePaths = sourcePaths;
   body.sourcePath = sourcePath;
 
   const { project, batch } = await transaction(async (client) => {
@@ -1302,7 +1347,7 @@ async function importPath(body) {
     const batchRow = (await client.query(
       `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
        VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
-      [projectId, toDisplayDataPath(sourcePath), "正在扫描文件"],
+      [projectId, sourcePaths.length === 1 ? toDisplayDataPath(sourcePaths[0]) : `${sourcePaths.length} 个选择项（${toDisplayDataPath(sourcePath)}）`, "正在扫描文件"],
     )).rows[0];
     return { project: projectRow, batch: batchRow };
   });
@@ -1337,18 +1382,34 @@ async function cancelImport(importId) {
 async function runImportBatch(batchId, project, body) {
   const projectId = project.id;
   const sourcePath = path.resolve(body.sourcePath || "");
+  const sourcePaths = Array.isArray(body.sourcePaths) && body.sourcePaths.length ? body.sourcePaths.map((entry) => path.resolve(entry)) : [sourcePath];
   let lastCancellationCheck = 0;
   let files;
   try {
-    files = await walkAsync(sourcePath, {
-      shouldStop: async () => {
-        if (shuttingDown) return true;
-        const now = Date.now();
-        if (now - lastCancellationCheck < 500) return false;
-        lastCancellationCheck = now;
-        return importCancelled(batchId);
-      },
-    });
+    const selectedFiles = new Set();
+    const selectedFileDirs = new Set();
+    const shouldStop = async () => {
+      if (shuttingDown) return true;
+      const now = Date.now();
+      if (now - lastCancellationCheck < 500) return false;
+      lastCancellationCheck = now;
+      return importCancelled(batchId);
+    };
+    for (const source of sourcePaths) {
+      if (fs.statSync(source).isDirectory()) {
+        for (const file of await walkAsync(source, { shouldStop })) selectedFiles.add(file);
+      } else {
+        selectedFiles.add(source);
+        selectedFileDirs.add(path.dirname(source));
+      }
+    }
+    const annotationExts = new Set([".json", ".txt", ".yaml", ".yml", ".names", ".xml"]);
+    for (const directory of selectedFileDirs) {
+      for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+        if (entry.isFile() && annotationExts.has(path.extname(entry.name).toLowerCase())) selectedFiles.add(path.join(directory, entry.name));
+      }
+    }
+    files = [...selectedFiles];
   } catch (error) {
     if (error.code !== "SCAN_CANCELLED") throw error;
     await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
@@ -3403,16 +3464,23 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/fs/dirs") {
     return sendJson(res, listFolders(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse"));
   }
-  if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
+  if (method === "GET" && ["/api/dialog/folder", "/api/dialog/select"].includes(parsed.pathname)) {
     if (nativeDialogMode === "disabled") {
-      return sendJson(res, { status: "unavailable", selectedPath: "", error: "系统文件夹选择器未启用" }, 503);
+      return sendJson(res, { status: "unavailable", selectedPath: "", selectedPaths: [], error: "系统文件选择器未启用" }, 503);
     }
     const purpose = parsed.query.purpose || "import";
+    const mode = ["folder", "file", "files"].includes(parsed.query.mode) ? parsed.query.mode : "folder";
     const defaultPath = purpose === "import" ? browseRoot : storageRoot;
-    const result = await selectFolder(defaultPath, purpose === "import" ? "选择要导入的数据文件夹" : "选择导出文件夹");
+    const titles = { folder: "选择要导入的数据文件夹", file: "选择要导入的数据文件", files: "选择多个要导入的数据文件" };
+    const result = nativeDialogMode === "bridge" && hostDialogUrl
+      ? await requestHostDialog(mode, purpose === "import" ? browseRootDisplay : exportRootDisplay)
+      : await selectNativePaths(mode, defaultPath, purpose === "import" ? titles[mode] : "选择导出位置");
+    const rawSelectedPaths = Array.isArray(result.selectedPaths) ? result.selectedPaths : result.selectedPath ? [result.selectedPath] : [];
+    const selectedPaths = nativeDialogMode === "bridge" ? rawSelectedPaths : rawSelectedPaths.map(toDisplayDataPath);
     return sendJson(res, {
       ...result,
-      selectedPath: result.selectedPath ? toDisplayDataPath(result.selectedPath) : "",
+      selectedPath: selectedPaths[0] || "",
+      selectedPaths,
       dataRoot: dataRootDisplay,
       browseRoot: browseRootDisplay,
       storageRoot,

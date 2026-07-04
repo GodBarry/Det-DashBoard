@@ -26,6 +26,7 @@ docker info >/dev/null
 mkdir -p "$OUTPUT_DIR"
 rm -rf "$STAGE" "$ARCHIVE" "$ARCHIVE.sha256"
 mkdir -p "$STAGE/images" "$STAGE/db" "$STAGE/datasets" "$STAGE/exports" \
+  "$STAGE/scripts" \
   "$STAGE/portable-data/storage" "$STAGE/portable-data/postgres" "$STAGE/portable-data/minio" \
   "$STAGE/runtime-assets/models" "$STAGE/runtime-assets/python-envs" "$STAGE/backups"
 
@@ -39,8 +40,10 @@ docker tag "$MINIO_UPSTREAM" "$MINIO_IMAGE"
 
 cp -a deploy/. "$STAGE/"
 cp db/schema.sql "$STAGE/db/schema.sql"
+cp scripts/folder-dialog-bridge.py "$STAGE/scripts/folder-dialog-bridge.py"
 cp docs/release-architecture.md "$STAGE/ARCHITECTURE.md"
 cp docs/code-audit-2026-07-03.md "$STAGE/CODE-AUDIT.md"
+cp docs/architecture-optimization-proposals-2026-07-04.md "$STAGE/ARCHITECTURE-OPTIMIZATION.md"
 cp .env.portable.example "$STAGE/SOURCE-CONFIG-REFERENCE.env"
 cp deploy/env.example "$STAGE/env.example"
 sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$APP_IMAGE|" "$STAGE/env.example"

@@ -111,6 +111,7 @@ function App() {
   const [activeConflictId, setActiveConflictId] = useState(null);
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [importPath, setImportPath] = useState("");
+  const [importPaths, setImportPaths] = useState([]);
   const [exportFormat, setExportFormat] = useState("labelme");
   const [browseBusy, setBrowseBusy] = useState(false);
   const [dirPicker, setDirPicker] = useState(null);
@@ -664,34 +665,41 @@ function App() {
   function importData() {
     if (!activeProject) return;
     setImportPath("");
+    setImportPaths([]);
     setError(null);
     setShowImportDialog(true);
+    if (appConfig.nativeDialogMode !== "disabled") window.setTimeout(() => browsePaths("folder"), 0);
   }
 
-  async function browseFolder() {
+  async function browsePaths(mode = "folder") {
     setError(null);
     if (appConfig.nativeDialogMode === "disabled") {
+      if (mode !== "folder") {
+        setError("当前环境未启用系统文件选择器；可手动输入绝对路径，每行一个。");
+        return;
+      }
       openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
       return;
     }
     setBrowseBusy(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 120000);
-    const dialogBase = String(appConfig.hostDialogUrl || "").replace(/\/$/, "");
-    const dialogUrl = dialogBase ? `${dialogBase}/api/dialog/folder` : "/api/dialog/folder?purpose=import";
+    const dialogUrl = `/api/dialog/select?purpose=import&mode=${encodeURIComponent(mode)}`;
     try {
       const response = await fetch(dialogUrl, { signal: controller.signal, cache: "no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "系统文件夹选择器不可用");
-      if (result.status === "selected" && result.selectedPath) {
-        setImportPath(result.selectedPath);
+      if (result.status === "selected" && (result.selectedPaths?.length || result.selectedPath)) {
+        const paths = result.selectedPaths?.length ? result.selectedPaths : [result.selectedPath];
+        setImportPaths(paths);
+        setImportPath(paths.join("\n"));
       } else if (result.status !== "cancelled") {
         throw new Error(result.error || "系统文件夹选择器不可用");
       }
     } catch (err) {
       const reason = err.name === "AbortError" ? "打开超时" : err.message;
-      openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
-      setError(`系统文件夹选择器失败，已切换到网页选择器：${reason}`);
+      if (mode === "folder") openDataRootPicker(importPath || appConfig.browseRootDisplay || "/");
+      setError(`系统文件选择器失败${mode === "folder" ? "，已切换到网页选择器" : "，请手动输入绝对路径"}：${reason}`);
     } finally {
       window.clearTimeout(timer);
       setBrowseBusy(false);
@@ -712,14 +720,15 @@ function App() {
 
   function chooseDir(pathValue) {
     setImportPath(pathValue);
+    setImportPaths([pathValue]);
     setDirPicker(null);
     setError(null);
   }
 
   function confirmImport() {
-    const p = importPath.trim();
-    if (!p) {
-      setError("请输入或选择数据文件夹路径");
+    const paths = [...new Set(importPath.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+    if (!paths.length) {
+      setError("请输入或选择数据文件、多个文件或文件夹路径");
       return;
     }
     setError(null);
@@ -728,7 +737,7 @@ function App() {
     fetch("/api/imports", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: activeProject.id, sourcePath: p, rename: true }),
+      body: JSON.stringify({ projectId: activeProject.id, sourcePath: paths[0], sourcePaths: paths, rename: true }),
     })
       .then((r) => Promise.all([r.status, r.json()]))
       .then(([status, d]) => {
@@ -991,11 +1000,17 @@ function App() {
         <div className="overlay" onClick={() => setShowImportDialog(false)}>
           <div className="import-dialog" onClick={(e) => e.stopPropagation()}>
             <h2>导入数据</h2>
-            <p className="muted">输入或选择要导入的数据文件夹路径（浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}）</p>
-            <div className="import-path-row">
-              <input value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="例如：/home/barry/图片/项目数据" />
-              <button onClick={browseFolder} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
+            <p className="muted">系统选择器会在部署本应用的 Ubuntu 机器上打开。也可手动输入绝对路径，每行一个。</p>
+            <div className="native-picker-actions">
+              <button onClick={() => browsePaths("folder")} disabled={browseBusy}><FolderOpen size={14} />选择文件夹</button>
+              <button onClick={() => browsePaths("file")} disabled={browseBusy}><ImageIcon size={14} />选择单个文件</button>
+              <button onClick={() => browsePaths("files")} disabled={browseBusy}><Copy size={14} />选择多个文件</button>
             </div>
+            <div className="import-path-row">
+              <textarea value={importPath} onChange={(e) => { setImportPath(e.target.value); setImportPaths(e.target.value.split(/\r?\n/).filter(Boolean)); }} placeholder="例如：/home/barry/图片/项目数据" rows={Math.min(6, Math.max(2, importPaths.length))} />
+              <button onClick={() => browsePaths("folder")} disabled={browseBusy}>{browseBusy ? "正在打开..." : "浏览"}</button>
+            </div>
+            <small className="muted">已选择 {importPaths.length || (importPath.trim() ? 1 : 0)} 个路径 · 浏览根目录：{appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot}</small>
             {error && <div className="error-msg">{error}</div>}
             <div className="dialog-actions">
               <button onClick={() => { setShowImportDialog(false); setError(null); }}>取消</button>

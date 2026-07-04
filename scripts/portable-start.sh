@@ -45,29 +45,33 @@ if [[ "$EXPORT_ROOT_DISPLAY" != /* ]]; then
   export EXPORT_ROOT_DISPLAY="$ROOT_DIR/${EXPORT_ROOT_DISPLAY#./}"
 fi
 export HOST_DIALOG_URL=""
+export HOST_DIALOG_TOKEN="${HOST_DIALOG_TOKEN:-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')}"
 export NATIVE_DIALOG_MODE="disabled"
 export FOLDER_DIALOG_ALLOWED_ORIGINS="${FOLDER_DIALOG_ALLOWED_ORIGINS:-http://localhost:${APP_PORT:-5173},http://127.0.0.1:${APP_PORT:-5173}}"
 
 DIALOG_PID_FILE="$ROOT_DIR/portable-data/folder-dialog.pid"
 DIALOG_LOG_FILE="$ROOT_DIR/portable-data/folder-dialog.log"
-if command -v node >/dev/null 2>&1 && command -v zenity >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+if command -v python3 >/dev/null 2>&1 && command -v zenity >/dev/null 2>&1 && [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
   if [[ -f "$DIALOG_PID_FILE" ]] && kill -0 "$(<"$DIALOG_PID_FILE")" 2>/dev/null; then
-    export HOST_DIALOG_URL="http://127.0.0.1:4178"
+    OLD_DIALOG_PID="$(<"$DIALOG_PID_FILE")"
+    kill "$OLD_DIALOG_PID" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "$OLD_DIALOG_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+  fi
+  FOLDER_DIALOG_HOST=0.0.0.0 FOLDER_DIALOG_TOKEN="$HOST_DIALOG_TOKEN" nohup python3 "$ROOT_DIR/scripts/folder-dialog-bridge.py" >"$DIALOG_LOG_FILE" 2>&1 &
+  DIALOG_PID=$!
+  sleep 0.5
+  if kill -0 "$DIALOG_PID" 2>/dev/null; then
+    echo "$DIALOG_PID" >"$DIALOG_PID_FILE"
+    export HOST_DIALOG_URL="http://host.docker.internal:4178"
     export NATIVE_DIALOG_MODE="bridge"
   else
-    nohup node "$ROOT_DIR/scripts/folder-dialog-bridge.js" >"$DIALOG_LOG_FILE" 2>&1 &
-    DIALOG_PID=$!
-    sleep 0.2
-    if kill -0 "$DIALOG_PID" 2>/dev/null; then
-      echo "$DIALOG_PID" >"$DIALOG_PID_FILE"
-      export HOST_DIALOG_URL="http://127.0.0.1:4178"
-      export NATIVE_DIALOG_MODE="bridge"
-    else
-      echo "Native folder dialog bridge failed to start; web folder picker will be used." >&2
-    fi
+    echo "Native file dialog bridge failed to start; web folder picker will be used." >&2
   fi
 else
-  echo "Node.js/zenity/desktop session unavailable; web folder picker will be used." >&2
+  echo "Python 3, zenity or a desktop session is unavailable; manual paths and the web folder picker remain available." >&2
 fi
 
 if [[ "${BUILD_LOCAL_IMAGE:-true}" == "true" ]]; then
@@ -75,6 +79,13 @@ if [[ "${BUILD_LOCAL_IMAGE:-true}" == "true" ]]; then
 else
   docker compose --env-file "$COMPOSE_ENV_FILE" -f docker-compose.portable.yml pull app
   docker compose --env-file "$COMPOSE_ENV_FILE" -f docker-compose.portable.yml up --no-build -d --wait
+fi
+
+if [[ "$NATIVE_DIALOG_MODE" == "bridge" ]]; then
+  docker compose --env-file "$COMPOSE_ENV_FILE" -f docker-compose.portable.yml exec -T app node -e \
+    "fetch(process.env.HOST_DIALOG_URL + '/health', {headers:{'x-dialog-token':process.env.HOST_DIALOG_TOKEN}}).then(r=>process.exit(r.status===404?0:1)).catch(()=>process.exit(1))" \
+    || { echo "Native file dialog bridge is not reachable from the app container." >&2; exit 1; }
+  echo "Native Ubuntu file picker bridge verified."
 fi
 
 echo "Det-DashBoard is running at http://localhost:${APP_PORT:-5173}"

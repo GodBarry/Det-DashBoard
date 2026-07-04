@@ -57,6 +57,9 @@ initialize_env() {
   if [[ "${MINIO_ROOT_PASSWORD:-}" == "GENERATE_ON_FIRST_START" || -z "${MINIO_ROOT_PASSWORD:-}" ]]; then
     set_env_value MINIO_ROOT_PASSWORD "$(random_secret)"
   fi
+  if [[ "${HOST_DIALOG_TOKEN:-}" == "GENERATE_ON_FIRST_START" || -z "${HOST_DIALOG_TOKEN:-}" ]]; then
+    set_env_value HOST_DIALOG_TOKEN "$(random_secret)"
+  fi
   set_env_value LOCAL_UID "$(id -u)"
   set_env_value LOCAL_GID "$(id -g)"
   load_env
@@ -104,4 +107,46 @@ check_gpu() {
   [[ "${ENABLE_GPU:-false}" == "true" ]] || return 0
   command -v nvidia-smi >/dev/null 2>&1 || die "ENABLE_GPU=true but nvidia-smi is unavailable"
   docker info 2>/dev/null | grep -qi nvidia || die "NVIDIA Container Toolkit is not configured for Docker"
+}
+
+start_dialog_bridge() {
+  local pid_file="$ROOT_DIR/portable-data/folder-dialog.pid"
+  local log_file="$ROOT_DIR/portable-data/folder-dialog.log"
+  set_env_value HOST_DIALOG_URL ""
+  set_env_value NATIVE_DIALOG_MODE disabled
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v zenity >/dev/null 2>&1 || [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    echo "Native Ubuntu picker unavailable (requires host Python 3, zenity and a desktop session); manual path input remains available." >&2
+    load_env
+    return 0
+  fi
+  if [[ -f "$pid_file" ]] && kill -0 "$(<"$pid_file")" 2>/dev/null; then
+    local old_dialog_pid
+    old_dialog_pid="$(<"$pid_file")"
+    kill "$old_dialog_pid" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "$old_dialog_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+  fi
+  FOLDER_DIALOG_HOST=0.0.0.0 FOLDER_DIALOG_TOKEN="$HOST_DIALOG_TOKEN" nohup python3 "$ROOT_DIR/scripts/folder-dialog-bridge.py" >"$log_file" 2>&1 &
+  local dialog_pid=$!
+  sleep 0.5
+  if kill -0 "$dialog_pid" 2>/dev/null; then
+    echo "$dialog_pid" >"$pid_file"
+    set_env_value HOST_DIALOG_URL "http://host.docker.internal:4178"
+    set_env_value NATIVE_DIALOG_MODE bridge
+  else
+    echo "Native Ubuntu picker failed to start; see $log_file" >&2
+  fi
+  load_env
+}
+
+stop_dialog_bridge() {
+  local pid_file="$ROOT_DIR/portable-data/folder-dialog.pid"
+  if [[ -f "$pid_file" ]]; then
+    local dialog_pid
+    dialog_pid="$(<"$pid_file")"
+    kill "$dialog_pid" 2>/dev/null || true
+    rm -f "$pid_file"
+  fi
 }

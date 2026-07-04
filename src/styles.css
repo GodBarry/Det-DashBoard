@@ -1706,16 +1706,33 @@ button {
   gap: 8px;
   margin-top: 14px;
 }
-.import-path-row input {
+.import-path-row input,
+.import-path-row textarea {
   flex: 1;
   min-width: 0;
-  height: 38px;
   border: 1px solid rgba(148, 163, 184, .2);
   border-radius: 7px;
   outline: 0;
   background: rgba(15, 23, 31, .85);
   color: #edf4f7;
   padding: 0 10px;
+}
+.import-path-row input { height: 38px; }
+.import-path-row textarea {
+  min-height: 76px;
+  padding-block: 10px;
+  resize: vertical;
+}
+.native-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.native-picker-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .import-path-row button {
   min-width: 60px;
@@ -1959,6 +1976,7 @@ button:disabled:hover {
 .platform-card select,
 .platform-card textarea,
 .import-path-row input,
+.import-path-row textarea,
 .baseline-dialog input,
 .label-input {
   border: 1px solid var(--border);
@@ -3380,6 +3398,16 @@ button:disabled:hover {
 }
 
 /* Keep previews and the statistics inspector in separate columns at every viewport. */
+.app-shell {
+  overflow-x: clip;
+}
+
+.workspace-layout,
+.workspace-folder-layout {
+  grid-template-columns: 292px minmax(0, 1fr) 360px;
+  overflow: hidden;
+}
+
 .workspace-sidebar {
   grid-column: 1;
   grid-row: 1;
@@ -3388,17 +3416,28 @@ button:disabled:hover {
 .preview-area {
   grid-column: 2;
   grid-row: 1;
+  min-width: 0;
 }
 
 .inspector-panel {
   grid-column: 3;
   grid-row: 1;
+  width: 360px;
+  min-width: 0;
+}
+
+.nav-tools .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 @media (max-width: 1500px) {
   .workspace-layout,
   .workspace-folder-layout {
-    grid-template-columns: 238px minmax(0, 1fr) 300px;
+    grid-template-columns: 238px minmax(0, 1fr) 360px;
   }
 
   .asset-grid {
@@ -3419,6 +3458,7 @@ button:disabled:hover {
   .inspector-panel {
     grid-column: 2;
     grid-row: 2;
+    width: 100%;
     position: static;
     min-height: 0;
     max-height: none;

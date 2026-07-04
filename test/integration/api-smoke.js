@@ -145,6 +145,20 @@ async function main() {
   assert.equal(Number(yolo.images.items[0].annotations[0].bbox_w), 80);
   assert.equal(Number(yolo.images.items[0].annotations[0].bbox_h), 20);
 
+  const selectedFilesProject = (await request("POST", "/api/projects", { name: "e2e-selected-files" })).project;
+  await request("POST", "/api/imports", {
+    projectId: selectedFilesProject.id,
+    sourcePaths: [
+      `${dataRoot}/labelme/scene-labelme/images/one.png`,
+      `${dataRoot}/video/scene-video/clip.mp4`,
+    ],
+    rename: false,
+  });
+  await waitForImport(selectedFilesProject.id);
+  const selectedFilesSummary = (await request("GET", `/api/projects/${selectedFilesProject.id}/summary`)).summary;
+  assert.equal(selectedFilesSummary.image_count, 1);
+  assert.equal(selectedFilesSummary.video_count, 1);
+
   const filtered = await request("GET", `/api/projects/${yolo.project.id}/images?page=1&pageSize=48&scenes=scene-yolo&labels=vehicle`);
   assert.equal(filtered.total, 1);
 
