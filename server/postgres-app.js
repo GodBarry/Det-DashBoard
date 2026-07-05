@@ -1,4 +1,4 @@
-﻿const http = require("http");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const url = require("url");
@@ -2172,7 +2172,7 @@ async function objectText(objectKey) {
   const stream = await store.getStream(objectKey);
   const chunks = [];
   for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks).toString("utf8").replace(/^\uFEFF/, "");
 }
 
 async function readAlgorithmManifest(objectKey) {
