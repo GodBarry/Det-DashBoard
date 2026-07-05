@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: det
       POSTGRES_PASSWORD: det_password
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-55432}:5432"
     volumes:
       - ./runtime/postgres:/var/lib/postgresql/data:Z,U
       - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro,Z

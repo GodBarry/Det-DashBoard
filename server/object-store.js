@@ -93,6 +93,18 @@ function writeFallbackFile(objectKey, filePath) {
   try {
     fs.linkSync(filePath, target);
   } catch (error) {
+    if (error.code === "EEXIST") {
+      try {
+        if (fs.statSync(target).size === sourceSize) return;
+      } catch {}
+      fs.rmSync(target, { force: true });
+      try {
+        fs.linkSync(filePath, target);
+        return;
+      } catch (retryError) {
+        error = retryError;
+      }
+    }
     if (error.code !== "EXDEV" && error.code !== "EPERM" && error.code !== "EACCES") throw error;
     try {
       fs.symlinkSync(filePath, target);
@@ -203,8 +215,54 @@ async function objectSize(objectKey) {
   return 0;
 }
 
+function walkLocalObjectKeys(rootDir, prefix = "") {
+  if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) return [];
+  const keys = [];
+  const stack = [rootDir];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+      } else if (entry.isFile()) {
+        const key = path.relative(rootDir, fullPath).split(path.sep).join("/");
+        if (!prefix || key.startsWith(prefix)) keys.push(key);
+      }
+    }
+  }
+  return keys;
+}
+
+async function listObjectKeys(prefix = "") {
+  const keys = new Set();
+  for (const rootDir of [
+    path.join(storageRoot, "object-store-fallback"),
+    path.join(fallbackStorageRoot, "object-store-fallback"),
+    path.join(__dirname, "..", "object-store-fallback"),
+    path.join(minio.dataDir, minio.bucket),
+  ]) {
+    for (const key of walkLocalObjectKeys(rootDir, prefix)) keys.add(key);
+  }
+  try {
+    if (await ensureBucketSafe()) {
+      await new Promise((resolve, reject) => {
+        const stream = client.listObjectsV2(minio.bucket, prefix, true);
+        stream.on("data", (item) => {
+          if (item?.name) keys.add(item.name);
+        });
+        stream.on("error", reject);
+        stream.on("end", resolve);
+      });
+    }
+  } catch (error) {
+    console.error("MinIO listObjects failed, using local object index only:", error.message);
+  }
+  return Array.from(keys).sort();
+}
 function extOf(filePath) {
   return path.extname(filePath).toLowerCase() || ".bin";
 }
 
-module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+
