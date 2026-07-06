@@ -195,6 +195,7 @@ Det-DashBoard/
 | `MINIO_BUCKET` | `zbh-datasets` | 对象 bucket |
 | `HOST_BROWSE_ROOT` | `/` | 容器允许浏览的宿主目录 |
 | `BROWSE_ROOT_DISPLAY` | `/` | 页面显示的浏览根路径 |
+| `HOST_PATH_MODE` | `posix` | 宿主路径格式；Windows 盘符模式设为 `windows` |
 | `EXPORTS_DIR` | `./exports` | 宿主机导出目录 |
 | `OBJECT_STORE_WRITE_FALLBACK` | `false` | 是否使用本地链接/fallback 写入模式 |
 
@@ -208,6 +209,14 @@ BROWSE_ROOT_DISPLAY=/home/barry/图片
 ```
 
 该挂载始终为只读；应用只会写入专用的 `portable-data/storage` 和 `exports` 挂载。
+
+Windows 纯 Docker Desktop 启动请使用：
+
+```bat
+portable-start.bat
+```
+
+该脚本会检测所有本机文件系统盘符，并生成 `portable-data/windows-drives.override.yml`，把 `C:\`、`D:\` 等只读挂载到容器的 `/host/browse/C`、`/host/browse/D`。网页中通过系统文件夹选择器选到的 `C:\data\images` 会自动映射为容器内路径读取。导出不写入这些只读盘符挂载，而是写入 `EXPORTS_DIR` 对应的可写目录，默认是仓库下 `exports`。
 
 ### 独立对象模式与链接模式
 
@@ -541,7 +550,7 @@ curl -v http://localhost:5173/api/health/ready
 
 ### 文件夹选择器没有弹出
 
-检查宿主机：
+Ubuntu 检查宿主机：
 
 ```bash
 command -v node
@@ -551,6 +560,13 @@ cat portable-data/folder-dialog.log
 ```
 
 原生桥接失败时网页会自动使用内置目录选择器，不影响导入。
+
+Windows 使用 `portable-start.bat` 时，桥接服务通过 PowerShell 打开系统文件夹选择器；日志位于：
+
+```bat
+type portable-data\folder-dialog.log
+type portable-data\folder-dialog.err.log
+```
 
 ### “上一级”按钮不可用
 

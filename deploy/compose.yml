@@ -21,6 +21,7 @@ services:
       DATA_ROOT_DISPLAY: ${DATASETS_DIR:-./datasets}
       BROWSE_ROOT: /host/browse
       BROWSE_ROOT_DISPLAY: ${HOST_BROWSE_ROOT:-/home}
+      HOST_PATH_MODE: ${HOST_PATH_MODE:-posix}
       HOST_DIALOG_URL: ""
       NATIVE_DIALOG_MODE: disabled
       STORAGE_ROOT: /data/storage

@@ -1530,7 +1530,9 @@ const timer = window.setTimeout(() => controller.abort(), 120000);
 
 const dialogBase = String(appConfig.hostDialogUrl || "").replace(/\/$/, "");
 
-const dialogUrl = dialogBase ? `${dialogBase}/api/dialog/folder` : "/api/dialog/folder?purpose=import";
+const dialogQuery = `path=${encodeURIComponent(initialPath)}&title=${encodeURIComponent("选择要导入的数据文件夹")}`;
+
+const dialogUrl = dialogBase ? `${dialogBase}/api/dialog/folder?${dialogQuery}` : `/api/dialog/folder?purpose=import&${dialogQuery}`;
 
 try {
 
@@ -7877,7 +7879,6 @@ setEditDrag({ type: "resize", id: ann.id, handle, start, origin: { x: Number(ann
 }
 
 createRoot(document.getElementById("root")).render(<App />);
-
 
 
 
