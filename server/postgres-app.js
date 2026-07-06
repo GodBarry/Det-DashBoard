@@ -5,7 +5,7 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
 const { pool, query, transaction } = require("./db");
 const store = require("./object-store");
 const {
@@ -158,6 +158,36 @@ function isInsideRoot(root, target) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function isWindowsHostPathMode() {
+  return hostPathMode === "windows";
+}
+
+function windowsHostPathToInternal(value, internalRoot) {
+  if (!isWindowsHostPathMode()) return null;
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (raw === "/" || raw === "\\") return path.resolve(internalRoot);
+  const driveMatch = raw.match(/^([A-Za-z]):[\\/]*(.*)$/);
+  const slashDriveMatch = raw.match(/^\/([A-Za-z])(?:\/(.*))?$/);
+  const match = driveMatch || slashDriveMatch;
+  if (!match) return null;
+  const drive = match[1].toUpperCase();
+  const rest = String(match[2] || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  return path.resolve(internalRoot, drive, ...rest);
+}
+
+function internalToWindowsHostPath(value, internalRoot) {
+  if (!isWindowsHostPathMode()) return null;
+  const resolved = path.resolve(value || "");
+  if (!isInsideRoot(internalRoot, resolved)) return null;
+  const relative = path.relative(internalRoot, resolved);
+  if (!relative) return "/";
+  const parts = relative.split(path.sep).filter(Boolean);
+  const drive = parts.shift();
+  if (!/^[A-Za-z]$/.test(drive || "")) return null;
+  return parts.length ? `${drive.toUpperCase()}:\\${parts.join("\\")}` : `${drive.toUpperCase()}:\\`;
+}
+
 function pathMappings() {
   return [
     { internal: dataRoot, display: dataRootDisplay },
@@ -173,6 +203,10 @@ function bestMappingFor(value, key) {
 }
 
 function toInternalDataPath(value) {
+  const windowsBrowsePath = windowsHostPathToInternal(value, browseRoot);
+  if (windowsBrowsePath) return windowsBrowsePath;
+  const windowsDataPath = windowsHostPathToInternal(value, dataRoot);
+  if (windowsDataPath) return windowsDataPath;
   const resolved = path.resolve(value || dataRoot);
   const internalMapping = bestMappingFor(resolved, "internal");
   if (internalMapping) return resolved;
@@ -186,6 +220,10 @@ function toInternalDataPath(value) {
 
 function toDisplayDataPath(value) {
   const resolved = path.resolve(value || dataRoot);
+  const windowsBrowsePath = internalToWindowsHostPath(resolved, browseRoot);
+  if (windowsBrowsePath) return windowsBrowsePath;
+  const windowsDataPath = internalToWindowsHostPath(resolved, dataRoot);
+  if (windowsDataPath) return windowsDataPath;
   const internalMapping = bestMappingFor(resolved, "internal");
   if (internalMapping) {
     const relative = path.relative(internalMapping.internal, resolved);
@@ -195,7 +233,10 @@ function toDisplayDataPath(value) {
 }
 
 function toScopedInternalPath(value, internalRoot, displayRoot) {
+  const windowsPath = windowsHostPathToInternal(value, internalRoot);
+  if (windowsPath) return windowsPath;
   const resolved = path.resolve(value || displayRoot);
+  if (isWindowsHostPathMode() && (value === "/" || value == null || value === "")) return path.resolve(internalRoot);
   if (isInsideRoot(internalRoot, resolved)) return resolved;
   if (isInsideRoot(displayRoot, resolved)) {
     return path.resolve(internalRoot, path.relative(displayRoot, resolved));
@@ -220,7 +261,7 @@ function listFolders(target, scope = "browse") {
   return {
     root: displayRoot,
     current: toDisplayDataPath(current),
-    parent: parent && parent !== current ? toDisplayDataPath(parent) : "",
+    parent: parent && parent !== current && isInsideRoot(root, parent) ? toDisplayDataPath(parent) : "",
     dirs,
   };
 }
@@ -1477,7 +1518,7 @@ async function listProjects(trash = false) {
      LEFT JOIN video_counts vc ON vc.root_id = p.id
      LEFT JOIN annotation_counts ac ON ac.root_id = p.id
      LEFT JOIN import_times it ON it.root_id = p.id
-     WHERE ${trash ? "p.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects parent WHERE parent.id=p.parent_id AND parent.deleted_at IS NOT NULL)" : "p.deleted_at IS NULL"}
+     WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
      ORDER BY p.created_at DESC`,
   );
   return result.rows;
@@ -2975,27 +3016,35 @@ async function createInferenceJob(body = {}) {
   const project = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
   if (!project) throw new Error("推理数据集项目不存在");
   const modelVersionId = body.modelVersionId || body.model_version_id || null;
+  let modelFramework = "";
   if (modelVersionId) {
-    const version = (await query("SELECT id FROM model_revisions WHERE id=$1", [modelVersionId])).rows[0];
+    const version = (await query(
+      `SELECT mv.id, mc.framework
+       FROM model_revisions mv
+       LEFT JOIN model_clusters mc ON mc.id=mv.model_id
+       WHERE mv.id=$1`,
+      [modelVersionId],
+    )).rows[0];
     if (!version) throw new Error("模型版本不存在");
+    modelFramework = String(version.framework || "").toLowerCase();
   }
   const params = body.params || {};
-  const algorithmAssetId = body.algorithmAssetId || body.algorithm_asset_id || params.algorithmAssetId || params.templateId || null;
-  if (algorithmAssetId) {
-    const algorithms = await listAlgorithmAssets();
-    const algorithm = algorithms.find((item) => String(item.id) === String(algorithmAssetId) || item.algorithm_key === algorithmAssetId || item.template_key === algorithmAssetId);
-    if (!algorithm) throw new Error("算法方法资产不存在");
-    params.algorithmAssetId = algorithm.id;
-    params.templateId = algorithm.id;
-    params.algorithmKey = algorithm.algorithm_key || algorithm.template_key;
-    params.templateKey = algorithm.algorithm_key || algorithm.template_key;
-    params.templateName = algorithm.name;
-    params.manifestKey = algorithm.manifest_key;
-    params.adapterKey = algorithm.adapter_key;
-    params.algorithmMinioPrefix = algorithm.minio_prefix;
-  } else {
-    throw new Error("请选择算法名称：推理任务必须绑定一个算法资产");
-  }
+  const requestedAlgorithmAssetId = body.algorithmAssetId || body.algorithm_asset_id || params.algorithmAssetId || params.templateId || null;
+  const algorithms = await listAlgorithmAssets();
+  const algorithm = requestedAlgorithmAssetId
+    ? algorithms.find((item) => String(item.id) === String(requestedAlgorithmAssetId) || item.algorithm_key === requestedAlgorithmAssetId || item.template_key === requestedAlgorithmAssetId)
+    : algorithms.find((item) => modelFramework && String(item.framework || "").toLowerCase() === modelFramework)
+      || algorithms.find((item) => item.algorithm_key === "dummy_empty_detector")
+      || algorithms[0];
+  if (!algorithm) throw new Error(requestedAlgorithmAssetId ? "算法方法资产不存在" : "请选择算法名称：推理任务必须绑定一个算法资产");
+  params.algorithmAssetId = algorithm.id;
+  params.templateId = algorithm.id;
+  params.algorithmKey = algorithm.algorithm_key || algorithm.template_key;
+  params.templateKey = algorithm.algorithm_key || algorithm.template_key;
+  params.templateName = algorithm.name;
+  params.manifestKey = algorithm.manifest_key;
+  params.adapterKey = algorithm.adapter_key;
+  params.algorithmMinioPrefix = algorithm.minio_prefix;
   const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const inserted = await query(
     `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message)
@@ -4242,6 +4291,7 @@ async function route(req, res) {
       dataRootDisplay,
       browseRoot,
       browseRootDisplay,
+      hostPathMode,
       hostDialogUrl,
       nativeDialogMode,
       storageRoot,
@@ -4391,7 +4441,7 @@ async function route(req, res) {
   }
 
   // Serve static files from dist/
-  if (method === "GET") {
+  if (method === "GET" || method === "HEAD") {
     const distRoot = path.resolve(__dirname, "..", "dist");
     let requestedPath;
     try {
@@ -4421,7 +4471,6 @@ async function route(req, res) {
           ".map": "application/json",
         };
         const contentType = mimeTypes[ext] || "application/octet-stream";
-        const content = fs.readFileSync(filePath);
         const cacheControl = requestedPath.startsWith("/assets/")
           ? "public, max-age=31536000, immutable"
           : ext === ".html" ? "no-store" : "public, max-age=3600";
@@ -4432,7 +4481,11 @@ async function route(req, res) {
           "x-frame-options": "DENY",
           "referrer-policy": "no-referrer",
         });
-        res.end(content);
+        if (method === "HEAD") {
+          res.end();
+        } else {
+          res.end(fs.readFileSync(filePath));
+        }
         return;
       }
     } catch {
@@ -4449,7 +4502,7 @@ async function route(req, res) {
           "x-frame-options": "DENY",
           "referrer-policy": "no-referrer",
         });
-        res.end(indexHtml);
+        res.end(method === "HEAD" ? undefined : indexHtml);
         return;
       } catch {}
     }
@@ -4483,6 +4536,7 @@ async function main() {
     console.log(`DATA_ROOT_DISPLAY=${dataRootDisplay}`);
     console.log(`BROWSE_ROOT=${browseRoot}`);
     console.log(`BROWSE_ROOT_DISPLAY=${browseRootDisplay}`);
+    console.log(`HOST_PATH_MODE=${hostPathMode}`);
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
   startTrainingWorker();

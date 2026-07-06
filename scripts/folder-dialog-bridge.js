@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { URL } = require("url");
 
 const host = "127.0.0.1";
 const port = Number(process.env.FOLDER_DIALOG_PORT || 4178);
@@ -23,20 +24,37 @@ function sendJson(res, statusCode, body, origin = "") {
   res.end(JSON.stringify(body));
 }
 
+function psQuote(value) {
+  return `'${String(value || "").replace(/'/g, "''")}'`;
+}
+
 function selectFolder(initialPath, title) {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const initialDir = fs.existsSync(initialPath) ? initialPath : "/";
-    const child = spawn("zenity", [
-      "--file-selection",
-      "--directory",
-      "--title",
-      title,
-      "--filename",
-      path.join(initialDir, path.sep),
-    ]);
+    const initialDir = fs.existsSync(initialPath) ? initialPath : process.platform === "win32" ? process.cwd().slice(0, 3) : "/";
+    let child;
+    if (process.platform === "win32") {
+      const script = [
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
+        "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+        `$dialog.Description = ${psQuote(title || "Select folder")}`,
+        `$dialog.SelectedPath = ${psQuote(initialDir)}`,
+        "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath; exit 0 } else { exit 1 }",
+      ].join("; ");
+      child = spawn("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { windowsHide: true });
+    } else {
+      child = spawn("zenity", [
+        "--file-selection",
+        "--directory",
+        "--title",
+        title,
+        "--filename",
+        path.join(initialDir, path.sep),
+      ]);
+    }
     const finish = (result) => {
       if (settled) return;
       settled = true;
@@ -63,10 +81,11 @@ function selectFolder(initialPath, title) {
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || "";
   if (!allowedOrigins.has(origin)) return sendJson(res, 403, { status: "failed", error: "不允许的请求来源" });
-  if (req.method !== "GET" || req.url !== "/api/dialog/folder") {
+  const parsed = new URL(req.url, `http://${host}:${port}`);
+  if (req.method !== "GET" || parsed.pathname !== "/api/dialog/folder") {
     return sendJson(res, 404, { status: "failed", error: "not found" }, origin);
   }
-  const result = await selectFolder("/", "选择要导入的数据文件夹");
+  const result = await selectFolder(parsed.searchParams.get("path") || "/", parsed.searchParams.get("title") || "选择要导入的数据文件夹");
   sendJson(res, 200, result, origin);
 });
 
