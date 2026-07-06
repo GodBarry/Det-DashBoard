@@ -5,7 +5,7 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay } = require("./config");
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
 const { pool, query, transaction } = require("./db");
 const store = require("./object-store");
 const {
@@ -42,6 +42,23 @@ function httpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
+  return `pbkdf2_sha256$120000$${salt}$${hash}`;
+}
+
+function verifyPassword(password, storedHash = "") {
+  const [scheme, iterationsText, salt, expected] = String(storedHash).split("$");
+  if (scheme !== "pbkdf2_sha256" || !salt || !expected) return false;
+  const iterations = Number(iterationsText || 120000);
+  const actual = crypto.pbkdf2Sync(String(password || ""), salt, iterations, 32, "sha256").toString("hex");
+  return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
+}
+
+function userToken(user) {
+  return crypto.createHash("sha256").update(`${user.id}:${user.username}:${user.password_hash}`).digest("hex");
 }
 
 function psQuote(value) {
@@ -385,6 +402,79 @@ function inspectCondaPackArchive(sourcePath, unpackPath, pythonPath) {
   };
 }
 
+async function seedDefaultAdmin() {
+  const existing = (await query("SELECT id FROM app_users WHERE username=$1", ["admin"])).rows[0];
+  if (existing) return;
+  await query(
+    "INSERT INTO app_users (username, password_hash, role, display_name) VALUES ($1,$2,$3,$4)",
+    ["admin", hashPassword("admin"), "admin", "管理员"],
+  );
+}
+
+function publicUser(row = {}) {
+  return { id: row.id, username: row.username, role: row.role, displayName: row.display_name || row.username };
+}
+
+async function loginUser(body = {}) {
+  const username = String(body.username || "").trim();
+  const password = String(body.password || "");
+  if (!username || !password) throw httpError(400, "请输入用户名和密码");
+  const user = (await query("SELECT * FROM app_users WHERE username=$1 AND status='active'", [username])).rows[0];
+  if (!user || !verifyPassword(password, user.password_hash)) throw httpError(401, "账号或密码不正确");
+  return { user: publicUser(user), token: userToken(user) };
+}
+
+async function registerUser(body = {}) {
+  const username = String(body.username || "").trim();
+  const password = String(body.password || "");
+  const displayName = String(body.displayName || body.display_name || username).trim();
+  if (!/^[A-Za-z0-9_\-\u4e00-\u9fa5]{2,32}$/.test(username)) throw httpError(400, "用户名需为 2-32 位中文、字母、数字、下划线或短横线");
+  if (password.length < 4) throw httpError(400, "密码至少 4 位");
+  try {
+    const row = (await query(
+      "INSERT INTO app_users (username, password_hash, role, display_name) VALUES ($1,$2,'user',$3) RETURNING *",
+      [username, hashPassword(password), displayName],
+    )).rows[0];
+    return { user: publicUser(row), token: userToken(row) };
+  } catch (error) {
+    if (error.code === "23505") throw httpError(409, "用户名已存在");
+    throw error;
+  }
+}
+
+function defaultSettings() {
+  return {
+    postgres: databaseUrl.replace(/:[^:@/]+@/, ":****@"),
+    dataStorage: dataRootDisplay || dataRoot,
+    browseRoot: browseRootDisplay || browseRoot,
+    minioStorage: `${minio.endPoint}:${minio.port} / ${minio.bucket}`,
+    minioDataDir: minio.dataDir,
+    pythonAssets: "D:\\Program Files\\miniforge3",
+    algorithmAssets: path.join(minio.dataDir, minio.bucket, "code-assets", "algorithms"),
+    exportRoot: exportRootDisplay,
+  };
+}
+
+async function getAppSettings() {
+  const rows = (await query("SELECT key, value_json FROM app_settings")).rows;
+  const settings = defaultSettings();
+  for (const row of rows) settings[row.key] = row.value_json?.value ?? row.value_json;
+  return settings;
+}
+
+async function saveAppSettings(body = {}) {
+  const allowed = new Set(["postgres", "dataStorage", "browseRoot", "minioStorage", "minioDataDir", "pythonAssets", "algorithmAssets", "exportRoot"]);
+  const entries = Object.entries(body.settings || body).filter(([key]) => allowed.has(key));
+  for (const [key, value] of entries) {
+    await query(
+      `INSERT INTO app_settings (key, value_json, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value_json=EXCLUDED.value_json, updated_at=now()`,
+      [key, JSON.stringify({ value: String(value || "") })],
+    );
+  }
+  return getAppSettings();
+}
+
 async function seedMlRuntimeConfig() {
   const templateCount = (await query("SELECT count(*)::int AS count FROM training_templates")).rows[0].count;
   if (!templateCount) {
@@ -532,6 +622,21 @@ async function ensureRuntimeSchema() {
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    `CREATE TABLE IF NOT EXISTS app_users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      display_name TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
     `CREATE TABLE IF NOT EXISTS baseline_merge_runs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       baseline_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -657,6 +762,7 @@ async function ensureRuntimeSchema() {
       model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
       dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       progress INT NOT NULL DEFAULT 0,
       output_root TEXT NOT NULL DEFAULT '',
@@ -706,6 +812,7 @@ async function ensureRuntimeSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
     "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     `CREATE TABLE IF NOT EXISTS runtime_envs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -742,7 +849,7 @@ async function ensureRuntimeSchema() {
   ];
   // Core project browsing, imports, and baseline generation must always have
   // their schema available. Only the larger ML platform schema is optional.
-  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 13);
+  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 15);
   await query("SET statement_timeout = '5000ms'");
   await query("SET lock_timeout = '2000ms'");
   for (let index = 0; index < runtimeStatements.length; index += 1) {
@@ -768,6 +875,7 @@ async function ensureRuntimeSchema() {
       throw error;
     }
   }
+  await seedDefaultAdmin();
   if (process.env.RUN_EXTENDED_SCHEMA !== "true") {
     const mlRuntimeStatements = [
       `CREATE TABLE IF NOT EXISTS model_clusters (
@@ -898,6 +1006,7 @@ async function ensureRuntimeSchema() {
         model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
         dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
         status TEXT NOT NULL DEFAULT 'pending',
+        priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
         output_root TEXT NOT NULL DEFAULT '',
@@ -1052,6 +1161,7 @@ async function ensureRuntimeSchema() {
         model_version_id UUID REFERENCES model_revisions(id) ON DELETE SET NULL,
         dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
         status TEXT NOT NULL DEFAULT 'pending',
+        priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
         output_root TEXT NOT NULL DEFAULT '',
@@ -1343,6 +1453,13 @@ async function listProjects(trash = false) {
        JOIN project_videos pv ON pv.project_id = subtree.project_id AND pv.deleted_at IS NULL
        GROUP BY subtree.root_id
      ),
+     annotation_counts AS (
+       SELECT subtree.root_id, count(a.id)::int AS annotation_count
+       FROM subtree
+       JOIN projects lp ON lp.id = subtree.project_id
+       JOIN image_annotations a ON a.label_version_id = lp.active_label_version_id
+       GROUP BY subtree.root_id
+     ),
      import_times AS (
        SELECT subtree.root_id, max(ib.created_at) AS last_import_at
        FROM subtree
@@ -1352,13 +1469,15 @@ async function listProjects(trash = false) {
      SELECT p.*,
       COALESCE(ic.image_count, 0)::int AS image_count,
       COALESCE(vc.video_count, 0)::int AS video_count,
+      COALESCE(ac.annotation_count, 0)::int AS annotation_count,
       (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND ${trash ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}) AS child_count,
       it.last_import_at
      FROM projects p
      LEFT JOIN image_counts ic ON ic.root_id = p.id
      LEFT JOIN video_counts vc ON vc.root_id = p.id
+     LEFT JOIN annotation_counts ac ON ac.root_id = p.id
      LEFT JOIN import_times it ON it.root_id = p.id
-     WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
+     WHERE ${trash ? "p.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM projects parent WHERE parent.id=p.parent_id AND parent.deleted_at IS NOT NULL)" : "p.deleted_at IS NULL"}
      ORDER BY p.created_at DESC`,
   );
   return result.rows;
@@ -1706,6 +1825,35 @@ async function emptyImportTrash(projectId) {
   });
 }
 
+
+async function deleteProjectPermanently(projectId) {
+  return transaction(async (client) => {
+    const root = (await client.query("SELECT id FROM projects WHERE id=$1 AND deleted_at IS NOT NULL", [projectId])).rows[0];
+    if (!root) throw httpError(404, "project is not in trash");
+    const rows = await client.query(
+      `WITH RECURSIVE descendants AS (
+         SELECT id FROM projects WHERE id=$1 AND deleted_at IS NOT NULL
+         UNION ALL
+         SELECT p.id
+         FROM projects p
+         JOIN descendants d ON p.parent_id = d.id
+         WHERE p.deleted_at IS NOT NULL
+       )
+       SELECT id FROM descendants`,
+      [projectId],
+    );
+    const ids = rows.rows.map((row) => row.id);
+    if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
+    await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
+    const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const deletedProjects = await client.query("DELETE FROM projects WHERE id = ANY($1::uuid[]) RETURNING id", [ids]);
+    const assets = await cleanupUnreferencedAssets(client);
+    return { projects: deletedProjects.rowCount, imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
+  });
+}
 async function emptyProjectTrash() {
   return transaction(async (client) => {
     const projects = await client.query("SELECT id FROM projects WHERE deleted_at IS NOT NULL");
@@ -2534,7 +2682,7 @@ async function listTrainingJobs() {
        LEFT JOIN projects p ON p.id=tj.dataset_project_id
        LEFT JOIN model_clusters m ON m.id=tj.model_id
        LEFT JOIN dataset_snapshots ds ON ds.id=tj.dataset_snapshot_id
-       ORDER BY tj.created_at DESC
+       ORDER BY tj.priority DESC, tj.created_at DESC, tj.id DESC
        LIMIT 200`,
     );
     return rows.rows;
@@ -2616,7 +2764,7 @@ async function listInferenceJobs() {
        LEFT JOIN model_revisions mv ON mv.id=ij.model_version_id
        LEFT JOIN model_clusters m ON m.id=mv.model_id
        LEFT JOIN projects p ON p.id=ij.dataset_project_id
-       ORDER BY ij.created_at DESC
+       ORDER BY ij.priority DESC, ij.created_at DESC, ij.id DESC
        LIMIT 200`,
     );
     return rows.rows.map((row) => {
@@ -2638,6 +2786,34 @@ async function listInferenceJobs() {
   }
 }
 
+
+async function moveRuntimeJobPriority(tableName, jobId, direction) {
+  const allowedTables = new Set(["runtime_training_jobs", "runtime_inference_jobs"]);
+  if (!allowedTables.has(tableName)) throw new Error("unsupported queue type");
+  if (!["up", "down"].includes(direction)) throw new Error("direction must be up or down");
+  return transaction(async (client) => {
+    const rows = (await client.query(
+      `SELECT id, COALESCE(priority, 0)::int AS priority, created_at
+       FROM ${tableName}
+       ORDER BY COALESCE(priority, 0) DESC, created_at DESC, id DESC
+       LIMIT 200`,
+    )).rows;
+    const index = rows.findIndex((row) => String(row.id) === String(jobId));
+    if (index < 0) throw new Error("job not found");
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= rows.length) return rows[index];
+
+    const normalized = rows.map((row, rowIndex) => ({ ...row, priority: rows.length - rowIndex }));
+    for (const row of normalized) {
+      await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [row.priority, row.id]);
+    }
+    const current = normalized[index];
+    const target = normalized[targetIndex];
+    await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [target.priority, current.id]);
+    await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [current.priority, target.id]);
+    return (await client.query(`SELECT * FROM ${tableName} WHERE id=$1`, [jobId])).rows[0];
+  });
+}
 async function listInferenceResults(jobId) {
   const rows = await query(
     `SELECT ir.*, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
@@ -4055,7 +4231,12 @@ async function route(req, res) {
     await query("SELECT 1");
     return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
   }
+  if (method === "POST" && parsed.pathname === "/api/auth/login") return sendJson(res, await loginUser(await readBody(req)));
+  if (method === "POST" && parsed.pathname === "/api/auth/register") return sendJson(res, await registerUser(await readBody(req)));
+  if (method === "GET" && parsed.pathname === "/api/settings") return sendJson(res, { settings: await getAppSettings() });
+  if (method === "PUT" && parsed.pathname === "/api/settings") return sendJson(res, { settings: await saveAppSettings(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/config") {
+    const settings = await getAppSettings();
     return sendJson(res, {
       dataRoot,
       dataRootDisplay,
@@ -4066,6 +4247,9 @@ async function route(req, res) {
       storageRoot,
       exportRoot: exportRootDisplay,
       platform: process.platform,
+      settings,
+      postgres: settings.postgres,
+      minio: { endPoint: minio.endPoint, port: minio.port, bucket: minio.bucket, dataDir: minio.dataDir },
     });
   }
   if (method === "GET" && parsed.pathname === "/api/fs/dirs") {
@@ -4096,6 +4280,8 @@ async function route(req, res) {
     await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
+  const permanentDeleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/permanent$/);
+  if (method === "DELETE" && permanentDeleteProject) return sendJson(res, await deleteProjectPermanently(permanentDeleteProject[1]));
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
     await restoreProjectTree(restoreProject[1]);
@@ -4119,6 +4305,8 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots() });
   if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs() });
   if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req)) });
+  const trainingPriorityMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/priority$/);
+  if (method === "PATCH" && trainingPriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction) });
   const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
   if (method === "POST" && requeueTrainingMatch) return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) });
   const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
@@ -4133,6 +4321,8 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
+  const inferencePriorityMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
+  if (method === "PATCH" && inferencePriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction) });
   const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
   if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
   const inferenceEvaluationMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/evaluation$/);
@@ -4327,6 +4517,11 @@ main()
     console.error(error);
     process.exit(1);
   });
+
+
+
+
+
 
 
 
