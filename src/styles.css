@@ -2726,6 +2726,10 @@ button:disabled:hover {
   background: #fffbfa;
 }
 
+.home-error-msg {
+  margin: 10px 16px 0;
+}
+
 .app-shell.dark .error-msg,
 .app-shell.dark .error-banner {
   color: #ffb4a8;
@@ -11214,6 +11218,55 @@ button:disabled:hover {
   flex: 0 0 28px !important;
 }
 
+.inference-task-name-row {
+  grid-template-columns: 88px minmax(260px, 1fr) !important;
+}
+
+.inference-task-name-row input {
+  width: min(520px, 100%) !important;
+}
+
+.dataset-source-row {
+  grid-template-columns: 88px auto minmax(420px, 1fr) !important;
+}
+
+.inference-dataset-picker {
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: minmax(190px, .9fr) minmax(230px, 1.1fr) !important;
+  gap: 10px !important;
+  align-items: center !important;
+}
+
+.inference-dataset-picker .path-select {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.inference-dataset-picker select {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.dataset-root-select select {
+  color: var(--dashboard-accent-strong, #0f9d97) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+.dataset-child-select select {
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+
+.inference-table-row > .queue-actions {
+  transform: translateX(-10px) !important;
+}
+
+.inference-table-row .queue-action-row {
+  transform: translateX(-4px) !important;
+}
+
 /* Dataset folder cards: text scales with the card width on narrow viewports. */
 .home-project-grid .project-folder,
 .workspace-folder-grid .project-folder,
@@ -11344,4 +11397,284 @@ button:disabled:hover {
 
 .app-shell.dark .inference-workspace .config-row.model-row {
   background: transparent !important;
+}
+
+/* Import dialog: align with the dashboard card language and both themes. */
+.app-shell .overlay:has(.import-dialog) {
+  z-index: 220 !important;
+  padding: 22px !important;
+  background: rgba(9, 18, 26, .44) !important;
+  backdrop-filter: blur(8px) saturate(118%) !important;
+}
+
+.import-dialog {
+  width: min(940px, calc(100vw - 44px)) !important;
+  max-height: min(82vh, 760px) !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  overflow: hidden !important;
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  border-radius: 8px !important;
+  background: var(--surface, #ffffff) !important;
+  color: var(--text, #17212b) !important;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .22) !important;
+}
+
+.import-dialog-head {
+  min-height: 72px !important;
+  padding: 16px 18px !important;
+  border-bottom: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  background: linear-gradient(180deg, var(--surface, #ffffff), var(--surface-soft, #f6f9fc)) !important;
+}
+
+.dialog-title {
+  gap: 12px !important;
+}
+
+.dialog-title-icon {
+  width: 40px !important;
+  height: 40px !important;
+  flex: 0 0 40px !important;
+  border: 1px solid rgba(20, 184, 166, .26) !important;
+  border-radius: 8px !important;
+  color: var(--dashboard-accent-strong, #0f9d97) !important;
+  background: linear-gradient(180deg, rgba(20,184,166,.16), rgba(20,184,166,.07)) !important;
+  box-shadow: none !important;
+}
+
+.import-dialog h2 {
+  color: var(--text, #17212b) !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0 !important;
+}
+
+.import-dialog-head p {
+  max-width: 620px !important;
+  color: var(--muted, #64748b) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
+.import-dialog .icon-button {
+  width: 32px !important;
+  height: 32px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  border-radius: 8px !important;
+  color: var(--icon, #607386) !important;
+  background: var(--button-bg, rgba(255,255,255,.74)) !important;
+}
+
+.import-dialog-body {
+  min-height: 0 !important;
+  overflow: auto !important;
+  padding: 16px 18px !important;
+  background: var(--app-bg, #f3f7fb) !important;
+}
+
+.import-dialog-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(238px, 280px) !important;
+  gap: 14px !important;
+  align-items: stretch !important;
+}
+
+.import-path-panel,
+.import-profile-panel {
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  border-radius: 8px !important;
+  background: var(--surface, #ffffff) !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .05) !important;
+}
+
+.import-path-panel {
+  padding: 14px !important;
+}
+
+.import-field-head {
+  margin-bottom: 10px !important;
+}
+
+.import-field-head label {
+  color: var(--text, #17212b) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+.import-field-head p,
+.import-field-head span {
+  color: var(--muted, #64748b) !important;
+}
+
+.import-field-head span {
+  min-width: 50px !important;
+  text-align: right !important;
+}
+
+.import-path-row {
+  gap: 10px !important;
+}
+
+.import-path-row textarea {
+  min-height: 126px !important;
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  border-radius: 8px !important;
+  background: var(--surface-soft, #f8fafc) !important;
+  color: var(--text, #17212b) !important;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, .03) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+.import-path-row textarea:focus {
+  border-color: rgba(20,184,166,.65) !important;
+  box-shadow: 0 0 0 3px rgba(20,184,166,.12), inset 0 1px 0 rgba(15,23,42,.03) !important;
+}
+
+.import-path-tools {
+  width: 96px !important;
+  gap: 10px !important;
+}
+
+.import-path-tools button,
+.dialog-actions button {
+  border-radius: 7px !important;
+  font-size: 12px !important;
+}
+
+.import-path-tools .primary,
+.dialog-actions .primary {
+  border-color: transparent !important;
+  color: #ffffff !important;
+  background: linear-gradient(180deg, var(--dashboard-accent, #14b8a6), var(--dashboard-accent-strong, #0f9d97)) !important;
+  box-shadow: 0 8px 18px rgba(20,184,166,.18) !important;
+}
+
+.import-path-list {
+  max-height: 118px !important;
+  gap: 8px !important;
+  padding-right: 2px !important;
+}
+
+.import-path-list span,
+.import-path-list em {
+  min-height: 32px !important;
+  border: 1px solid var(--border-soft, rgba(148,163,184,.18)) !important;
+  border-radius: 7px !important;
+  background: var(--surface-soft, #f8fafc) !important;
+  color: var(--text, #17212b) !important;
+}
+
+.import-path-list em {
+  color: var(--muted, #64748b) !important;
+}
+
+.import-profile-panel {
+  padding: 14px !important;
+}
+
+.import-profile-block {
+  min-height: 62px !important;
+  border: 1px solid var(--border-soft, rgba(148,163,184,.18)) !important;
+  border-radius: 8px !important;
+  background: var(--surface-soft, #f8fafc) !important;
+}
+
+.import-profile-block span,
+.import-profile-list {
+  color: var(--muted, #64748b) !important;
+}
+
+.import-profile-block b {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  color: var(--text, #17212b) !important;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.import-profile-list {
+  gap: 9px !important;
+  padding: 4px 2px 0 !important;
+}
+
+.import-profile-list div {
+  min-height: 28px !important;
+  gap: 8px !important;
+}
+
+.import-profile-list svg {
+  flex: 0 0 auto !important;
+  color: var(--dashboard-accent-strong, #0f9d97) !important;
+}
+
+.import-dialog .error-msg {
+  margin: 12px 0 0 !important;
+}
+
+.dialog-actions {
+  min-height: 62px !important;
+  margin-top: 0 !important;
+  padding: 13px 18px !important;
+  align-items: center !important;
+  border-top: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  background: var(--surface, #ffffff) !important;
+}
+
+.dialog-actions button {
+  min-width: 96px !important;
+  height: 34px !important;
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  background: var(--button-bg, rgba(255,255,255,.74)) !important;
+  color: var(--text, #17212b) !important;
+}
+
+.app-shell.dark .overlay:has(.import-dialog) {
+  background: rgba(0, 0, 0, .58) !important;
+}
+
+.app-shell.dark .import-dialog {
+  box-shadow: 0 26px 78px rgba(0,0,0,.5) !important;
+}
+
+.app-shell.dark .import-dialog-head {
+  background: linear-gradient(180deg, rgba(15,29,40,.98), rgba(9,20,29,.98)) !important;
+}
+
+.app-shell.dark .import-dialog-body {
+  background: rgba(5, 13, 20, .92) !important;
+}
+
+.app-shell.dark .import-path-panel,
+.app-shell.dark .import-profile-panel {
+  background: rgba(12, 25, 35, .96) !important;
+  box-shadow: 0 12px 30px rgba(0,0,0,.18) !important;
+}
+
+.app-shell.dark .import-path-row textarea,
+.app-shell.dark .import-path-list span,
+.app-shell.dark .import-path-list em,
+.app-shell.dark .import-profile-block {
+  background: rgba(6, 16, 24, .78) !important;
+}
+
+@media (max-width: 820px) {
+  .import-dialog {
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 24px) !important;
+  }
+  .import-dialog-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .import-path-row {
+    flex-direction: column !important;
+  }
+  .import-path-tools {
+    width: 100% !important;
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-rows: none !important;
+  }
 }

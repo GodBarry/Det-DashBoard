@@ -209,8 +209,13 @@ async function objectSize(objectKey) {
   const files = localObjectFiles(objectKey);
   if (files.length) return files.reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
   if (await ensureBucketSafe()) {
-    const stat = await client.statObject(minio.bucket, objectKey);
-    return Number(stat.size) || 0;
+    try {
+      const stat = await client.statObject(minio.bucket, objectKey);
+      return Number(stat.size) || 0;
+    } catch (error) {
+      if (["NotFound", "NoSuchKey", "NoSuchObject"].includes(error?.code) || error?.statusCode === 404) return 0;
+      throw error;
+    }
   }
   return 0;
 }

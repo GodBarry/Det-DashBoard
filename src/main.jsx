@@ -154,6 +154,16 @@ return status || "未知状态态";
 
 }
 
+function sortRuntimeJobsByTime(jobs = []) {
+  return [...jobs].sort((left, right) => {
+    const leftPriority = Number(left.priority || 0);
+    const rightPriority = Number(right.priority || 0);
+    if (rightPriority !== leftPriority) return rightPriority - leftPriority;
+    const leftTime = Date.parse(left.finished_at || left.started_at || left.created_at || 0) || 0;
+    const rightTime = Date.parse(right.finished_at || right.started_at || right.created_at || 0) || 0;
+    return rightTime - leftTime;
+  });
+}
 function App() {
 
 const [view, setView] = useState("home");
@@ -590,7 +600,7 @@ fetch("/api/ml/model-versions").then((r) => r.json()).then((d) => setModelVersio
 
 fetch("/api/ml/training-jobs").then((r) => r.json()).then((d) => setTrainingJobs(d.jobs || [])).catch(() => {});
 
-fetch("/api/ml/inference-jobs").then((r) => r.json()).then((d) => setInferenceJobs(d.jobs || [])).catch(() => {});
+fetch("/api/ml/inference-jobs").then((r) => r.json()).then((d) => setInferenceJobs(sortRuntimeJobsByTime(d.jobs || []))).catch(() => {});
 
 fetch("/api/ml/algorithm-assets").then((r) => r.json()).then((d) => {
 
@@ -1484,6 +1494,26 @@ setShowImportDialog(true);
 
 }
 
+function importDataFromHome() {
+
+if (currentFolder) {
+
+setImportPath("");
+
+setError(null);
+
+openProject(currentFolder);
+
+setShowImportDialog(true);
+
+return;
+
+}
+
+setError("请先打开一个具体项目后再导入数据集");
+
+}
+
 function splitImportPaths(value) {
 
 return Array.from(new Set(String(value || "").split(";").map((item) => item.trim()).filter(Boolean)));
@@ -1880,7 +1910,7 @@ stats={homeStats}
 
 <button onClick={createProject}><FolderPlus size={16} />新建文件</button>
 
-<button onClick={() => setError("请先进入具体项目后再导入数据集")}><Import size={16} />导入数据</button>
+<button onClick={importDataFromHome}><Import size={16} />导入数据</button>
 
 <button onClick={() => setError("请先进入具体项目后再导出数据集")}><Upload size={16} />导出数据</button>
 
@@ -1889,6 +1919,8 @@ stats={homeStats}
 </div>
 
 </div>
+
+{error && <div className="error-msg home-error-msg">{error}</div>}
 
 <div className="home-filterbar">
 
@@ -2142,6 +2174,10 @@ createProject={createProject}
 
 summary={summary}
 
+expandedIds={homeExpandedIds}
+
+setExpandedIds={setHomeExpandedIds}
+
 />
 
 <main className="preview-area">
@@ -2224,11 +2260,15 @@ commitRenameProject={commitRenameProject}
 
 cancelRenameProject={cancelRenameProject}
 
+projectLastImportAt={projectLastImportAt}
+
 />
 
 {hasCurrentImages ? (
 
 <>
+
+<ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 <ImageGrid
 
@@ -2255,8 +2295,6 @@ setLastCheckedId={setLastCheckedId}
 deleteCheckedImages={deleteCheckedImages}
 
 />
-
-<ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </>
 
@@ -2400,7 +2438,7 @@ rows={4}
 
 <button onClick={() => { setShowImportDialog(false); setError(null); }}>取消</button>
 
-<button className="primary" onClick={confirmImport}>开始导</button>
+<button className="primary" onClick={confirmImport}>开始导入</button>
 
 </div>
 
@@ -4576,7 +4614,7 @@ return (
 
 <small>完成时间：{formatDateTime(job.finished_at || job.created_at)}</small>
 
-<em>{formatCount(rowMetrics.images ?? job.image_count ?? 0)} 张图　|　{formatCount(rowMetrics.predictions ?? job.prediction_count ?? 0)} 个预</em>
+<em>{formatCount(rowMetrics.images ?? job.image_count ?? 0)} 张图　|　{formatCount(rowMetrics.predictions ?? job.prediction_count ?? 0)} 个预测</em>
 
 </span>
 
@@ -4620,7 +4658,7 @@ return (
 
 <div className="evaluation-analysis-tabs">
 
-{[["overview", "性能概览"], ["classes", "类别表现"], ["confusion", "混淆矩阵"], ["threshold", "阈值分"]].map(([id, label]) => <button key={id} className={activeAnalysis === id ? "active" : ""} onClick={() => setActiveAnalysis(id)}>{label}</button>)}
+{[["overview", "性能概览"], ["classes", "类别表现"], ["confusion", "混淆矩阵"], ["threshold", "阈值分布"]].map(([id, label]) => <button key={id} className={activeAnalysis === id ? "active" : ""} onClick={() => setActiveAnalysis(id)}>{label}</button>)}
 
 </div>
 
@@ -4692,11 +4730,11 @@ return (
 
 <section className="evaluation-key-insights"><h3>关键结论</h3>{insightRows.map((text) => <p key={text}>{text}</p>)}</section>
 
-<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
+<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50）</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
 
 <div className="evaluation-insight-actions"><button onClick={() => setActiveAnalysis("confusion")}><Grid size={14} />查看混淆矩阵</button><button className="primary"><Download size={14} />生成评估报告</button></div>
 
-<section className="evaluation-run-info"><h3>运行信息</h3><p><span>推理记录</span><b>{selectedTask?.name || "--"}</b></p><p><span>运行时间</span><b>{formatDateTime(selectedJob.finished_at)}</b></p><p><span>推理时长</span><b>{formatDuration(selectedJob.created_at, selectedJob.finished_at)}</b></p><p><span>评估状</span><b>{evaluation?.evaluated ? "真实标注评估" : "等待标注"}</b></p></section>
+<section className="evaluation-run-info"><h3>运行信息</h3><p><span>推理记录</span><b>{selectedTask?.name || "--"}</b></p><p><span>运行时间</span><b>{formatDateTime(selectedJob.finished_at)}</b></p><p><span>推理时长</span><b>{formatDuration(selectedJob.created_at, selectedJob.finished_at)}</b></p><p><span>评估状态</span><b>{evaluation?.evaluated ? "真实标注评估" : "等待标注"}</b></p></section>
 
 </aside>
 
@@ -5225,7 +5263,9 @@ const selectedProject = projects.find((project) => project.id === inferenceForm.
 
   const selectedAlgorithm = visibleInferenceAlgorithms.find((algorithm) => algorithm.id === inferenceForm.templateId);
 
-const latestJob = inferenceJobs[0];
+const sortedInferenceJobs = sortRuntimeJobsByTime(inferenceJobs);
+
+const latestJob = sortedInferenceJobs[0];
 
 const latestMetrics = parseMaybeJson(latestJob?.metrics_json);
 
@@ -5244,6 +5284,47 @@ const [errorFilter, setErrorFilter] = useState("false_negative");
 const [expandedGroups, setExpandedGroups] = useState(() => new Set(["算法适配", "Python 环境"]));
 
 const setField = (key, value) => setInferenceForm({ ...inferenceForm, [key]: value });
+
+const inferenceProjectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+
+const topLevelDatasetProjects = useMemo(
+  () => projects.filter((project) => !project.parent_id),
+  [projects],
+);
+
+const selectedRootProject = useMemo(() => {
+  let cursor = selectedProject;
+  const seen = new Set();
+  while (cursor?.parent_id && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    cursor = inferenceProjectById.get(cursor.parent_id) || cursor;
+    if (!cursor?.parent_id) break;
+  }
+  return cursor || null;
+}, [selectedProject, inferenceProjectById]);
+
+const selectedRootProjectId = selectedRootProject?.id || "";
+
+const secondLevelDatasetOptions = useMemo(() => {
+  if (!selectedRootProjectId) return [];
+  const root = inferenceProjectById.get(selectedRootProjectId);
+  const children = projects.filter((project) => project.parent_id === selectedRootProjectId);
+  const rootHasAssets = Number(root?.image_count || 0) > 0 || Number(root?.video_count || 0) > 0;
+  const rows = (rootHasAssets || !children.length) ? [{ ...root, datasetOptionLabel: "当前一级项目" }] : [];
+  rows.push(...children.map((project) => ({ ...project, datasetOptionLabel: project.name })));
+  if (selectedProject && !rows.some((project) => project.id === selectedProject.id)) {
+    rows.push({ ...selectedProject, datasetOptionLabel: `${selectedRootProject?.name || "项目"} / ${selectedProject.name}` });
+  }
+  return rows;
+}, [projects, inferenceProjectById, selectedRootProjectId, selectedProject, selectedRootProject]);
+
+const selectDatasetRoot = (rootId) => {
+  const root = inferenceProjectById.get(rootId);
+  const children = projects.filter((project) => project.parent_id === rootId);
+  const rootHasAssets = Number(root?.image_count || 0) > 0 || Number(root?.video_count || 0) > 0;
+  const nextProjectId = (rootHasAssets || !children.length) ? rootId : (children[0]?.id || rootId || "");
+  setField("datasetProjectId", nextProjectId);
+};
 
 const toggleGroup = (title) => {
 
@@ -5491,7 +5572,7 @@ onClick: () => setField("pythonEnvId", env.id),
 
 ];
 
-const displayJobs = (inferenceJobs.length ? inferenceJobs : []).slice(0, 5);
+const displayJobs = sortedInferenceJobs.slice(0, 5);
 
 const previewItems = previewRows.slice(0, 12);
 
@@ -5572,7 +5653,7 @@ return (
           <button type="button">新建任务</button>
         </div>
         <div className="workspace-commandbar inference-commandbar">
-          <button className="primary" type="button" onClick={submitInferenceJob}><span>+</span>新建推理任务</button>
+          <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
           <button className="danger-outline" type="button"><Trash2 size={16} />停止任务</button>
           <button type="button"><RefreshCw size={16} />刷新</button>
@@ -5582,20 +5663,43 @@ return (
       <section className="reference-builder">
         <div className="reference-section">
           <h2>数据来源</h2>
-          <div className="config-row">
+          <div className="config-row inference-task-name-row">
+            <span className="row-label">任务名称</span>
+            <input
+              value={inferenceForm.name}
+              onChange={(e) => setField("name", e.target.value)}
+              placeholder="请输入推理任务名称，留空则自动生成"
+            />
+          </div>
+          <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
             <div className="segmented">
               <button type="button" className="active"><Database size={14} />数据集</button>
               <button type="button"><Folder size={14} />文件目录</button>
               <button type="button">文件列表</button>
             </div>
-            <label className="path-select">
-              <FolderOpen size={15} />
-              <select value={inferenceForm.datasetProjectId} onChange={(e) => setField("datasetProjectId", e.target.value)}>
-                <option value="">选择数据集项目目</option>
-                {projects.map((project) => <option key={project.id} value={project.id}>项目 / {project.name}</option>)}
-              </select>
-            </label>
+            <div className="inference-dataset-picker">
+              <label className="path-select dataset-root-select">
+                <FolderOpen size={15} />
+                <select value={selectedRootProjectId} onChange={(e) => selectDatasetRoot(e.target.value)}>
+                  <option value="">选择一级项目</option>
+                  {topLevelDatasetProjects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="path-select dataset-child-select">
+                <Folder size={15} />
+                <select value={inferenceForm.datasetProjectId} onChange={(e) => setField("datasetProjectId", e.target.value)} disabled={!selectedRootProjectId}>
+                  <option value="">{selectedRootProjectId ? "选择二级数据集" : "先选择一级项目"}</option>
+                  {secondLevelDatasetOptions.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.datasetOptionLabel || project.name} · {formatCount(project.image_count || 0)} 图像
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
@@ -5665,7 +5769,7 @@ return (
             <span className="inference-task-name"><input type="checkbox" />任务名称</span>
             <span>数据集</span><span>模型</span><span>状态</span><span>进度</span><span>图像数</span><span>预测数</span><span>Precision</span><span>Recall</span><span>mAP50</span><span>操作</span>
           </div>
-          {(displayJobs.length ? displayJobs : inferenceJobs).map((job) => {
+          {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
             const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
             return (
@@ -5694,7 +5798,7 @@ return (
               </div>
             );
           })}
-          {!inferenceJobs.length && <div className="empty-state">推理队列为空</div>}
+          {!sortedInferenceJobs.length && <div className="empty-state">推理队列为空</div>}
         </div>
       </section>
     </main>
@@ -6708,6 +6812,8 @@ startRenameProject,
 commitRenameProject,
 
 cancelRenameProject,
+
+projectLastImportAt,
 
 }) {
 

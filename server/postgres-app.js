@@ -813,6 +813,7 @@ async function ensureRuntimeSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
     "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
+    "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     `CREATE TABLE IF NOT EXISTS runtime_envs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1587,8 +1588,9 @@ async function runImportBatch(batchId, project, body) {
     acc.labelme += group.formatCounts?.labelme || 0;
     acc.coco += group.formatCounts?.coco || 0;
     acc.yolo += group.formatCounts?.yolo || 0;
+    acc.voc += group.formatCounts?.voc || 0;
     return acc;
-  }, { labelme: 0, coco: 0, yolo: 0 });
+  }, { labelme: 0, coco: 0, yolo: 0, voc: 0 });
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
@@ -2769,7 +2771,9 @@ async function listInferenceJobs() {
     );
     return rows.rows.map((row) => {
       const params = typeof row.params_json === "string" ? JSON.parse(row.params_json || "{}") : (row.params_json || {});
-      const metrics = params?.output?.metrics || {};
+      const storedMetrics = typeof row.metrics_json === "string" ? JSON.parse(row.metrics_json || "{}") : (row.metrics_json || {});
+      const outputMetrics = params?.output?.metrics || {};
+      const metrics = Object.keys(storedMetrics || {}).length ? storedMetrics : outputMetrics;
       return {
         ...row,
         metrics_json: metrics,
@@ -3289,18 +3293,21 @@ async function runDummyInferenceJob(job) {
         [job.id, row.projectImageId || null, JSON.stringify(row.predictions), predictionsPath],
       );
     }
+    const metrics = await computeDetectionMetrics(job, predictionRows);
     const nextParams = {
       ...params,
       output: {
         ...(params.output || {}),
         predictionsPath,
         resultCount: predictionRows.length,
+        predictionCount: 0,
         completedAt: new Date().toISOString(),
+        metrics,
       },
     };
     await client.query(
-      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
-      [JSON.stringify(nextParams), `空模型推理完成：${predictionRows.length} 张图片，0 个预测框`, job.id],
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+      [JSON.stringify(nextParams), JSON.stringify(metrics), `空模型推理完成：${predictionRows.length} 张图片，0 个预测框`, job.id],
     );
   });
 }
@@ -3575,8 +3582,8 @@ async function runUltralyticsInferenceJob(job) {
       },
     };
     await client.query(
-      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, message=$2, finished_at=now() WHERE id=$3",
-      [JSON.stringify(nextParams), `YOLO 推理完成：${rows.length} 张图片，${predictionCount} 个预测框`, job.id],
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+      [JSON.stringify(nextParams), JSON.stringify(metrics), `YOLO 推理完成：${rows.length} 张图片，${predictionCount} 个预测框`, job.id],
     );
   });
   await recordRuntimeAssetLink(job, metrics);

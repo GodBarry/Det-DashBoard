@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const YAML = require("yaml");
 const { IMAGE_EXTS, safeReadJson, basenameNoExt } = require("./utils");
@@ -47,6 +47,24 @@ function findImage(index, reference, labelDir) {
   if (suffixMatches.length === 1) return suffixMatches[0].file;
   const nameMatches = index.byName.get(normalizedPath(path.basename(ref))) || [];
   return nameMatches.length === 1 ? nameMatches[0] : "";
+}
+
+function stripGeneratedSuffix(value) {
+  return String(value || "").replace(/_(?=[0-9a-z]{8,16}$)(?=[0-9a-z]*[a-z])[0-9a-z]{8,16}$/i, "");
+}
+
+function findImageLooseStem(index, references = []) {
+  const stems = references
+    .filter(Boolean)
+    .map((value) => stripGeneratedSuffix(basenameNoExt(value)))
+    .filter(Boolean);
+  if (!stems.length) return "";
+  const matches = index.relative.filter((item) => {
+    const imageStem = stripGeneratedSuffix(basenameNoExt(item.file));
+    return stems.some((stem) => imageStem === stem || imageStem.startsWith(`${stem}_`) || stem.startsWith(`${imageStem}_`));
+  });
+  const unique = Array.from(new Set(matches.map((item) => item.file)));
+  return unique.length === 1 ? unique[0] : "";
 }
 
 function cocoShape(annotation, label) {
@@ -212,6 +230,96 @@ function yoloShape(line, names, labelFile, lineNumber) {
   };
 }
 
+function xmlText(source, tag) {
+  const match = String(source || "").match(new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/" + tag + ">", "i"));
+  return match ? match[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
+}
+
+function xmlBlocks(source, tag) {
+  const blocks = [];
+  const re = new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/" + tag + ">", "gi");
+  let match;
+  while ((match = re.exec(String(source || "")))) blocks.push(match[1]);
+  return blocks;
+}
+
+function numberText(source, tag) {
+  const value = Number(xmlText(source, tag));
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseVocXml(files, index, matches, unresolved, usedLabelFiles) {
+  const xmlFiles = files.filter((file) => path.extname(file).toLowerCase() === ".xml");
+  let count = 0;
+  for (const xmlFile of xmlFiles) {
+    let xml;
+    try {
+      xml = fs.readFileSync(xmlFile, "utf8");
+    } catch {
+      unresolved.push({ labelFile: xmlFile, reason: "unreadable_voc_xml" });
+      continue;
+    }
+    if (!/<object[\s>]/i.test(xml) || !/<bndbox[\s>]/i.test(xml)) continue;
+    const filename = xmlText(xml, "filename") || path.basename(xmlFile).replace(/\.xml$/i, ".jpg");
+    const xmlImageName = path.basename(xmlFile).replace(/\.xml$/i, ".jpg");
+    const imageFile = findImage(index, filename, path.dirname(xmlFile))
+      || findImage(index, path.basename(filename), path.dirname(xmlFile))
+      || findImage(index, xmlImageName, path.dirname(xmlFile))
+      || findImage(index, path.basename(xmlFile).replace(/\.xml$/i, ".jpg"), path.dirname(xmlFile))
+      || findImage(index, path.basename(xmlFile).replace(/\.xml$/i, ".jpeg"), path.dirname(xmlFile))
+      || findImage(index, path.basename(xmlFile).replace(/\.xml$/i, ".png"), path.dirname(xmlFile))
+      || findImageLooseStem(index, [xmlImageName])
+      || findImageLooseStem(index, [filename]);
+    if (!imageFile) {
+      unresolved.push({ labelFile: xmlFile, reason: "voc_image_not_found", imageName: filename });
+      continue;
+    }
+    const width = numberText(xml, "width");
+    const height = numberText(xml, "height");
+    const shapes = [];
+    for (const block of xmlBlocks(xml, "object")) {
+      const label = xmlText(block, "name") || "unknown";
+      const bboxBlock = xmlText(block, "bndbox");
+      const xmin = numberText(bboxBlock, "xmin");
+      const ymin = numberText(bboxBlock, "ymin");
+      const xmax = numberText(bboxBlock, "xmax");
+      const ymax = numberText(bboxBlock, "ymax");
+      if (![xmin, ymin, xmax, ymax].every((value) => Number.isFinite(value)) || xmax <= xmin || ymax <= ymin) {
+        unresolved.push({ labelFile: xmlFile, reason: "invalid_voc_bbox", imageFile });
+        continue;
+      }
+      shapes.push({
+        label,
+        points: [[xmin, ymin], [xmax, ymax]],
+        shape_type: "rectangle",
+        difficult: numberText(block, "difficult") === 1,
+        attributes: {
+          source_format: "voc",
+          truncated: numberText(block, "truncated") || 0,
+          pose: xmlText(block, "pose") || "",
+        },
+      });
+    }
+    addMatch(matches, imageFile, {
+      labelFile: xmlFile,
+      meta: {
+        imagePath: filename,
+        imageWidth: width,
+        imageHeight: height,
+        scene: "",
+        view: "",
+        keyword: "",
+        shapes,
+      },
+      format: "voc",
+      priority: 25,
+    }, unresolved);
+    usedLabelFiles.add(xmlFile);
+    count += 1;
+  }
+  return count;
+}
+
 function parseYolo(files, images, sourceRoot, matches, unresolved, usedLabelFiles) {
   const textFiles = files.filter((file) => path.extname(file).toLowerCase() === ".txt");
   if (!textFiles.length) return 0;
@@ -254,6 +362,7 @@ function buildDatasetMatches({ files, images, sourceRoot }) {
   const formatCounts = {
     coco: parseCoco(jsonFiles, index, matches, unresolved, usedLabelFiles),
     labelme: parseLabelMe(jsonFiles, index, matches, unresolved, usedLabelFiles),
+    voc: parseVocXml(files, index, matches, unresolved, usedLabelFiles),
   };
   formatCounts.yolo = parseYolo(files, images, sourceRoot, matches, unresolved, usedLabelFiles);
   for (const jsonFile of jsonFiles) {
