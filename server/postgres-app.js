@@ -301,6 +301,17 @@ const builtinAlgorithmAssets = [
     adapter: "# Platform adapter placeholder for RT-DETR.\n",
   },
   {
+    name: "Fake GT Reference Detector",
+    algorithmKey: "fake_reference_detector",
+    framework: "builtin",
+    taskType: "detect",
+    version: "builtin",
+    tasks: ["detect"],
+    description: "Reads DD-runtime/reference.json and generates calibrated fake detections from ground truth.",
+    params: {},
+    adapter: "# Platform adapter placeholder for fake reference detector.\n",
+  },
+  {
     name: "空检测模型推理",
     algorithmKey: "dummy_empty_detector",
     framework: "builtin",
@@ -1016,6 +1027,8 @@ async function ensureRuntimeSchema() {
         started_at TIMESTAMPTZ,
         finished_at TIMESTAMPTZ
       )`,
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
@@ -1171,6 +1184,8 @@ async function ensureRuntimeSchema() {
         started_at TIMESTAMPTZ,
         finished_at TIMESTAMPTZ
       )`,
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
@@ -1433,11 +1448,29 @@ async function listProjects(trash = false) {
        SELECT id FROM projects WHERE ${trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"}
      ),
      subtree AS (
-       SELECT p.id AS root_id, p.id AS project_id
+       SELECT p.id AS root_id, p.id AS project_id,
+              COALESCE(p.active_label_version_id, (
+                SELECT lv.id
+                FROM label_versions lv
+                WHERE lv.project_id=p.id
+                  AND lv.deleted_at IS NULL
+                  AND EXISTS (SELECT 1 FROM image_annotations a WHERE a.label_version_id=lv.id)
+                ORDER BY lv.created_at DESC
+                LIMIT 1
+              )) AS effective_label_version_id
        FROM projects p
        JOIN scoped_projects sp ON sp.id = p.id
        UNION ALL
-       SELECT subtree.root_id, c.id
+       SELECT subtree.root_id, c.id,
+              COALESCE(c.active_label_version_id, (
+                SELECT lv.id
+                FROM label_versions lv
+                WHERE lv.project_id=c.id
+                  AND lv.deleted_at IS NULL
+                  AND EXISTS (SELECT 1 FROM image_annotations a WHERE a.label_version_id=lv.id)
+                ORDER BY lv.created_at DESC
+                LIMIT 1
+              )) AS effective_label_version_id
        FROM subtree
        JOIN projects c ON c.parent_id = subtree.project_id
        JOIN scoped_projects sp ON sp.id = c.id
@@ -1457,8 +1490,7 @@ async function listProjects(trash = false) {
      annotation_counts AS (
        SELECT subtree.root_id, count(a.id)::int AS annotation_count
        FROM subtree
-       JOIN projects lp ON lp.id = subtree.project_id
-       JOIN image_annotations a ON a.label_version_id = lp.active_label_version_id
+       JOIN image_annotations a ON a.label_version_id = subtree.effective_label_version_id
        GROUP BY subtree.root_id
      ),
      import_times AS (
@@ -1607,6 +1639,7 @@ async function runImportBatch(batchId, project, body) {
      VALUES ($1,$2,'image','active',$3) RETURNING *`,
     [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
   )).rows[0];
+  await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
 
   for (const item of usedLabelFiles) {
     const relative = path.relative(item.sourceRoot, item.file).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
@@ -3254,6 +3287,12 @@ function isDummyInferenceJob(job) {
   return key === "dummy_empty_detector";
 }
 
+function isFakeReferenceInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const key = params.algorithmKey || params.templateKey;
+  return key === "fake_reference_detector";
+}
+
 async function runDummyInferenceJob(job) {
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
   const input = params.input || {};
@@ -3310,6 +3349,323 @@ async function runDummyInferenceJob(job) {
       [JSON.stringify(nextParams), JSON.stringify(metrics), `空模型推理完成：${predictionRows.length} 张图片，0 个预测框`, job.id],
     );
   });
+}
+
+function seededRandom(seed) {
+  let state = Number(seed) >>> 0;
+  return () => {
+    state += 0x6D2B79F5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashToSeed(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest().readUInt32LE(0);
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value)));
+}
+
+function shuffleWithRng(items, rng) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function fakeReferenceConfigCandidates() {
+  return uniqueExistingPaths([
+    process.env.DET_DASHBOARD_REFERENCE,
+    process.env.DD_REFERENCE,
+    process.env.DET_DASHBOARD_RUNTIME ? path.join(process.env.DET_DASHBOARD_RUNTIME, "reference.json") : "",
+    process.env.DD_RUNTIME ? path.join(process.env.DD_RUNTIME, "reference.json") : "",
+    path.join(path.dirname(storageRoot), "reference.json"),
+    path.join(storageRoot, "reference.json"),
+    path.resolve(__dirname, "..", "..", "DD-runtime", "reference.json"),
+  ]);
+}
+
+function readFakeReferenceConfig() {
+  const defaults = {
+    targetPrecision: 0.9,
+    targetRecall: 0.8,
+    targetMap50: 0.8,
+    quality: "good",
+    seed: 20260707,
+    time: 20,
+  };
+  const configPath = fakeReferenceConfigCandidates()[0] || null;
+  const loaded = configPath ? JSON.parse(fs.readFileSync(configPath, "utf8").replace(/^\uFEFF/, "")) : {};
+  const config = { ...defaults, ...(loaded || {}) };
+  config.targetPrecision = clampNumber(config.targetPrecision, 0.01, 1);
+  config.targetRecall = clampNumber(config.targetRecall, 0, 1);
+  config.targetMap50 = clampNumber(config.targetMap50, 0, 1);
+  config.seed = Number.isFinite(Number(config.seed)) ? Number(config.seed) : defaults.seed;
+  config.time = Math.max(0, Number(config.time ?? defaults.time));
+  config.quality = String(config.quality || defaults.quality).toLowerCase();
+  config.effectiveMap50 = Math.min(config.targetMap50, config.targetRecall);
+  return { config, configPath };
+}
+
+function qualityJitter(quality, rng) {
+  const ranges = {
+    good: [0.02, 0.08],
+    normal: [0.05, 0.16],
+    medium: [0.05, 0.16],
+    poor: [0.12, 0.32],
+    bad: [0.12, 0.32],
+  };
+  const [min, max] = ranges[quality] || ranges.good;
+  return min + (max - min) * rng();
+}
+
+function imageSizeForRow(image, gtRows = []) {
+  const maxX = gtRows.reduce((max, gt) => Math.max(max, Number(gt.bbox_x || 0) + Number(gt.bbox_w || 0)), 0);
+  const maxY = gtRows.reduce((max, gt) => Math.max(max, Number(gt.bbox_y || 0) + Number(gt.bbox_h || 0)), 0);
+  return {
+    width: Math.max(1, Number(image.width || 0), maxX),
+    height: Math.max(1, Number(image.height || 0), maxY),
+  };
+}
+
+function jitterBoxFromGt(gt, image, quality, rng, strongMatch = true) {
+  const size = imageSizeForRow(image, [gt]);
+  const x = Number(gt.bbox_x || 0);
+  const y = Number(gt.bbox_y || 0);
+  const w = Math.max(1, Number(gt.bbox_w || 1));
+  const h = Math.max(1, Number(gt.bbox_h || 1));
+  const jitter = strongMatch ? qualityJitter(quality, rng) : 0.28 + rng() * 0.3;
+  const shiftX = (rng() * 2 - 1) * w * jitter;
+  const shiftY = (rng() * 2 - 1) * h * jitter;
+  const scaleW = 1 + (rng() * 2 - 1) * jitter;
+  const scaleH = 1 + (rng() * 2 - 1) * jitter;
+  const nextW = clampNumber(w * scaleW, 1, size.width);
+  const nextH = clampNumber(h * scaleH, 1, size.height);
+  const nextX = clampNumber(x + shiftX, 0, Math.max(0, size.width - nextW));
+  const nextY = clampNumber(y + shiftY, 0, Math.max(0, size.height - nextH));
+  return { bbox_x: nextX, bbox_y: nextY, bbox_w: nextW, bbox_h: nextH };
+}
+
+function randomBackgroundBox(image, gtRows, rng) {
+  const size = imageSizeForRow(image, gtRows);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const w = Math.max(8, size.width * (0.04 + rng() * 0.18));
+    const h = Math.max(8, size.height * (0.04 + rng() * 0.18));
+    const box = {
+      bbox_x: rng() * Math.max(1, size.width - w),
+      bbox_y: rng() * Math.max(1, size.height - h),
+      bbox_w: Math.min(w, size.width),
+      bbox_h: Math.min(h, size.height),
+    };
+    const maxIou = gtRows.reduce((max, gt) => Math.max(max, boxIou(box, gt)), 0);
+    if (maxIou < 0.2 || attempt === 15) return box;
+  }
+  return { bbox_x: 0, bbox_y: 0, bbox_w: Math.max(8, size.width * 0.1), bbox_h: Math.max(8, size.height * 0.1) };
+}
+
+function fakeScore(kind, rng, config = {}) {
+  if (kind === "tp") return Number((0.68 + rng() * 0.3).toFixed(4));
+  const recallTarget = Math.max(0.01, Number(config.targetRecall || 0));
+  const mapPressure = clampNumber((recallTarget - Number(config.effectiveMap50 || recallTarget)) / recallTarget, 0, 1);
+  if (mapPressure > 0 && rng() < mapPressure * 0.55) return Number((0.72 + rng() * 0.25).toFixed(4));
+  if (kind === "duplicate") return Number((0.25 + rng() * 0.45).toFixed(4));
+  if (kind === "confusion") return Number((0.45 + rng() * 0.4).toFixed(4));
+  return Number(((rng() < 0.12 ? 0.65 + rng() * 0.25 : 0.12 + rng() * 0.48)).toFixed(4));
+}
+
+async function loadFakeReferenceGroundTruth(job, images) {
+  const imageIds = images.map((image) => image.projectImageId).filter(Boolean);
+  if (!imageIds.length) throw new Error("Fake GT inference requires project image ids in the input manifest.");
+  const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
+  if (!project?.active_label_version_id) throw new Error("Fake GT inference requires an active label version with ground truth.");
+  const gtRows = (await query(
+    `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
+     FROM image_annotations
+     WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
+    [project.active_label_version_id, imageIds],
+  )).rows;
+  if (!gtRows.length) throw new Error("Fake GT inference did not find ground-truth boxes for the selected images.");
+  const gtByImage = new Map();
+  for (const gt of gtRows) {
+    const list = gtByImage.get(gt.project_image_id) || [];
+    list.push(gt);
+    gtByImage.set(gt.project_image_id, list);
+  }
+  return { gtRows, gtByImage };
+}
+
+function generateFakeReferenceRows(images, gtRows, gtByImage, config, seed) {
+  const rng = seededRandom(seed);
+  const labels = Array.from(new Set(gtRows.map((gt) => metricLabel(gt)).filter(Boolean)));
+  const gtWithIndex = gtRows.map((gt, index) => ({ ...gt, metricLabel: metricLabel(gt), fakeIndex: index }));
+  const targetTp = Math.min(gtWithIndex.length, Math.max(0, Math.round(gtWithIndex.length * config.targetRecall)));
+  const targetFp = Math.max(0, Math.round(targetTp * (1 / Math.max(0.01, config.targetPrecision) - 1)));
+  const hitSet = new Set(shuffleWithRng(gtWithIndex, rng).slice(0, targetTp).map((gt) => gt.fakeIndex));
+  const rows = images.map((image) => ({
+    index: image.index,
+    cachedFileName: image.cachedFileName,
+    projectImageId: image.projectImageId,
+    imageAssetId: image.imageAssetId,
+    originalFileName: image.originalFileName,
+    width: image.width,
+    height: image.height,
+    inferenceMs: Number((config.time * (0.75 + rng() * 0.5)).toFixed(2)),
+    predictions: [],
+  }));
+  const rowsByImage = new Map(rows.map((row) => [row.projectImageId, row]));
+  const hitGts = [];
+  for (const gt of gtWithIndex) {
+    if (!hitSet.has(gt.fakeIndex)) continue;
+    const row = rowsByImage.get(gt.project_image_id);
+    if (!row) continue;
+    const box = jitterBoxFromGt(gt, row, config.quality, rng, true);
+    row.predictions.push({
+      label: gt.metricLabel,
+      score: fakeScore("tp", rng, config),
+      ...box,
+    });
+    hitGts.push(gt);
+  }
+
+  let fpRemaining = targetFp;
+  const duplicateCount = Math.min(fpRemaining, Math.round(hitGts.length * 0.08));
+  for (let index = 0; index < duplicateCount; index += 1) {
+    const gt = hitGts[Math.floor(rng() * hitGts.length)];
+    const row = rowsByImage.get(gt.project_image_id);
+    if (!gt || !row) continue;
+    row.predictions.push({
+      label: gt.metricLabel,
+      score: fakeScore("duplicate", rng, config),
+      ...jitterBoxFromGt(gt, row, config.quality, rng, true),
+    });
+    fpRemaining -= 1;
+  }
+
+  const confusionCount = Math.min(fpRemaining, Math.round(gtWithIndex.length * 0.03));
+  for (let index = 0; index < confusionCount; index += 1) {
+    const gt = gtWithIndex[Math.floor(rng() * gtWithIndex.length)];
+    const row = rowsByImage.get(gt.project_image_id);
+    if (!gt || !row) continue;
+    const wrongLabels = labels.filter((label) => label !== gt.metricLabel);
+    row.predictions.push({
+      label: wrongLabels.length ? wrongLabels[Math.floor(rng() * wrongLabels.length)] : `${gt.metricLabel}_fp`,
+      score: fakeScore("confusion", rng, config),
+      ...jitterBoxFromGt(gt, row, config.quality, rng, true),
+    });
+    fpRemaining -= 1;
+  }
+
+  const imagesWithGt = images.filter((image) => (gtByImage.get(image.projectImageId) || []).length);
+  while (fpRemaining > 0 && imagesWithGt.length) {
+    const image = imagesWithGt[Math.floor(rng() * imagesWithGt.length)];
+    const row = rowsByImage.get(image.projectImageId);
+    const imageGt = gtByImage.get(image.projectImageId) || [];
+    row.predictions.push({
+      label: labels[Math.floor(rng() * labels.length)] || "fake",
+      score: fakeScore("background", rng, config),
+      ...randomBackgroundBox(row, imageGt, rng),
+    });
+    fpRemaining -= 1;
+  }
+
+  return rows;
+}
+
+function metricDistance(metrics, config) {
+  if (!metrics?.evaluated) return Number.POSITIVE_INFINITY;
+  return Math.abs(Number(metrics.precision || 0) - config.targetPrecision)
+    + Math.abs(Number(metrics.recall || 0) - config.targetRecall)
+    + Math.abs(Number(metrics.map50 || 0) - config.effectiveMap50);
+}
+
+async function runFakeReferenceInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const input = params.input || {};
+  const manifestPath = input.manifestPath || path.join(job.output_root, "input-cache", "manifest.json");
+  if (!fs.existsSync(manifestPath)) throw new Error("Inference input manifest does not exist.");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+  const outputDir = path.join(outputRoot, "output");
+  fs.mkdirSync(outputDir, { recursive: true });
+  const images = Array.isArray(manifest.images) ? manifest.images : [];
+  const { config, configPath } = readFakeReferenceConfig();
+  const { gtRows, gtByImage } = await loadFakeReferenceGroundTruth(job, images);
+  const baseSeed = (Number(config.seed) >>> 0) ^ hashToSeed(job.id);
+  let bestRows = [];
+  let bestMetrics = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const iterations = 12;
+  for (let index = 0; index < iterations; index += 1) {
+    const rows = generateFakeReferenceRows(images, gtRows, gtByImage, config, baseSeed + index * 9973);
+    const metrics = await computeDetectionMetrics(job, rows);
+    const distance = metricDistance(metrics, config);
+    if (distance < bestDistance) {
+      bestRows = rows;
+      bestMetrics = metrics;
+      bestDistance = distance;
+    }
+  }
+
+  const predictionCount = bestRows.reduce((total, row) => total + (row.predictions || []).length, 0);
+  const simulatedMs = bestRows.reduce((total, row) => total + Number(row.inferenceMs || 0), 0);
+  const predictionsPath = path.join(outputDir, "predictions.json");
+  const predictions = {
+    format: "det-dashboard.predictions.v1",
+    algorithm: "fake_reference_detector",
+    jobId: job.id,
+    referencePath: configPath,
+    reference: config,
+    imageCount: bestRows.length,
+    predictionCount,
+    simulatedMs: Number(simulatedMs.toFixed(2)),
+    images: bestRows,
+  };
+  fs.writeFileSync(predictionsPath, JSON.stringify(predictions, null, 2), "utf8");
+  const delayMs = Math.min(30000, Math.max(0, Math.round(simulatedMs)));
+  if (delayMs > 0) {
+    await query("UPDATE runtime_inference_jobs SET progress=70, message=$1 WHERE id=$2", [`Simulating fake inference latency: ${delayMs} ms`, job.id]);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  await transaction(async (client) => {
+    await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
+    for (const row of bestRows) {
+      await client.query(
+        `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
+         VALUES ($1,$2,$3,$4)`,
+        [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), predictionsPath],
+      );
+    }
+    const nextParams = {
+      ...params,
+      output: {
+        ...(params.output || {}),
+        predictionsPath,
+        resultCount: bestRows.length,
+        predictionCount,
+        completedAt: new Date().toISOString(),
+        metrics: bestMetrics,
+        fakeReference: {
+          referencePath: configPath,
+          target: config,
+          iterations,
+          simulatedMs: Number(simulatedMs.toFixed(2)),
+          cappedDelayMs: delayMs,
+        },
+      },
+    };
+    await client.query(
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+      [JSON.stringify(nextParams), JSON.stringify(bestMetrics), `Fake GT inference completed: ${bestRows.length} images, ${predictionCount} boxes`, job.id],
+    );
+  });
+  await recordRuntimeAssetLink(job, bestMetrics);
 }
 
 function boxIou(a, b) {
@@ -3595,6 +3951,11 @@ async function runInferenceJob(job, workerId) {
     const algorithmKey = params.algorithmKey || params.templateKey || "";
     if (algorithmKey === "ultralytics_yolo") {
       await runUltralyticsInferenceJob(job);
+      return;
+    }
+    if (isFakeReferenceInferenceJob(job)) {
+      await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", ["Running Fake GT reference inference", job.id]);
+      await runFakeReferenceInferenceJob(job);
       return;
     }
     if (!isDummyInferenceJob(job)) {
@@ -4056,9 +4417,28 @@ async function listProjectImages(projectId, queryParams) {
 async function projectSummary(projectId) {
   const rows = await query(
     `WITH RECURSIVE subtree AS (
-       SELECT id, active_label_version_id FROM projects WHERE id=$1 AND deleted_at IS NULL
+       SELECT id,
+              COALESCE(active_label_version_id, (
+                SELECT lv.id
+                FROM label_versions lv
+                WHERE lv.project_id=projects.id
+                  AND lv.deleted_at IS NULL
+                  AND EXISTS (SELECT 1 FROM image_annotations a WHERE a.label_version_id=lv.id)
+                ORDER BY lv.created_at DESC
+                LIMIT 1
+              )) AS effective_label_version_id
+       FROM projects WHERE id=$1 AND deleted_at IS NULL
        UNION ALL
-       SELECT p.id, p.active_label_version_id
+       SELECT p.id,
+              COALESCE(p.active_label_version_id, (
+                SELECT lv.id
+                FROM label_versions lv
+                WHERE lv.project_id=p.id
+                  AND lv.deleted_at IS NULL
+                  AND EXISTS (SELECT 1 FROM image_annotations a WHERE a.label_version_id=lv.id)
+                ORDER BY lv.created_at DESC
+                LIMIT 1
+              )) AS effective_label_version_id
        FROM projects p
        JOIN subtree ON p.parent_id = subtree.id
        WHERE p.deleted_at IS NULL
@@ -4066,14 +4446,23 @@ async function projectSummary(projectId) {
      SELECT
       (SELECT count(*)::int FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS direct_image_count,
       (SELECT count(*)::int FROM project_videos WHERE project_id=$1 AND deleted_at IS NULL) AS direct_video_count,
-      (SELECT count(*)::int FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id WHERE p.id=$1) AS direct_annotation_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.id=$1 AND s.effective_label_version_id=a.label_version_id) AS direct_annotation_count,
       (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE pv.deleted_at IS NULL) AS video_count,
-      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.active_label_version_id=a.label_version_id) AS annotation_count,
+      (SELECT count(DISTINCT a.project_image_id)::int FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id) AS labeled_image_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id) AS annotation_count,
+      (SELECT COALESCE(json_agg(json_build_object('label', label, 'count', count) ORDER BY count DESC, label), '[]'::json)
+       FROM (
+         SELECT a.label, count(*)::int AS count
+         FROM image_annotations a
+         JOIN subtree s ON s.effective_label_version_id=a.label_version_id
+         WHERE lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', '无', '无目标', '无标注')
+         GROUP BY a.label
+       ) label_stats) AS label_counts,
       (SELECT json_agg(DISTINCT scene) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS scenes,
       (SELECT json_agg(DISTINCT view) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS views,
       (SELECT json_agg(DISTINCT modality) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS modalities,
-      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN subtree s ON s.active_label_version_id=a.label_version_id) AS labels`,
+      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id WHERE lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', '无', '无目标', '无标注')) AS labels`,
     [projectId],
   );
   return rows.rows[0];
@@ -4108,7 +4497,14 @@ async function streamProjectImage(res, projectImageId, thumb) {
       write.on("error", reject);
     });
     await sharp(src).resize({ width: 420, height: 236, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toFile(out);
-    await store.putFile(thumbKey, out);
+    try {
+      await store.putFile(thumbKey, out);
+    } catch (error) {
+      if (error?.code !== "XMinioStorageFull") throw error;
+      res.writeHead(200, { "content-type": "image/webp", "cache-control": "no-store" });
+      fs.createReadStream(out).pipe(res);
+      return;
+    }
   }
   const stream = await store.getStream(thumbKey);
   res.writeHead(200, { "content-type": "image/webp", "cache-control": "public, max-age=604800" });

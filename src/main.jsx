@@ -332,6 +332,8 @@ saveVisualization: true,
 
 createLabelVersion: false,
 
+fakeReferenceMode: false,
+
 });
 
 const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
@@ -844,7 +846,9 @@ loadMlPlatform();
 
 function submitInferenceJob() {
 
-const selectedAlgorithm = algorithmAssets.find((item) => item.id === inferenceForm.templateId);
+const fakeAlgorithm = algorithmAssets.find((item) => item.algorithm_key === "fake_reference_detector" || item.template_key === "fake_reference_detector");
+
+const selectedAlgorithm = inferenceForm.fakeReferenceMode ? fakeAlgorithm : algorithmAssets.find((item) => item.id === inferenceForm.templateId);
 
 if (!inferenceForm.datasetProjectId) {
 
@@ -862,7 +866,11 @@ return;
 
 }
 
-if (selectedAlgorithm.algorithm_key !== "dummy_empty_detector") {
+const algorithmKey = selectedAlgorithm.algorithm_key || selectedAlgorithm.template_key || "";
+
+const isBuiltInNoEnvAlgorithm = algorithmKey === "dummy_empty_detector" || algorithmKey === "fake_reference_detector";
+
+if (!isBuiltInNoEnvAlgorithm) {
 
 if (!inferenceForm.pythonEnvId) {
 
@@ -894,15 +902,17 @@ name: inferenceForm.name,
 
 datasetProjectId: inferenceForm.datasetProjectId,
 
-modelVersionId: inferenceForm.modelVersionId || null,
+modelVersionId: inferenceForm.fakeReferenceMode ? null : (inferenceForm.modelVersionId || null),
 
 params: {
 
 modelId: null,
 
-algorithmAssetId: inferenceForm.templateId || null,
+algorithmAssetId: selectedAlgorithm.id || inferenceForm.templateId || null,
 
-templateId: inferenceForm.templateId || null,
+templateId: selectedAlgorithm.id || inferenceForm.templateId || null,
+
+fakeReferenceMode: Boolean(inferenceForm.fakeReferenceMode),
 
 taskType: inferenceForm.taskType,
 
@@ -5734,6 +5744,12 @@ return (
               <option value="">请选择 Python 环境</option>
               {pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}
             </select>
+            <label className="switch-option fake-reference-switch" title="Fake GT" aria-label="Fake GT">
+              <span className="switch-control">
+                <input type="checkbox" checked={Boolean(inferenceForm.fakeReferenceMode)} onChange={() => setField("fakeReferenceMode", !inferenceForm.fakeReferenceMode)} />
+                <i />
+              </span>
+            </label>
           </div>
         </div>
 
@@ -7438,9 +7454,17 @@ function InspectorStats({ summary, labels }) {
 
 const imageCount = Number(summary?.image_count || 0);
 
+const labeledImageCount = Number(summary?.labeled_image_count || 0);
+
 const annotationCount = Number(summary?.annotation_count || 0);
 
-const labelCount = optionList(summary?.labels).length;
+const labelRows = Array.isArray(summary?.label_counts)
+  ? summary.label_counts.map((item) => ({ label: item.label, count: Number(item.count || 0) })).filter((item) => item.label)
+  : labels.map((label) => ({ label, count: 0 }));
+
+const labelCount = labelRows.length || optionList(summary?.labels).length;
+
+const maxLabelCount = Math.max(1, ...labelRows.map((item) => item.count));
 
 return (
 
@@ -7450,7 +7474,7 @@ return (
 
 <div><ImageIcon size={15} /><span>图像数量</span><b>{formatCount(imageCount)}</b></div>
 
-<div><CheckCircle size={15} /><span>已标注图</span><b>{formatCount(imageCount)}</b></div>
+<div><CheckCircle size={15} /><span>已标注图</span><b>{formatCount(labeledImageCount)}</b></div>
 
 <div><Tags size={15} /><span>标注框总数</span><b>{formatCount(annotationCount)}</b></div>
 
@@ -7462,21 +7486,21 @@ return (
 
 <h3>类别分布（标注框</h3>
 
-{labels.map((label, index) => (
+{labelRows.slice(0, 6).map((item) => (
 
-<p key={label}>
+<p key={item.label}>
 
-<span><i style={{ background: labelColor(label) }} />{label}</span>
+<span><i style={{ background: labelColor(item.label) }} />{item.label}</span>
 
-<strong><em style={{ width: `${Math.max(22, 96 - index * 10)}%`, background: labelColor(label) }} /></strong>
+<strong><em style={{ width: `${Math.max(8, Math.round((item.count / maxLabelCount) * 100))}%`, background: labelColor(item.label) }} /></strong>
 
-<b>{formatCount(Math.max(1, annotationCount ? Math.round(annotationCount / (index + 2)) : 0))}</b>
+<b>{formatCount(item.count)}</b>
 
 </p>
 
 ))}
 
-{!labels.length && <small className="muted">暂无类别统计</small>}
+{!labelRows.length && <small className="muted">暂无类别统计</small>}
 
 </section>
 

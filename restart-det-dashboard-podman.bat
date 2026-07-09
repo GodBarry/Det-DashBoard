@@ -36,7 +36,7 @@ if exist "%RUNTIME_ROOT%\node\npm.cmd" set "NPM=%RUNTIME_ROOT%\node\npm.cmd"
 set "PATH=%RUNTIME_ROOT%\node;%PATH%"
 if not exist "%NPM%" (
   echo Missing runtime node: %NPM%
-  call :maybe_pause
+  if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
 
@@ -89,7 +89,7 @@ echo [2/7] Start Podman machine if needed...
 "%PODMAN%" info >nul 2>nul
 if errorlevel 1 (
   echo Podman is not reachable. Try: podman machine init ^&^& podman machine start
-  call :maybe_pause
+  if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
 
@@ -115,7 +115,7 @@ if errorlevel 1 (
 )
 if errorlevel 1 (
   echo PostgreSQL container failed to start.
-  call :maybe_pause
+  if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
 
@@ -135,7 +135,7 @@ if errorlevel 1 (
 )
 if errorlevel 1 (
   echo MinIO container failed to start.
-  call :maybe_pause
+  if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
 
@@ -146,7 +146,7 @@ for /l %%I in (1,1,60) do (
   call :sleep 2
 )
 echo PostgreSQL did not become ready in Podman.
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 
 :postgres_ready
@@ -159,7 +159,7 @@ for /l %%I in (1,1,30) do (
   call :sleep 1
 )
 echo PostgreSQL tunnel did not become ready on 127.0.0.1:%POSTGRES_PORT%.
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 
 :postgres_tunnel_ready
@@ -169,7 +169,7 @@ for /l %%I in (1,1,60) do (
   call :sleep 2
 )
 echo MinIO tunnel did not become ready on 127.0.0.1:%MINIO_PORT%.
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 
 :minio_ready
@@ -182,7 +182,7 @@ for /l %%I in (1,1,45) do (
 )
 echo Backend did not become ready. Last log:
 type "%API_LOG%"
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 
 :api_ready
@@ -195,7 +195,7 @@ for /l %%I in (1,1,30) do (
 )
 echo Frontend did not become ready. Last log:
 type "%WEB_LOG%"
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 
 :web_ready
@@ -212,7 +212,7 @@ echo   %API_LOG%
 echo   %WEB_LOG%
 echo   %TUNNEL_LOG%
 echo.
-call :maybe_pause
+if not "%NO_PAUSE%"=="1" pause
 exit /b 0
 
 :start_tunnel
@@ -223,7 +223,7 @@ for /f "tokens=1,2,* delims=|" %%A in ('%PODMAN% machine inspect --format "{{.SS
 )
 if "%PODMAN_SSH_PORT%"=="" (
   echo Failed to read Podman machine SSH config.
-  call :maybe_pause
+  if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
 echo Establish SSH tunnel: Windows %POSTGRES_PORT%/%MINIO_PORT%/%MINIO_CONSOLE_PORT% -^> Podman machine %PODMAN_SSH_PORT% ...
@@ -233,10 +233,6 @@ exit /b 0
 
 :sleep
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds %~1" >nul
-exit /b 0
-
-:maybe_pause
-if not "%NO_PAUSE%"=="1" pause
 exit /b 0
 
 :kill_port

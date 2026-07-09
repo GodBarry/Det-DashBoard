@@ -4447,6 +4447,23 @@ button:disabled:hover {
   justify-content: space-between;
 }
 
+.fake-reference-switch {
+  min-width: 54px;
+  height: 32px;
+  padding: 0 10px;
+  justify-content: center;
+  border: 1px solid rgba(75, 96, 116, .58);
+  border-radius: 6px;
+  color: #dceaf1;
+  background: rgba(9, 18, 27, .8);
+}
+
+.app-shell.light .fake-reference-switch {
+  color: #17212b;
+  background: #fff;
+  border-color: #d8e3ec;
+}
+
 .switch-control {
   position: relative;
   width: 34px;

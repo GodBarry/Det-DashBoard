@@ -1,0 +1,1790 @@
+[
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          63,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          63,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          25
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          98,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          25
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          98,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          86,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          86,
+          106
+        ]
+      }
+    ],
+    "lowContrast": []
+  }
+]
