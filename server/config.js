@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const projectRoot = path.resolve(__dirname, "..");
+const hostPathMode = String(process.env.HOST_PATH_MODE || "posix").toLowerCase();
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -27,20 +28,27 @@ function bool(value, fallback = false) {
   return String(value).toLowerCase() === "true";
 }
 
+function displayPath(value, fallback) {
+  const selected = value || fallback;
+  if (hostPathMode === "windows" && /^[A-Za-z]:[\\/]/.test(String(selected || ""))) return selected;
+  return path.resolve(selected);
+}
+
 module.exports = {
   host: process.env.HOST || "127.0.0.1",
   port: Number(process.env.PORT || 4177),
   dataRoot: path.resolve(process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
-  dataRootDisplay: path.resolve(process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
+  dataRootDisplay: displayPath(process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT, path.join(projectRoot, "runtime", "data-root")),
   browseRoot: path.resolve(process.env.BROWSE_ROOT || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
-  browseRootDisplay: path.resolve(process.env.BROWSE_ROOT_DISPLAY || process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
+  browseRootDisplay: displayPath(process.env.BROWSE_ROOT_DISPLAY || process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT, path.join(projectRoot, "runtime", "data-root")),
+  hostPathMode,
   hostDialogUrl: process.env.HOST_DIALOG_URL || "",
   nativeDialogMode: process.env.NATIVE_DIALOG_MODE || "server",
   maxRequestBodyBytes: Number(process.env.MAX_REQUEST_BODY_BYTES || 1024 * 1024),
   storageRoot: path.resolve(process.env.STORAGE_ROOT || path.join(projectRoot, "tmp", "local-storage")),
   fallbackStorageRoot: path.resolve(process.env.FALLBACK_STORAGE_ROOT || path.join(projectRoot, "tmp", "local-storage")),
   exportRoot: path.resolve(process.env.EXPORT_ROOT || path.join(projectRoot, "exports")),
-  exportRootDisplay: path.resolve(process.env.EXPORT_ROOT_DISPLAY || process.env.EXPORT_ROOT || path.join(projectRoot, "exports")),
+  exportRootDisplay: displayPath(process.env.EXPORT_ROOT_DISPLAY || process.env.EXPORT_ROOT, path.join(projectRoot, "exports")),
   databaseUrl: process.env.DATABASE_URL || "postgres://det:det_password@localhost:5432/det_dashboard",
   minio: {
     endPoint: process.env.MINIO_ENDPOINT || "localhost",
