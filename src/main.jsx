@@ -416,7 +416,7 @@ return () => window.clearInterval(timer);
 
 useEffect(() => {
 
-if (!activeTrainingJobId) {
+if (!activeTrainingJobId || String(activeTrainingJobId).startsWith("mock-")) {
 
 setTrainingLogs([]);
 
@@ -1523,6 +1523,20 @@ fetch(`/api/projects/${projectId}/restore`, { method: "POST" }).then(() => refre
 
 }
 
+function restoreAllProjects() {
+
+if (!trashProjects.length) return;
+
+if (!window.confirm(`确定恢复回收站中的 ${trashProjects.length} 个项目吗？`)) return;
+
+Promise.all(trashProjects.map((project) => fetch(`/api/projects/${project.id}/restore`, { method: "POST" })))
+
+.then(() => refreshHome())
+
+.catch((err) => setError("恢复全部项目失败：" + err.message));
+
+}
+
 
 function deleteProjectPermanently(projectId) {
 
@@ -2144,6 +2158,8 @@ stats={homeStats}
 trashProjects={trashProjects}
 
 restoreProject={restoreProject}
+
+restoreAllProjects={restoreAllProjects}
 
 emptyProjectTrash={emptyProjectTrash}
 
@@ -3573,7 +3589,39 @@ function TrainingWorkspace({
 
         </div>
 
-        <section className="training-queue reference-queue"><h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2><div className="training-table-head"><span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span><span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span></div>{queueRows.map((job, index) => (<div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}><b>{job.name || '训练任务'}</b><span>{job.dataset_project_name || selectedProject.name || '--'}</span><span>{job.model_name || selectedModel.name || '--'}</span><em className={'status-badge ' + (String(job.status).includes('fail') ? 'status-failed' : '')}>{runStatusLabel(job.status)}</em><i className="mini-progress"><b style={{ width: (job.progress ?? progress) + '%' }} /></i><span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span><span>0.{482 + index * 13}</span><span>{index ? '71.11%' : '71.10%'}</span><span>{index ? '--' : '18m'}</span><div className="training-row-actions"><button title={"\u67e5\u770b\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0a\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0b\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u91cd\u65b0\u5f00\u59cb"} onClick={(event) => { event.stopPropagation(); requeueTrainingJob?.(job.id); }}><RefreshCw size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && !["done", "failed", "cancelled"].includes(job.status) && <button title={job.status === "paused" ? "\u7ee7\u7eed\u4efb\u52a1" : "\u6682\u505c\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>}{job.id && !String(job.id).startsWith("mock-") && <button className="danger-icon" title={"\u5220\u9664\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>}<button title={"\u6253\u5f00 TensorBoard"} onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button></div></div>))}</section>
+        <section className="training-queue reference-queue">
+          <h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2>
+          <div className="training-table-head">
+            <span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span>
+            <span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span>
+          </div>
+          {queueRows.map((job, index) => {
+            const persistedJob = Boolean(job.id && !String(job.id).startsWith("mock-"));
+            const terminalJob = ["done", "failed", "cancelled"].includes(String(job.status || "").toLowerCase());
+            return (
+              <div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}>
+                <b>{job.name || "训练任务"}</b>
+                <span>{job.dataset_project_name || selectedProject.name || "--"}</span>
+                <span>{job.model_name || selectedModel.name || "--"}</span>
+                <em className={"status-badge " + (String(job.status).includes("fail") ? "status-failed" : "")}>{runStatusLabel(job.status)}</em>
+                <i className="mini-progress"><b style={{ width: (job.progress ?? progress) + "%" }} /></i>
+                <span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span>
+                <span>0.{482 + index * 13}</span>
+                <span>{index ? "71.11%" : "71.10%"}</span>
+                <span>{index ? "--" : "18m"}</span>
+                <div className="training-row-actions">
+                  <button title="查看任务" onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>
+                  <button title="上移" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>
+                  <button title="下移" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>
+                  <button title={job.status === "paused" ? "继续任务" : "暂停任务"} disabled={!persistedJob || terminalJob} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>
+                  <button className="restart-action" title="重新开始" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); requeueTrainingJob?.(job.id); }}><RotateCcw size={15} strokeWidth={2.2} /></button>
+                  <button className="danger-icon" title="删除任务" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>
+                  <button title="打开 TensorBoard" onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </section>
 
       </main>
 
@@ -6003,8 +6051,8 @@ return (
                 <div className="queue-actions">
                   <span className="queue-action-row">
                     <button type="button" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
-                    <button type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RefreshCw size={14} /></button>
-                    <button type="button" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
+                    <button className="restart-action" type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RotateCcw size={15} strokeWidth={2.2} /></button>
+                    <button className="danger-icon" type="button" title="删除任务" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
                   </span>
                   <span className="queue-priority">
                     <button type="button" title="优先级上移" onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("inference", job.id, "up"); }}><ArrowUp size={13} /></button>
@@ -6729,7 +6777,7 @@ depth={depth + 1}
 
 }
 
-function HomeInspector({ stats, trashProjects, restoreProject, emptyProjectTrash, deleteProjectPermanently }) {
+function HomeInspector({ stats, trashProjects, restoreProject, restoreAllProjects, emptyProjectTrash, deleteProjectPermanently }) {
 
 return (
 
@@ -6767,9 +6815,13 @@ return (
 
 <span>共 {formatCount(trashProjects.length)} 项</span>
 
-<button title="刷新回收" onDoubleClick={emptyProjectTrash}><RefreshCw size={14} /></button>
+<span className="trash-toolbar-actions">
 
-<button title="清空项目回收站" disabled={!trashProjects.length} onClick={emptyProjectTrash}><Trash2 size={14} />全部清除</button>
+<button title="全部恢复" disabled={!trashProjects.length} onClick={restoreAllProjects}><RotateCcw size={14} /></button>
+
+<button className="danger-icon" title="全部清空" disabled={!trashProjects.length} onClick={emptyProjectTrash}><Trash2 size={14} /></button>
+
+</span>
 
 </div>
 

@@ -2005,6 +2005,7 @@ async function sourceImageRows(sourceProjectIds) {
     `SELECT pi.*, ia.sha256, ia.width AS image_width, ia.height AS image_height, ia.original_ext,
             p.name AS project_name, p.active_label_version_id
      FROM project_images pi
+     JOIN projects p ON p.id=pi.project_id
      JOIN image_assets ia ON ia.id=pi.image_asset_id
      JOIN projects p ON p.id=pi.project_id
      WHERE pi.project_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND p.deleted_at IS NULL
@@ -3240,10 +3241,10 @@ async function requeueInferenceJob(jobId) {
   if (!job) throw new Error("推理任务不存在");
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
   const updated = (await query(
-    `UPDATE runtime_inference_jobs
+     `UPDATE runtime_inference_jobs
      SET status='pending', progress=0, metrics_json='{}'::jsonb, message=$1,
-         started_at=NULL, finished_at=NULL, heartbeat_at=NULL, worker_id='', process_pid=NULL,
-         created_at=now(), priority=COALESCE(priority, 0)
+          started_at=NULL, finished_at=NULL,
+          created_at=now(), priority=COALESCE(priority, 0)
      WHERE id=$2 RETURNING *`,
     ["推理任务已重新排队，等待 worker 接管", jobId],
   )).rows[0];
@@ -5207,8 +5208,6 @@ main()
     console.error(error);
     process.exit(1);
   });
-
-
 
 
 

@@ -2747,6 +2747,122 @@ button:disabled:hover {
   }
 }
 
+/* Unified recycle-bin and queue action controls. */
+.home-trash-panel .compact-title {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  column-gap: 10px !important;
+}
+
+.home-trash-panel .compact-title > span:not(.trash-toolbar-actions) {
+  justify-self: end !important;
+  white-space: nowrap !important;
+}
+
+.trash-toolbar-actions,
+.trash-row-actions {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+}
+
+.home-trash-panel .compact-title .trash-toolbar-actions button,
+.home-trash-panel .trash-row-actions button {
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  border: 1px solid var(--border-soft, rgba(148,163,184,.30)) !important;
+  border-radius: 7px !important;
+  background: var(--surface-soft, rgba(255,255,255,.76)) !important;
+  color: var(--icon, #557086) !important;
+  line-height: 1 !important;
+}
+
+.home-trash-panel .compact-title .trash-toolbar-actions button:hover,
+.home-trash-panel .trash-row-actions button:hover {
+  border-color: rgba(20,184,166,.48) !important;
+  background: var(--accent-soft, rgba(20,184,166,.12)) !important;
+  color: var(--accent, #0f9d97) !important;
+}
+
+.home-trash-panel .compact-title .trash-toolbar-actions .danger-icon,
+.home-trash-panel .trash-row-actions button:last-child,
+.queue-action-row .danger-icon,
+.training-row-actions .danger-icon {
+  color: #ef4444 !important;
+}
+
+.home-trash-panel .compact-title .trash-toolbar-actions button:disabled {
+  opacity: .42 !important;
+  cursor: not-allowed !important;
+}
+
+.training-table-head,
+.training-table-row {
+  grid-template-columns: minmax(150px,1.2fr) minmax(90px,.75fr) minmax(110px,.85fr) 68px 76px 58px 60px 60px 46px 204px !important;
+  column-gap: 7px !important;
+}
+
+.training-table-head > span:last-child,
+.training-table-row > .training-row-actions {
+  width: 204px !important;
+  min-width: 204px !important;
+  max-width: 204px !important;
+  justify-self: end !important;
+}
+
+.training-row-actions {
+  gap: 4px !important;
+}
+
+.training-row-actions button,
+.queue-action-row button,
+.queue-priority button {
+  flex: 0 0 25px !important;
+  width: 25px !important;
+  min-width: 25px !important;
+  height: 25px !important;
+  padding: 0 !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  border-radius: 7px !important;
+}
+
+.training-row-actions button:disabled {
+  opacity: .48 !important;
+  cursor: not-allowed !important;
+}
+
+.restart-action {
+  color: var(--accent, #0f9d97) !important;
+  background: var(--accent-soft, rgba(20,184,166,.13)) !important;
+  border-color: rgba(20,184,166,.38) !important;
+}
+
+.restart-action svg {
+  display: block !important;
+  width: 15px !important;
+  height: 15px !important;
+  stroke: currentColor !important;
+}
+
+.app-shell.dark .trash-toolbar-actions button,
+.app-shell.dark .trash-row-actions button {
+  background: rgba(17,30,40,.90) !important;
+  color: #dceaf1 !important;
+}
+
+.app-shell.dark .restart-action {
+  color: #5eead4 !important;
+  background: rgba(20,184,166,.16) !important;
+  border-color: rgba(45,212,191,.42) !important;
+}
+
 @media (max-width: 1366px) {
   .workspace-layout {
     grid-template-columns: 220px 230px minmax(460px, 1fr);
@@ -11101,6 +11217,7 @@ button:disabled:hover {
   background: var(--surface, #fff) !important;
   box-shadow: var(--shadow-md, 0 12px 26px rgba(15,23,42,.14)) !important;
 }
+
 .app-shell.dark .filter-dropdown .filter-menu {
   background: #0d1b24 !important;
 }
@@ -11694,4 +11811,57 @@ button:disabled:hover {
     grid-template-columns: 1fr 1fr !important;
     grid-template-rows: none !important;
   }
+}
+
+/* Queue layout guard: this must remain after legacy responsive overrides. */
+.training-table-head,
+.training-table-row {
+  grid-template-columns: minmax(170px, 1.25fr) minmax(100px, .72fr) minmax(120px, .86fr) 68px 78px 56px 60px 60px 44px 204px !important;
+  column-gap: 7px !important;
+}
+
+.training-table-head > span:last-child,
+.training-table-row > .training-row-actions {
+  width: 204px !important;
+  min-width: 204px !important;
+  max-width: 204px !important;
+  justify-self: end !important;
+}
+
+.training-row-actions {
+  gap: 4px !important;
+}
+
+@media (max-width: 1500px) {
+  .training-table-head,
+  .training-table-row {
+    grid-template-columns: 160px 92px 110px 64px 72px 52px 56px 56px 42px 204px !important;
+  }
+}
+
+/* Final inference queue guard. */
+.inference-workspace .reference-queue .inference-table-head,
+.inference-workspace .reference-queue .inference-table-row {
+  grid-template-columns: minmax(180px,1.3fr) minmax(90px,.68fr) minmax(100px,.74fr) 74px 76px 56px 56px 58px 58px 58px 180px !important;
+  column-gap: 6px !important;
+}
+
+.inference-workspace .reference-queue .inference-table-head > span:last-child,
+.inference-workspace .reference-queue .inference-table-row > .queue-actions {
+  width: 180px !important;
+  min-width: 180px !important;
+  max-width: 180px !important;
+  transform: none !important;
+  justify-self: end !important;
+}
+
+.inference-workspace .reference-queue .inference-table-row .queue-action-row {
+  transform: none !important;
+}
+
+.queue-action-row .restart-action,
+.training-row-actions .restart-action {
+  color: var(--accent, #0f9d97) !important;
+  background: var(--accent-soft, rgba(20,184,166,.13)) !important;
+  border-color: rgba(20,184,166,.40) !important;
 }
