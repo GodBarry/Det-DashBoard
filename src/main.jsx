@@ -85,104 +85,20 @@ X,
 } from "lucide-react";
 
 import "./styles.css";
-
-const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
-
-const evaluationClusterLabels = { detect: "目标检测", segment: "实例分割", classify: "图像分类" };
-
-const evaluationTypeLabels = { training: "训练模型", inference: "推理模型" };
-
-const completedEvaluationStatuses = new Set(["done", "completed", "succeeded", "success"]);
-
-function taskLabel(task) {
-
-if (task === "detect") return "目标检测";
-
-if (task === "segment") return "实例分割";
-
-if (task === "classify") return "图像分类";
-
-return task || "未知任务";
-
-}
-
-function formatDateTime(value) {
-
-return value ? new Date(value).toLocaleString() : "--";
-
-}
-
-function formatDuration(start, end) {
-
-if (!start || !end) return "--";
-
-const durationMs = new Date(end).getTime() - new Date(start).getTime();
-
-if (!Number.isFinite(durationMs) || durationMs < 0) return "--";
-
-const totalSeconds = Math.round(durationMs / 1000);
-
-const minutes = Math.floor(totalSeconds / 60);
-
-const seconds = totalSeconds % 60;
-
-return minutes ? `${minutes}分${seconds}秒` : `${seconds}秒`;
-
-}
-
-function formatCount(value) {
-
-return Number(value || 0).toLocaleString();
-
-}
-
-function runStatusLabel(status) {
-
-const normalized = String(status || "").toLowerCase();
-
-if (completedEvaluationStatuses.has(normalized)) return "运行完成";
-
-if (["pending", "preparing"].includes(normalized)) return "等待处理";
-
-if (normalized === "running") return "运行中";
-
-if (normalized === "failed") return "运行失败";
-
-if (normalized === "cancelled") return "已取消";
-
-return status || "未知状态态";
-
-}
-
-function sortRuntimeJobsByTime(jobs = []) {
-  return [...jobs].sort((left, right) => {
-    const leftPriority = Number(left.priority || 0);
-    const rightPriority = Number(right.priority || 0);
-    if (rightPriority !== leftPriority) return rightPriority - leftPriority;
-    const leftTime = Date.parse(left.finished_at || left.started_at || left.created_at || 0) || 0;
-    const rightTime = Date.parse(right.finished_at || right.started_at || right.created_at || 0) || 0;
-    return rightTime - leftTime;
-  });
-}
-
-const uiStateStorageKey = "det-dashboard-ui-state-v1";
-const restorableViews = new Set(["home", "workspace", "models", "training", "inference", "evaluation"]);
-
-function readUiState() {
-  try {
-    return JSON.parse(window.localStorage.getItem(uiStateStorageKey) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-function updateUiState(patch) {
-  try {
-    window.localStorage.setItem(uiStateStorageKey, JSON.stringify({ ...readUiState(), ...patch }));
-  } catch {
-    // State restoration is best-effort when storage is unavailable.
-  }
-}
+import { readUiState, restorableViews, updateUiState } from "./app/ui-state.js";
+import {
+  colors,
+  completedEvaluationStatuses,
+  evaluationClusterLabels,
+  evaluationTypeLabels,
+  formatCount,
+  formatDateTime,
+  formatDuration,
+  runStatusLabel,
+  sortRuntimeJobsByTime,
+  taskLabel,
+} from "./shared/presentation.js";
+import { useWorkspaceColumns, WorkspaceResizeHandle } from "./shared/useWorkspaceColumns.jsx";
 
 function App() {
 
@@ -3560,43 +3476,6 @@ function SettingsDialog({ config, onClose }) {
   );
 
 }
-function useWorkspaceColumns(storageKey, defaults) {
-  const [columns, setColumns] = useState(() => {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(storageKey));
-      return saved && Number(saved.left) && Number(saved.right) ? saved : defaults;
-    } catch {
-      return defaults;
-    }
-  });
-  const beginResize = (side, event) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startValue = columns[side];
-    const onMove = (moveEvent) => {
-      const delta = moveEvent.clientX - startX;
-      const min = side === "left" ? 220 : 300;
-      const max = side === "left" ? 460 : 620;
-      setColumns((current) => ({ ...current, [side]: Math.max(min, Math.min(max, startValue + (side === "left" ? delta : -delta))) }));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      document.body.classList.remove("resizing-workspace");
-    };
-    document.body.classList.add("resizing-workspace");
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { once: true });
-  };
-  useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(columns));
-  }, [columns, storageKey]);
-  return { columns, beginResize };
-}
-
-function WorkspaceResizeHandle({ side, onPointerDown }) {
-  return <div className={`workspace-resize-handle ${side}`} role="separator" aria-orientation="vertical" aria-label={`调整${side === "left" ? "左侧" : "右侧"}栏宽度`} onPointerDown={(event) => onPointerDown(side, event)} />;
-}
-
 function TrainingWorkspace({
 
   projects,
