@@ -4594,17 +4594,19 @@ function runChildProcess(command, args, options = {}) {
     const child = spawn(command, args, { windowsHide: true, ...options });
     let stdout = "";
     let stderr = "";
+    let combined = "";
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.stdout?.on("data", (chunk) => { stdout += chunk; combined += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; combined += chunk; });
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) return resolve({ stdout, stderr, code });
+      if (code === 0) return resolve({ stdout, stderr, combined, code });
       const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
       error.code = code;
       error.stdout = stdout;
       error.stderr = stderr;
+      error.combined = combined;
       reject(error);
     });
   });
@@ -4717,6 +4719,9 @@ async function runUltralyticsInferenceJob(job) {
         completedAt: new Date().toISOString(),
         metrics,
         runnerSummary: summary,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        executionLog: result.combined || `${result.stdout || ""}${result.stderr || ""}`,
       },
     };
     await client.query(
@@ -4819,7 +4824,11 @@ async function runDinoInferenceJob(job) {
   try {
     result = await runChildProcess(env.python_path, commandArgs, { cwd: sourceRoot, env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONPATH: [sourceRoot, cacheRoot, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } });
   } catch (error) {
-    throw new Error(`DINO inference command failed: ${env.python_path} ${commandArgs.join(" ")} (cwd=${sourceRoot})\n${error.stderr || error.message}`);
+    const wrapped = new Error(`DINO inference command failed: ${env.python_path} ${commandArgs.join(" ")} (cwd=${sourceRoot})\n${error.stderr || error.message}`);
+    wrapped.stdout = error.stdout || "";
+    wrapped.stderr = error.stderr || "";
+    wrapped.combined = error.combined || `${error.stdout || ""}${error.stderr || error.message || ""}`;
+    throw wrapped;
   }
   if (!fs.existsSync(predictionsPath)) throw new Error(`DINO inference command completed without predictions.json: ${env.python_path} ${commandArgs.join(" ")}`);
   const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
@@ -4832,7 +4841,7 @@ async function runDinoInferenceJob(job) {
       "INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path) VALUES ($1,$2,$3,$4)",
       [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), row.visualizationPath || predictionsPath],
     );
-    const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: new Date().toISOString(), metrics, command: [env.python_path, ...commandArgs], stdout: String(result.stdout || "").slice(-4000) } };
+    const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: new Date().toISOString(), metrics, command: [env.python_path, ...commandArgs], stdout: result.stdout, stderr: result.stderr, executionLog: result.combined || `${result.stdout || ""}${result.stderr || ""}` } };
     await client.query(
       "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
       [JSON.stringify(nextParams), JSON.stringify(metrics), `DINO inference completed: ${rows.length} images, ${predictionCount} boxes`, job.id],
@@ -4875,9 +4884,21 @@ async function runInferenceJob(job, workerId) {
     await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在执行空模型推理", job.id]);
     await runDummyInferenceJob(job);
   } catch (error) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    const executionLog = error.combined || `${error.stdout || ""}${error.stderr || ""}` || error.message || "";
+    const nextParams = {
+      ...params,
+      output: {
+        ...(params.output || {}),
+        stdout: error.stdout || "",
+        stderr: error.stderr || "",
+        executionLog,
+        failedAt: new Date().toISOString(),
+      },
+    };
     await query(
-      "UPDATE runtime_inference_jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
-      [error.message || `推理 worker ${workerId} 执行失败`, job.id],
+      "UPDATE runtime_inference_jobs SET status='failed', message=$1, params_json=$2, finished_at=now() WHERE id=$3",
+      [error.message || `推理 worker ${workerId} 执行失败`, JSON.stringify(nextParams), job.id],
     ).catch(() => {});
   }
 }

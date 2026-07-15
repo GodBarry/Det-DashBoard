@@ -6255,25 +6255,12 @@ const previewItems = previewRows.slice(0, 12);
 
   const legendItems = predictionLegend(previewItems);
 
-const logLines = latestJob ? [
-
-`[INFO] 任务已创建，任务ID：${latestJob.id?.slice(0, 12) || "infer_20250620_001"}`,
-
-`[INFO] 加载模型 ${latestJob.model_name || selectedVersion?.model_name || "YOLOv8n"} 成功`,
-
-`[INFO] 使用设备：${String(inferenceForm.device || "CPU").toUpperCase()}`,
-
-`[INFO] 状态：${runStatusLabel(latestJob.status)}，进度：${latestJob.progress || 0}%`,
-
-`[INFO] ${displayInferenceMessage(latestJob, latestMetrics)}`,
-
-] : [
-
-"[INFO] 等待创建推理任务",
-
-"[INFO] 选择数据集、模型版本和算法适配器后提交",
-
-];
+const latestJobParams = parseMaybeJson(latestJob?.params_json);
+const executionLog = latestJobParams?.output?.executionLog
+  || latestJobParams?.output?.stderr
+  || latestJobParams?.output?.stdout
+  || latestJob?.message
+  || "等待执行脚本输出";
 
 return (
   <div className="inference-workspace resizable-workspace" style={{ "--workspace-left": `${columns.left}px`, "--workspace-right": `${columns.right}px` }}>
@@ -6537,12 +6524,7 @@ return (
       </div>
       <div className="inference-log reference-log">
         <h3>运行日志 <button type="button">清空</button></h3>
-        <div>
-          {logLines.concat(latestJob ? [
-            `[INFO] 图片：${latestMetrics.images ?? "--"}，预测框：${latestMetrics.predictions ?? "--"}`,
-            `[INFO] 输出：${latestJob.output_root || "等待生成"}`,
-          ] : []).map((line, index) => <p key={index}>14:32:{String(18 + index).padStart(2, "0")} {line}</p>)}
-        </div>
+        <pre>{executionLog}</pre>
       </div>
     </aside>
   </div>

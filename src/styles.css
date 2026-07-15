@@ -6000,7 +6000,8 @@ button:disabled:hover {
     linear-gradient(160deg, #496054, #25354a 52%, #101827);
 }
 
-.reference-log > div {
+.reference-log > div,
+.reference-log > pre {
   margin-top: 8px;
   min-height: 140px;
   max-height: 176px;
@@ -6010,6 +6011,21 @@ button:disabled:hover {
   border-radius: 7px;
   background: rgba(4, 10, 16, .72);
   font-family: Consolas, "SFMono-Regular", monospace;
+}
+
+.reference-log > pre {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #aebfcc;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.app-shell.light .reference-log > pre {
+  border-color: #d8e3ec;
+  background: #f8fafc;
+  color: #334155;
 }
 
 .reference-log p {
