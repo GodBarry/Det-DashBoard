@@ -125,6 +125,8 @@ const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dar
 
 const [currentUser, setCurrentUser] = useState(() => readSession());
 
+const [userPermissions, setUserPermissions] = useState([]);
+
 const [authMode, setAuthMode] = useState(() => window.localStorage.getItem("det-dashboard-user") ? null : "login");
 
 const signOut = async () => {
@@ -359,6 +361,17 @@ useEffect(() => {
     .then(() => setCurrentUser(readSession()))
     .catch(() => {});
 }, [currentUser?.token]);
+
+useEffect(() => {
+  if (!currentUser) {
+    setUserPermissions([]);
+    return;
+  }
+  fetch("/api/me/permissions")
+    .then((response) => response.json())
+    .then((payload) => setUserPermissions(Array.isArray(payload.permissions) ? payload.permissions : []))
+    .catch(() => setUserPermissions([]));
+}, [currentUser?.id]);
 
 useEffect(() => {
   if (currentUser) refreshHome();
@@ -2275,7 +2288,7 @@ cancelRenameProject={cancelRenameProject}
 
 </div>
 
-<div className="project-actions">
+{(currentUser?.role === "admin" || project.owner_user_id === currentUser?.id) && <div className="project-actions">
 
 <button title={"分享项目"} onClick={(event) => { event.stopPropagation(); setProjectShareResource({ ...project, resourceType: "project" }); }}><Share2 size={16} /></button>
 
@@ -2285,7 +2298,7 @@ cancelRenameProject={cancelRenameProject}
 
 <button title="删除项目" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
 
-</div>
+</div>}
 
 </article>
 
@@ -2420,6 +2433,7 @@ setActiveInferenceResult={setActiveInferenceResult}
 viewInferenceResults={viewInferenceResults}
 
 currentUser={currentUser}
+        userPermissions={userPermissions}
         assetScope={assetScope}
         setAssetScope={setAssetScope}
         authMode={authMode}
@@ -3042,6 +3056,7 @@ theme,
 setTheme,
 
   currentUser,
+  userPermissions,
   assetScope,
   setAssetScope,
   authMode,
@@ -3146,8 +3161,6 @@ return (
         <div>
 
 <h1>{title}</h1>
-
-<p>借鉴 Run / Artifact / Model Version / Queue 的平台化管理方式</p>
 
 </div>
 
@@ -3349,6 +3362,10 @@ assetScope={assetScope}
 
 setAssetScope={setAssetScope}
 
+currentUser={currentUser}
+
+userPermissions={userPermissions}
+
 />
 
 )}
@@ -3424,8 +3441,6 @@ function AuthDialog({ mode, setMode, onClose, onSignedIn, required = false }) {
 
         <h2>{mode === "login" ? "登录 Det Dashboard" : "注册用户"}</h2>
 
-        <p>支持多用户登录，默认账号：admin / admin</p>
-
         <label>用户名<input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label>
 
         {mode === "register" && <label>显示名称<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="可" /></label>}
@@ -3436,7 +3451,7 @@ function AuthDialog({ mode, setMode, onClose, onSignedIn, required = false }) {
 
         <button className="primary" onClick={submit} disabled={busy}>{busy ? "处理中..." : (mode === "login" ? "登录" : "注册并登录")}</button>
 
-        <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "没有账号？注" : "已有账号？登"}</button>
+        <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "没有账号？注册" : "已有账号？登录"}</button>
 
       </section>
 
@@ -3959,6 +3974,10 @@ assetScope,
 
 setAssetScope,
 
+currentUser,
+
+userPermissions,
+
 }) {
 
 const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
@@ -3999,15 +4018,15 @@ const stats = [
 
 const recentItems = [
 
-["登记权重", modelVersions[0]?.version_name || "YOLOv8n_ultralytics_8.4.80_cpu", "14:32:18", "admin", Upload],
+modelVersions[0] ? ["登记权重", modelVersions[0].version_name, formatDateTime(modelVersions[0].created_at), modelVersions[0].created_by_name || "--", Upload] : null,
 
-["推理验证通过", assetLinks[0]?.algorithm_name || "Ultralytics YOLO", "14:32:19", "admin", CheckCircle2],
+assetLinks[0] ? ["推理验证通过", assetLinks[0].algorithm_name || assetLinks[0].model_name || "已关联资产", formatDateTime(assetLinks[0].last_success_at), assetLinks[0].created_by_name || "--", CheckCircle2] : null,
 
-["环境检测完", pythonEnvs[0]?.name || "py3.12-torch2.12-cpu", "14:31:05", "system", Cpu],
+pythonEnvs[0] ? ["环境检测完成", pythonEnvs[0].name, formatDateTime(pythonEnvs[0].created_at), pythonEnvs[0].created_by_name || "--", Cpu] : null,
 
-["导入算法适配", algorithms[0]?.name || "Ultralytics YOLO", "14:30:12", "admin", Boxes],
+algorithms[0] ? ["导入算法适配", algorithms[0].name, formatDateTime(algorithms[0].created_at), algorithms[0].created_by_name || "--", Boxes] : null,
 
-];
+].filter(Boolean);
 
 return (
 
@@ -4087,6 +4106,7 @@ return (
 
 <div className="workspace-commandbar asset-commandbar">
 
+{(currentUser?.role === "admin" || userPermissions.includes("assets.register")) && <>
 <button onClick={() => setDrawerMode("cluster")}><span>+</span>登记模型</button>
 
 <button onClick={() => setDrawerMode("version")}><Download size={15} />导入预训练权重</button>
@@ -4096,6 +4116,7 @@ return (
 <button onClick={() => setDrawerMode("algorithm")}><span>+</span>导入算法适配</button>
 
 <button onClick={() => setDrawerMode("env")}><span>+</span>登记Python 环境</button>
+</>}
 
 <button><RefreshCw size={15} />刷新</button>
 
@@ -4235,7 +4256,7 @@ return (
 
 <div><span>总资产</span><b>{algorithms.length + familyRows.length + modelVersions.length + pythonEnvs.length}</b><Boxes size={24} /></div>
 
-<div><span>MinIO对象</span><b>{Math.max(42, modelVersions.length + pythonEnvs.length + algorithms.length)}</b><Database size={24} /></div>
+<div><span>MinIO对象</span><b>{modelVersions.length + pythonEnvs.length + algorithms.length}</b><Database size={24} /></div>
 
 <div><span>预训练权重</span><b>{modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").length}</b><Brain size={24} /></div>
 
@@ -4260,6 +4281,8 @@ return (
 </article>
 
 ))}
+
+{!recentItems.length && <p className="resource-empty">暂无活动</p>}
 
 </section>
 

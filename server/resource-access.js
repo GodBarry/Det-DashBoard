@@ -205,10 +205,10 @@ function createResourceAccess(dependencies = {}) {
       return { sql: `${column(ownerColumn)}=$${params.length}`, params };
     }
     if (scope === "shared") {
-      params.push(definition.resourceType, actor.id, [permissions.VIEW || "asset:view", permissions.USE || "asset:use", permissions.EDIT || "asset:edit", permissions.DELETE || "asset:delete", permissions.SHARE || "asset:share", permissions.MANAGE_ACL || "asset:manage_acl"]);
+      params.push(actor.id, definition.resourceType, actor.id, [permissions.VIEW || "asset:view", permissions.USE || "asset:use", permissions.EDIT || "asset:edit", permissions.DELETE || "asset:delete", permissions.SHARE || "asset:share", permissions.MANAGE_ACL || "asset:manage_acl"]);
       const base = params.length - 2;
       return {
-        sql: `EXISTS (SELECT 1 FROM asset_acl resource_acl WHERE resource_acl.resource_type=$${base} AND resource_acl.resource_id=${column(idColumn)} AND resource_acl.user_id=$${base + 1} AND resource_acl.permission=ANY($${base + 2}::text[]) AND (resource_acl.expires_at IS NULL OR resource_acl.expires_at>now()))`,
+        sql: `${column(ownerColumn)}<>$${base - 1} AND EXISTS (SELECT 1 FROM asset_acl resource_acl WHERE resource_acl.resource_type=$${base} AND resource_acl.resource_id=${column(idColumn)} AND resource_acl.user_id=$${base + 1} AND resource_acl.permission=ANY($${base + 2}::text[]) AND (resource_acl.expires_at IS NULL OR resource_acl.expires_at>now()))`,
         params,
       };
     }

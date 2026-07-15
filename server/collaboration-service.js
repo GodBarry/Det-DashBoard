@@ -98,6 +98,7 @@ function createCollaborationService(options = {}) {
   const transaction = options.transaction;
   const httpError = options.httpError || defaultHttpError;
   const checkPermission = options.checkPermission || options.authorize || null;
+  const taskScope = options.taskScope || null;
   const audit = options.audit || options.onAudit || null;
   const defaultLockTtlSeconds = positiveInteger(options.lockTtlSeconds, 300, 86400);
 
@@ -105,6 +106,7 @@ function createCollaborationService(options = {}) {
   if (typeof transaction !== "function") throw new TypeError("createCollaborationService requires a transaction function");
   if (typeof httpError !== "function") throw new TypeError("httpError must be a function");
   if (checkPermission && typeof checkPermission !== "function") throw new TypeError("checkPermission must be a function");
+  if (taskScope && typeof taskScope !== "function") throw new TypeError("taskScope must be a function");
   if (audit && typeof audit !== "function") throw new TypeError("audit must be a function");
 
   const run = (client, text, params = []) => client && typeof client.query === "function"
@@ -232,7 +234,7 @@ function createCollaborationService(options = {}) {
 
   async function listTasks(filters = {}, actor) {
     const input = objectInput(filters);
-    await authorize("task:list", actor || input.actor, input);
+    const currentActor = await authorize("task:list", actor || input.actor, input);
     const page = positiveInteger(input.page, 1, 1000000);
     const pageSize = positiveInteger(input.pageSize || input.page_size, 50, 200);
     const params = [];
@@ -241,6 +243,11 @@ function createCollaborationService(options = {}) {
     addFilter(where, params, "t.dataset_version_id", input.datasetVersionId || input.dataset_version_id);
     addFilter(where, params, "t.status", input.status);
     addFilter(where, params, "t.created_by", input.createdBy || input.created_by);
+    if (taskScope) {
+      const scoped = await taskScope(currentActor, { params: [...params] });
+      if (scoped?.sql) where.push(scoped.sql);
+      if (Array.isArray(scoped?.params)) params.splice(0, params.length, ...scoped.params);
+    }
     if (input.assigneeId || input.assignee_id) {
       params.push(input.assigneeId || input.assignee_id);
       where.push(`EXISTS (SELECT 1 FROM annotation_assignments aa WHERE aa.task_id=t.id AND aa.assignee_id=$${params.length})`);

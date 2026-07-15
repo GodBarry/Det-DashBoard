@@ -1233,7 +1233,7 @@ export function AnnotationTaskPanel({
       <header style={ui.panelHeader}>
         <div>
           <h2 style={ui.panelTitle}>{selectedTask ? entityName(selectedTask) : "协同工作台"}</h2>
-          <p style={ui.muted}>{selectedTask ? `${selectedTask.dataset_version_name || "数据集版本"} · ${items.length} 个条目` : "处理分享、公开申请与逐图协同标注。"}</p>
+          {selectedTask ? <p style={ui.muted}>{`${selectedTask.dataset_version_name || "数据集版本"} · ${items.length} 个条目`}</p> : null}
         </div>
         <span style={ui.actions}>
           {selectedTask ? <ActionButton icon={ChevronLeft} onClick={() => { setSelectedTask(null); setItems([]); }}>返回任务</ActionButton> : null}

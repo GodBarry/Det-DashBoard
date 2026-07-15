@@ -3608,9 +3608,16 @@ async function backfillRuntimeAssetLinks() {
   }
 }
 
-async function listRuntimeAssetLinks() {
+async function listRuntimeAssetLinks(actor, scope = "mine") {
   try {
     await backfillRuntimeAssetLinks();
+    let scopedParams = [];
+    const scopeConditions = [];
+    for (const [table, alias] of [["algorithm_assets", "aa"], ["model_clusters", "mc"], ["runtime_envs", "re"], ["projects", "p"]]) {
+      const scoped = scopedSql(table, alias, actor, scope, scopedParams);
+      scopedParams = scoped.params;
+      scopeConditions.push(`(${alias}.id IS NOT NULL AND ${scoped.sql})`);
+    }
     const rows = await query(
       `SELECT ral.*,
         aa.name AS algorithm_name, aa.algorithm_key, aa.version AS algorithm_version,
@@ -3626,8 +3633,10 @@ async function listRuntimeAssetLinks() {
        LEFT JOIN runtime_envs re ON re.id=ral.python_env_id
        LEFT JOIN projects p ON p.id=ral.dataset_project_id
        LEFT JOIN runtime_inference_jobs ij ON ij.id=ral.last_success_job_id
+       WHERE ${scopeConditions.join(" OR ")}
        ORDER BY ral.last_success_at DESC NULLS LAST, ral.success_count DESC
        LIMIT 200`,
+      scopedParams,
     );
     return rows.rows;
   } catch (error) {
@@ -5952,7 +5961,7 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req), actor) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await clearModelAssets(await readBody(req))); }
   if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") { accessControl.requireAdmin(actor); return sendJson(res, { links: await listRuntimeAssetLinks() }); }
+  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await listRuntimeAssetLinks(actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req), actor) });
   if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs(actor, requestedScope(parsed, actor)) });
@@ -6100,13 +6109,37 @@ async function main() {
     query,
     transaction,
     httpError,
+    taskScope: async (actor, { params = [] } = {}) => {
+      if (accessControl.isAdmin(actor)) return { sql: "TRUE", params };
+      const scopedParams = [...params, actor.id];
+      const actorParam = scopedParams.length;
+      return {
+        sql: `EXISTS (
+          SELECT 1 FROM projects task_project
+          WHERE task_project.id=dv.project_id AND task_project.deleted_at IS NULL AND (
+            task_project.owner_user_id=$${actorParam}
+            OR task_project.visibility='public'
+            OR EXISTS (
+              SELECT 1 FROM asset_acl task_acl
+              WHERE task_acl.resource_type='project'
+                AND task_acl.resource_id=task_project.id
+                AND task_acl.user_id=$${actorParam}
+                AND (task_acl.expires_at IS NULL OR task_acl.expires_at>now())
+            )
+            OR EXISTS (
+              SELECT 1 FROM annotation_assignments task_assignment
+              JOIN annotation_items assigned_item ON assigned_item.id=task_assignment.item_id
+              WHERE assigned_item.task_id=t.id AND task_assignment.assignee_id=$${actorParam}
+            )
+          )
+        )`,
+        params: scopedParams,
+      };
+    },
     checkPermission: async (action, { actor, resource }) => {
       if (!actor?.id) return false;
       if (action === "review:create") return accessControl.isAdmin(actor);
       let projectId = resource.projectId || resource.project_id || null;
-      if (action === "task:list" && !projectId && !accessControl.isAdmin(actor)) {
-        throw httpError(400, "projectId is required");
-      }
       if (!projectId && resource.taskId) {
         projectId = (await query(
           `SELECT dv.project_id FROM annotation_tasks t JOIN dataset_versions dv ON dv.id=t.dataset_version_id WHERE t.id=$1`,
