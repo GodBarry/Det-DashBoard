@@ -12201,6 +12201,47 @@ button:disabled:hover {
   border-radius: 3px;
 }
 
+.dataset-filter-panel {
+  display: grid;
+  grid-template-columns: auto repeat(4, minmax(110px, 1fr)) minmax(150px, 1.2fr);
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.dataset-filter-panel > b {
+  align-self: center;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.dataset-filter-panel label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.dataset-filter-panel select,
+.dataset-filter-panel input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+}
+
+.dataset-filter-panel select[multiple] {
+  height: 58px;
+  padding: 2px;
+}
+
+@media (max-width: 1500px) {
+  .dataset-filter-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 .selection-summary,
 .initialization-note {
   color: var(--training-muted, var(--muted)) !important;

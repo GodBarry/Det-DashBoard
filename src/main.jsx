@@ -309,7 +309,14 @@ datasetProjectId: "",
 trainProjectId: "",
 trainProjectIds: [],
 valProjectId: "",
+valProjectIds: [],
 testProjectId: "",
+testProjectIds: [],
+datasetFilters: {
+  train: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
+  val: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
+  test: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
+},
 modelId: "",
 initializationMode: "random",
 initialModelVersionId: "",
@@ -488,7 +495,10 @@ useEffect(() => {
       trainProjectId: trainingForm.trainProjectId,
       trainProjectIds: trainingForm.trainProjectIds,
       valProjectId: trainingForm.valProjectId,
+      valProjectIds: trainingForm.valProjectIds,
       testProjectId: trainingForm.testProjectId,
+      testProjectIds: trainingForm.testProjectIds,
+      datasetFilters: trainingForm.datasetFilters,
       modelId: trainingForm.modelId,
       initializationMode: trainingForm.initializationMode,
       initialModelVersionId: trainingForm.initialModelVersionId,
@@ -816,8 +826,11 @@ datasetSplits: {
 trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
 trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
 valProjectId: trainingForm.valProjectId || null,
+valProjectIds: trainingForm.valProjectIds?.length ? trainingForm.valProjectIds : (trainingForm.valProjectId ? [trainingForm.valProjectId] : []),
 testProjectId: trainingForm.testProjectId || null,
+testProjectIds: trainingForm.testProjectIds?.length ? trainingForm.testProjectIds : (trainingForm.testProjectId ? [trainingForm.testProjectId] : []),
 },
+datasetFilters: trainingForm.datasetFilters,
 
 modelId: trainingForm.modelId || null,
 
@@ -855,8 +868,11 @@ datasetSplits: {
 trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
 trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
 valProjectId: trainingForm.valProjectId || null,
+valProjectIds: trainingForm.valProjectIds?.length ? trainingForm.valProjectIds : (trainingForm.valProjectId ? [trainingForm.valProjectId] : []),
 testProjectId: trainingForm.testProjectId || null,
+testProjectIds: trainingForm.testProjectIds?.length ? trainingForm.testProjectIds : (trainingForm.testProjectId ? [trainingForm.testProjectId] : []),
 },
+datasetFilters: trainingForm.datasetFilters,
 earlyStop: Boolean(trainingForm.earlyStop),
 amp: Boolean(trainingForm.amp),
 freezeBackbone: Boolean(trainingForm.freezeBackbone),
@@ -3626,6 +3642,11 @@ function TrainingWorkspace({
   const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
 
   const trainProjectIds = trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : [trainingForm.trainProjectId || trainingForm.datasetProjectId].filter(Boolean);
+  const valProjectIds = trainingForm.valProjectIds?.length ? trainingForm.valProjectIds : [trainingForm.valProjectId].filter(Boolean);
+  const testProjectIds = trainingForm.testProjectIds?.length ? trainingForm.testProjectIds : [trainingForm.testProjectId].filter(Boolean);
+  const splitIds = { trainProjectId: trainProjectIds, valProjectId: valProjectIds, testProjectId: testProjectIds };
+  const splitArrayKey = { trainProjectId: 'trainProjectIds', valProjectId: 'valProjectIds', testProjectId: 'testProjectIds' };
+  const splitName = { trainProjectId: 'train', valProjectId: 'val', testProjectId: 'test' };
   const selectedProject = projects.find((project) => project.id === trainProjectIds[0]) || {};
 
   const selectedEnv = pythonEnvs.find((env) => env.id === trainingForm.pythonEnvId) || pythonEnvs.find((env) => String(env.name || '').includes('ultralytics')) || pythonEnvs[0] || {};
@@ -3660,14 +3681,13 @@ function TrainingWorkspace({
         name: project.name,
         right: project.image_count || 0,
         depth,
-        active: activeDatasetSplit === "trainProjectId" ? trainProjectIds.includes(project.id) : trainingForm[activeDatasetSplit] === project.id,
+        active: splitIds[activeDatasetSplit].includes(project.id),
         onClick: () => {
-          if (activeDatasetSplit === "trainProjectId") {
-            const nextIds = trainProjectIds.includes(project.id) ? trainProjectIds.filter((id) => id !== project.id) : [...trainProjectIds, project.id];
-            setTrainingForm({ ...trainingForm, trainProjectIds: nextIds, trainProjectId: nextIds[0] || "", datasetProjectId: nextIds[0] || "" });
-          } else {
-            setTrainingForm({ ...trainingForm, [activeDatasetSplit]: trainingForm[activeDatasetSplit] === project.id ? "" : project.id });
-          }
+          const currentIds = splitIds[activeDatasetSplit];
+          const nextIds = currentIds.includes(project.id) ? currentIds.filter((id) => id !== project.id) : [...currentIds, project.id];
+          const next = { ...trainingForm, [splitArrayKey[activeDatasetSplit]]: nextIds, [activeDatasetSplit]: nextIds[0] || "" };
+          if (activeDatasetSplit === 'trainProjectId') next.datasetProjectId = nextIds[0] || '';
+          setTrainingForm(next);
         },
       });
       appendDatasetRows(project.id, depth + 1);
@@ -3710,6 +3730,22 @@ function TrainingWorkspace({
   const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [];
 
   const setField = (key, value) => setTrainingForm({ ...trainingForm, [key]: value });
+  const metadataValues = (key) => Array.from(new Set(projects.flatMap((project) => {
+    const value = project[key];
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(','); }
+  }).map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const trainingFilterOptions = { scenes: metadataValues('scenes'), views: metadataValues('views'), modalities: metadataValues('modalities'), labels: metadataValues('labels') };
+  const activeFilterSplit = splitName[activeDatasetSplit];
+  const activeDatasetFilter = trainingForm.datasetFilters?.[activeFilterSplit] || { scenes: [], views: [], modalities: [], labels: [], keywords: [] };
+  const setDatasetFilter = (key, values) => setTrainingForm({
+    ...trainingForm,
+    datasetFilters: {
+      ...(trainingForm.datasetFilters || {}),
+      [activeFilterSplit]: { ...activeDatasetFilter, [key]: values },
+    },
+  });
   const normalizeParameterSchema = (schema) => {
     const conflictingKeys = new Set(["model", "model_id", "model_path", "data", "dataset", "dataset_id", "dataset_project_id", "project", "project_id", "name", "task_name"]);
     const cleanFields = (fields = []) => fields.filter((field) => field?.key && !conflictingKeys.has(String(field.key).toLowerCase()));
@@ -3859,10 +3895,14 @@ function TrainingWorkspace({
           <section className="reference-section dataset-split-section">
             <h2>数据与标签</h2>
             <div className="dataset-split-grid">
-              <label className="training-multiselect"><span>训练集<small>train · 可多选</small></span><select multiple value={trainProjectIds} size={Math.min(5, Math.max(3, projects.length))} onChange={(event) => { const nextIds = Array.from(event.target.selectedOptions, (option) => option.value); setTrainingForm({ ...trainingForm, trainProjectIds: nextIds, trainProjectId: nextIds[0] || "", datasetProjectId: nextIds[0] || "" }); }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {trainProjectIds.length} 个训练集</small></label>
-              {[['valProjectId', '验证集', 'val'], ['testProjectId', '测试集', 'test']].map(([key, label, hint]) => (
-                <label key={key}><span>{label}<small>{hint} · 单选</small></span><select value={trainingForm[key] || ''} onChange={(e) => setTrainingForm({ ...trainingForm, [key]: e.target.value })}><option value="">选择{label}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select></label>
+              {[["trainProjectId", "训练集", "train", trainProjectIds], ["valProjectId", "验证集", "val", valProjectIds], ["testProjectId", "测试集", "test", testProjectIds]].map(([key, label, hint, selectedIds]) => (
+                <label className="training-multiselect" key={key}><span>{label}<small>{hint} · 可多选</small></span><select multiple value={selectedIds} size={Math.min(5, Math.max(3, projects.length))} onFocus={() => setActiveDatasetSplit(key)} onChange={(event) => { const nextIds = Array.from(event.target.selectedOptions, (option) => option.value); const next = { ...trainingForm, [splitArrayKey[key]]: nextIds, [key]: nextIds[0] || "" }; if (key === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {selectedIds.length} 个{label}</small></label>
               ))}
+            </div>
+            <div className="dataset-filter-panel">
+              <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
+              {[["views", "视角"], ["scenes", "场景"], ["modalities", "模态"], ["labels", "目标标签"]].map(([key, label]) => <label key={key}><span>{label}</span><select multiple value={activeDatasetFilter[key] || []} onChange={(event) => setDatasetFilter(key, Array.from(event.target.selectedOptions, (option) => option.value))}>{trainingFilterOptions[key].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>)}
+              <label><span>其他标签/关键词</span><input value={(activeDatasetFilter.keywords || []).join(", ")} onChange={(event) => setDatasetFilter("keywords", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} placeholder="逗号分隔" /></label>
             </div>
             <div className="dataset-meta-row"><span>活动标签：{String(selectedProject.active_label_version_id || 'active').slice(0, 8)}</span><span>训练图像：{formatCount(selectedProject.image_count || 0)}</span><span>划分由导入结果确定，不再使用固定比例</span></div>
           </section>
@@ -5871,6 +5911,15 @@ const { columns, beginResize } = useWorkspaceColumns("det-dashboard.inference-co
 
 const selectedProject = projects.find((project) => project.id === inferenceForm.datasetProjectId);
 
+const inferenceMetadataValues = (key) => Array.from(new Set(projects.flatMap((project) => {
+  const value = project[key];
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
+}).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), views: inferenceMetadataValues("views"), modalities: inferenceMetadataValues("modalities"), labels: inferenceMetadataValues("labels") };
+
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
 
   const visibleInferenceAlgorithms = inferenceAlgorithms.length ? inferenceAlgorithms : algorithmAssets;
@@ -6369,11 +6418,12 @@ return (
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
-            <select value={inferenceForm.inputViews} onChange={(e) => setField("inputViews", e.target.value)}><option value="">视角：全部</option></select>
-            <select value={inferenceForm.inputScenes} onChange={(e) => setField("inputScenes", e.target.value)}><option value="">场景：全部</option></select>
-            <select value={inferenceForm.inputModalities} onChange={(e) => setField("inputModalities", e.target.value)}><option value="">模式：RGB</option></select>
-            <select value={inferenceForm.inputLabels} onChange={(e) => setField("inputLabels", e.target.value)}><option value="">标签：全部</option></select>
-            <button type="button">清空</button>
+            <select value={inferenceForm.inputViews} onChange={(e) => setField("inputViews", e.target.value)}><option value="">视角：全部</option>{inferenceFilterOptions.views.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+            <select value={inferenceForm.inputScenes} onChange={(e) => setField("inputScenes", e.target.value)}><option value="">场景：全部</option>{inferenceFilterOptions.scenes.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+            <select value={inferenceForm.inputModalities} onChange={(e) => setField("inputModalities", e.target.value)}><option value="">模态：全部</option>{inferenceFilterOptions.modalities.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+            <select value={inferenceForm.inputLabels} onChange={(e) => setField("inputLabels", e.target.value)}><option value="">标签：全部</option>{inferenceFilterOptions.labels.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+            <input value={inferenceForm.inputQuery} onChange={(e) => setField("inputQuery", e.target.value)} placeholder="其他标签/关键词" />
+            <button type="button" onClick={() => setInferenceForm({ ...inferenceForm, inputViews: "", inputScenes: "", inputModalities: "", inputLabels: "", inputQuery: "" })}>清空</button>
           </div>
         </div>
 

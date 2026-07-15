@@ -1836,6 +1836,10 @@ async function listProjects(trash = false) {
       COALESCE(vc.video_count, 0)::int AS subtree_video_count,
       COALESCE(ac.annotation_count, 0)::int AS subtree_annotation_count,
       (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND ${trash ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}) AS child_count,
+      COALESCE((SELECT jsonb_agg(DISTINCT pi.scene) FILTER (WHERE pi.scene IS NOT NULL AND pi.scene<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS scenes,
+      COALESCE((SELECT jsonb_agg(DISTINCT pi.view) FILTER (WHERE pi.view IS NOT NULL AND pi.view<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS views,
+      COALESCE((SELECT jsonb_agg(DISTINCT pi.modality) FILTER (WHERE pi.modality IS NOT NULL AND pi.modality<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS modalities,
+      COALESCE((SELECT jsonb_agg(DISTINCT a.label) FILTER (WHERE a.label IS NOT NULL AND a.label<>'') FROM subtree s JOIN image_annotations a ON a.label_version_id=s.effective_label_version_id WHERE s.root_id=p.id), '[]'::jsonb) AS labels,
       it.last_import_at
      FROM projects p
      LEFT JOIN image_counts ic ON ic.root_id = p.id
@@ -3294,6 +3298,29 @@ function normalizeTrainingDatasetSplits(body = {}, params = {}, fallbackTrainPro
   return { trainProjectIds: read("train"), valProjectIds: read("val"), testProjectIds: read("test") };
 }
 
+function normalizeTrainingDatasetFilters(body = {}, params = {}) {
+  const requested = body.datasetFilters || body.dataset_filters || params.datasetFilters || params.dataset_filters || {};
+  const list = (value) => [...new Set((Array.isArray(value) ? value : String(value || "").split(",")).map((item) => String(item || "").trim()).filter(Boolean))];
+  const normalize = (filter = {}) => ({
+    scenes: list(filter.scenes || filter.scene),
+    views: list(filter.views || filter.view),
+    modalities: list(filter.modalities || filter.modality),
+    labels: list(filter.labels || filter.label),
+    keywords: list(filter.keywords || filter.keyword),
+  });
+  return { train: normalize(requested.train), val: normalize(requested.val), test: normalize(requested.test) };
+}
+
+function trainingImageMatchesFilter(image, annotations = [], filter = {}) {
+  const includes = (values, value) => !values?.length || values.includes(String(value || ""));
+  if (!includes(filter.scenes, image.scene)) return false;
+  if (!includes(filter.views, image.view)) return false;
+  if (!includes(filter.modalities, image.modality)) return false;
+  if (filter.keywords?.length && !filter.keywords.some((value) => String(image.keyword || "").toLowerCase().includes(value.toLowerCase()))) return false;
+  if (filter.labels?.length && !annotations.some((annotation) => filter.labels.includes(String(annotation.label || "")))) return false;
+  return true;
+}
+
 async function presentTrainingJobs(jobs) {
   const selections = jobs.map((job) => normalizeTrainingDatasetSplits({}, job.params_json || {}, job.dataset_project_id));
   const ids = [...new Set(selections.flatMap((item) => [...item.trainProjectIds, ...item.valProjectIds, ...item.testProjectIds]))];
@@ -3365,8 +3392,6 @@ async function createTrainingJob(body = {}) {
   const datasetProjectId = datasetSplits.trainProjectIds[0] || null;
   if (!datasetProjectId) throw new Error("请选择训练数据集项目");
   const selectedProjectIds = [...new Set([...datasetSplits.trainProjectIds, ...datasetSplits.valProjectIds, ...datasetSplits.testProjectIds])];
-  const selectedProjectCount = datasetSplits.trainProjectIds.length + datasetSplits.valProjectIds.length + datasetSplits.testProjectIds.length;
-  if (selectedProjectIds.length !== selectedProjectCount) throw new Error("A dataset project cannot be assigned to more than one split");
   const projects = (await query("SELECT id, name FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedProjectIds])).rows;
   if (projects.length !== selectedProjectIds.length) throw new Error("One or more selected dataset projects do not exist");
   const projectById = new Map(projects.map((item) => [String(item.id), item]));
@@ -3406,6 +3431,7 @@ async function createTrainingJob(body = {}) {
   params.resume = initialization.resume;
   params.checkpointMetadata = initialization.checkpoint;
   params.datasetSplits = datasetSplits;
+  params.datasetFilters = normalizeTrainingDatasetFilters(body, params);
   params.trainProjectIds = datasetSplits.trainProjectIds;
   params.valProjectIds = datasetSplits.valProjectIds;
   params.testProjectIds = datasetSplits.testProjectIds;
@@ -5025,6 +5051,7 @@ async function createDatasetSnapshotForTraining(job) {
     val: requested.valProjectIds,
     test: requested.testProjectIds,
   };
+  const datasetFilters = normalizeTrainingDatasetFilters({}, params);
   if (!splitProjectIds.train.length) throw new Error("Training split project is required");
   const selectedIds = [...new Set(Object.values(splitProjectIds).flat())];
   const projects = (await query("SELECT * FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedIds])).rows;
@@ -5064,7 +5091,7 @@ async function createDatasetSnapshotForTraining(job) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
   const snapshotName = `${cleanName(trainProject.name, "dataset")}_${stamp}`;
   const snapshotRoot = path.join(storageRoot, "runtime", "snapshots", snapshotName);
-  const split = { train: 0, val: 0, test: 0, projects: splitProjectIds };
+  const split = { train: 0, val: 0, test: 0, projects: splitProjectIds, filters: datasetFilters };
   fs.mkdirSync(path.join(snapshotRoot, "annotations"), { recursive: true });
   for (const part of ["train", "val", "test"]) {
     fs.mkdirSync(path.join(snapshotRoot, "images", part), { recursive: true });
@@ -5072,23 +5099,31 @@ async function createDatasetSnapshotForTraining(job) {
   }
   const cocoBySplit = Object.fromEntries(["train", "val", "test"].map((name) => [name, { images: [], annotations: [], categories: labels.map((label, index) => ({ id: index + 1, name: label })) }]));
   let annotationId = 1;
-  const splitRank = new Map(Object.entries(splitProjectIds).flatMap(([part, ids], partIndex) => ids.map((id, projectIndex) => [String(id), { part, rank: partIndex * 100000 + projectIndex }])));
-  const deduplicatedRows = [...rows].sort((a, b) => (splitRank.get(String(a.project_id))?.rank ?? 999999) - (splitRank.get(String(b.project_id))?.rank ?? 999999));
-  const seenAssets = new Set();
+  const deduplicatedRows = [...rows];
+  const seenAssets = new Map();
   let duplicateImageCount = 0;
   for (let index = 0; index < deduplicatedRows.length; index += 1) {
     const item = deduplicatedRows[index];
-    const part = splitRank.get(String(item.project_id))?.part;
+    const annotations = annsByImage.get(String(item.id)) || [];
+    const matchingParts = ["train", "val", "test"].filter((part) =>
+      splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, annotations, datasetFilters[part]));
+    if (matchingParts.length > 1) {
+      throw new Error(`Dataset split filters overlap: image ${item.display_name || item.id} matches ${matchingParts.join(", ")}`);
+    }
+    const part = matchingParts[0];
     if (!part) continue;
     const assetKey = String(item.image_asset_id || item.object_key || item.id);
-    if (seenAssets.has(assetKey)) { duplicateImageCount += 1; continue; }
-    seenAssets.add(assetKey);
+    if (seenAssets.has(assetKey)) {
+      if (seenAssets.get(assetKey) !== part) throw new Error(`Dataset leakage detected: asset ${assetKey} appears in ${seenAssets.get(assetKey)} and ${part}`);
+      duplicateImageCount += 1;
+      continue;
+    }
+    seenAssets.set(assetKey, part);
     split[part] += 1;
     const ext = item.original_ext || ".jpg";
     const base = `${exportBaseName(item, index + 1)}_${String(item.id).slice(0, 8)}`;
     const imageName = `${base}${ext}`;
     await writeObjectToFile(item.object_key, path.join(snapshotRoot, "images", part, imageName));
-    const annotations = annsByImage.get(String(item.id)) || [];
     const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
     fs.writeFileSync(path.join(snapshotRoot, "labels", part, `${base}.txt`), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
     cocoBySplit[part].images.push({ id: String(item.id), file_name: imageName, width: Number(item.width || 0), height: Number(item.height || 0) });
@@ -5107,12 +5142,13 @@ async function createDatasetSnapshotForTraining(job) {
   const imageCount = split.train + split.val + split.test;
   const includedImageIds = new Set(Object.values(cocoBySplit).flatMap((coco) => coco.images.map((image) => String(image.id))));
   const annotationCount = annRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
-  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
+  if (!split.train) throw new Error("Training filters produced an empty train split");
+  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
   const snapshot = (await query(
     `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
      VALUES ($1,$2,$3,'yolo+coco',$4,$5,$6,$7,$8) RETURNING *`,
     [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, imageCount, annotationCount,
-      JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, duplicateImageCount })],
+      JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
   )).rows[0];
   await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
   await appendTrainingLog(job.id, "system", `dataset snapshot created: train=${split.train}, val=${split.val}, test=${split.test}, duplicates=${duplicateImageCount}`);
