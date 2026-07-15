@@ -31,6 +31,8 @@ const { createAccessControl } = require("./access-control");
 const { createResourceAccess } = require("./resource-access");
 const { createCollaborationService } = require("./collaboration-service");
 const { createMultiUserRouter } = require("./api-router");
+const { createAuthService } = require("./auth-service");
+const { createPathService } = require("./platform/path-service");
 const {
   imageObjectKey,
   videoObjectKey,
@@ -56,23 +58,24 @@ const {
 const lifecycle = runtime.lifecycle;
 const staticHandler = runtime.staticHandler;
 
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
-  return `pbkdf2_sha256$120000$${salt}$${hash}`;
-}
-
-function verifyPassword(password, storedHash = "") {
-  const [scheme, iterationsText, salt, expected] = String(storedHash).split("$");
-  if (scheme !== "pbkdf2_sha256" || !salt || !expected) return false;
-  const iterations = Number(iterationsText || 120000);
-  const actual = crypto.pbkdf2Sync(String(password || ""), salt, iterations, 32, "sha256").toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
-}
-
 let accessControl;
 let resourceAccess;
 let collaborationService;
 let multiUserRouter;
+const authService = createAuthService({ query, httpError });
+const pathService = createPathService({
+  config: runtime.config,
+  fs,
+  path,
+  childProcess: { spawn },
+});
+const {
+  isInsideRoot,
+  toInternalDataPath,
+  toDisplayDataPath,
+  listFolders,
+  selectFolder,
+} = pathService;
 
 function requestedScope(parsed, actor) {
   return String(parsed?.query?.scope || (accessControl.isAdmin(actor) ? "all" : "mine")).toLowerCase();
@@ -90,66 +93,6 @@ async function projectForImport(importId) {
   return (await query("SELECT project_id FROM import_batches WHERE id=$1", [importId])).rows[0]?.project_id || null;
 }
 
-function psQuote(value) {
-  return `'${String(value || "").replace(/'/g, "''")}'`;
-}
-
-function runFolderDialog(command, args, timeoutMs = 120000) {
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const child = spawn(command, args, { windowsHide: true });
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish({ status: "failed", selectedPath: "", error: "系统文件夹选择器打开超时" });
-    }, timeoutMs);
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => finish({ status: "unavailable", selectedPath: "", error: error.message }));
-    child.on("close", (code) => {
-      if (code === 0 && stdout.trim()) return finish({ status: "selected", selectedPath: stdout.trim(), error: "" });
-      if (code === 1) return finish({ status: "cancelled", selectedPath: "", error: "" });
-      finish({ status: "failed", selectedPath: "", error: stderr.trim() || `文件夹选择器退出码：${code}` });
-    });
-  });
-}
-
-async function selectFolder(defaultPath, description) {
-  if (process.platform === "linux") {
-    const initialDir = fs.existsSync(defaultPath || "") ? defaultPath : dataRoot;
-    return runFolderDialog("zenity", [
-      "--file-selection",
-      "--directory",
-      "--title",
-      description || "选择数据文件夹",
-      "--filename",
-      path.join(initialDir, path.sep),
-    ]);
-  }
-
-  if (process.platform === "win32") {
-    const script = [
-      "Add-Type -AssemblyName System.Windows.Forms",
-      "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
-      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-      `$dialog.Description = ${psQuote(description || "Select folder")}`,
-      `$dialog.SelectedPath = ${psQuote(defaultPath || dataRoot)}`,
-      "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath; exit 0 } else { exit 1 }",
-    ].join("; ");
-    return runFolderDialog("powershell.exe", ["-NoProfile", "-STA", "-Command", script]);
-  }
-
-  return { status: "unavailable", selectedPath: "", error: `暂不支持 ${process.platform} 系统文件夹选择器` };
-}
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -179,128 +122,6 @@ function readBody(req) {
     });
     req.on("error", reject);
   });
-}
-
-function isInsideRoot(root, target) {
-  const relative = path.relative(root, target);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function isWindowsHostPathMode() {
-  return hostPathMode === "windows";
-}
-
-function windowsHostPathToInternal(value, internalRoot) {
-  if (!isWindowsHostPathMode()) return null;
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  if (raw === "/" || raw === "\\") return path.resolve(internalRoot);
-  const driveMatch = raw.match(/^([A-Za-z]):[\\/]*(.*)$/);
-  const slashDriveMatch = raw.match(/^\/([A-Za-z])(?:\/(.*))?$/);
-  const match = driveMatch || slashDriveMatch;
-  if (!match) return null;
-  const drive = match[1].toUpperCase();
-  const rest = String(match[2] || "").replace(/\\/g, "/").split("/").filter(Boolean);
-  return path.resolve(internalRoot, drive, ...rest);
-}
-
-function internalToWindowsHostPath(value, internalRoot) {
-  if (!isWindowsHostPathMode()) return null;
-  const resolved = path.resolve(value || "");
-  if (!isInsideRoot(internalRoot, resolved)) return null;
-  const relative = path.relative(internalRoot, resolved);
-  if (!relative) return "/";
-  const parts = relative.split(path.sep).filter(Boolean);
-  const drive = parts.shift();
-  if (!/^[A-Za-z]$/.test(drive || "")) return null;
-  return parts.length ? `${drive.toUpperCase()}:\\${parts.join("\\")}` : `${drive.toUpperCase()}:\\`;
-}
-
-function pathMappings() {
-  return [
-    { internal: dataRoot, display: dataRootDisplay },
-    { internal: browseRoot, display: browseRootDisplay },
-  ];
-}
-
-function bestMappingFor(value, key) {
-  const resolved = path.resolve(value || "");
-  return pathMappings()
-    .filter((mapping) => isInsideRoot(mapping[key], resolved))
-    .sort((a, b) => b[key].length - a[key].length)[0] || null;
-}
-
-function toInternalDataPath(value) {
-  const windowsBrowsePath = windowsHostPathToInternal(value, browseRoot);
-  if (windowsBrowsePath) return windowsBrowsePath;
-  const windowsDataPath = windowsHostPathToInternal(value, dataRoot);
-  if (windowsDataPath) return windowsDataPath;
-  const resolved = path.resolve(value || dataRoot);
-  const internalMapping = bestMappingFor(resolved, "internal");
-  if (internalMapping) return resolved;
-  const displayMapping = bestMappingFor(resolved, "display");
-  if (displayMapping) {
-    const relative = path.relative(displayMapping.display, resolved);
-    return path.resolve(displayMapping.internal, relative);
-  }
-  return resolved;
-}
-
-function toDisplayDataPath(value) {
-  const resolved = path.resolve(value || dataRoot);
-  const windowsBrowsePath = internalToWindowsHostPath(resolved, browseRoot);
-  if (windowsBrowsePath) return windowsBrowsePath;
-  const windowsDataPath = internalToWindowsHostPath(resolved, dataRoot);
-  if (windowsDataPath) return windowsDataPath;
-  const internalMapping = bestMappingFor(resolved, "internal");
-  if (internalMapping) {
-    const relative = path.relative(internalMapping.internal, resolved);
-    return path.resolve(internalMapping.display, relative);
-  }
-  return resolved;
-}
-
-function toScopedInternalPath(value, internalRoot, displayRoot) {
-  const windowsPath = windowsHostPathToInternal(value, internalRoot);
-  if (windowsPath) return windowsPath;
-  const resolved = path.resolve(value || displayRoot);
-  if (isWindowsHostPathMode() && (value === "/" || value == null || value === "")) return path.resolve(internalRoot);
-  if (isInsideRoot(internalRoot, resolved)) return resolved;
-  if (isInsideRoot(displayRoot, resolved)) {
-    return path.resolve(internalRoot, path.relative(displayRoot, resolved));
-  }
-  return resolved;
-}
-
-function listFolders(target, scope = "browse") {
-  const root = scope === "data" ? dataRoot : browseRoot;
-  const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
-  const allDrives = scope === "browse" && browseAllDrives && process.platform === "win32";
-  if (allDrives && (!target || target === "__drives__")) {
-    const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      .split("")
-      .map((letter) => `${letter}:\\`)
-      .filter((drive) => fs.existsSync(drive))
-      .map((drive) => ({ name: drive, path: drive }));
-    return { root: "__drives__", current: "__drives__", parent: "", dirs };
-  }
-  const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
-  const stat = fs.statSync(current);
-  if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
-  const dirs = fs.readdirSync(current, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const fullPath = path.join(current, entry.name);
-      return { name: entry.name, path: toDisplayDataPath(fullPath) };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-  const parent = path.dirname(current);
-  return {
-    root: displayRoot,
-    current: toDisplayDataPath(current),
-    parent: allDrives && parent === current ? "__drives__" : (parent && parent !== current && (allDrives || isInsideRoot(root, parent)) ? toDisplayDataPath(parent) : ""),
-    dirs,
-  };
 }
 
 const builtinAlgorithmAssets = [
@@ -538,46 +359,6 @@ function validateWindowsCondaPackRoot(sourcePath) {
     throw new Error(`环境包根目录结构不正确，缺少：${missing.join("、")}。归档必须直接包含 python.exe、Lib、Scripts、conda-meta，不能包含额外顶层目录${wrapper ? `（检测到 ${wrapper}/）` : ""}`);
   }
   return entries;
-}
-
-async function seedDefaultAdmin() {
-  const existing = (await query("SELECT id FROM app_users WHERE username=$1", ["admin"])).rows[0];
-  if (existing) return;
-  await query(
-    "INSERT INTO app_users (username, password_hash, role, display_name) VALUES ($1,$2,$3,$4)",
-    ["admin", hashPassword("admin"), "admin", "管理员"],
-  );
-}
-
-function publicUser(row = {}) {
-  return { id: row.id, username: row.username, role: row.role, displayName: row.display_name || row.username };
-}
-
-async function loginUser(body = {}) {
-  const username = String(body.username || "").trim();
-  const password = String(body.password || "");
-  if (!username || !password) throw httpError(400, "请输入用户名和密码");
-  const user = (await query("SELECT * FROM app_users WHERE username=$1 AND status='active'", [username])).rows[0];
-  if (!user || !verifyPassword(password, user.password_hash)) throw httpError(401, "账号或密码不正确");
-  return publicUser(user);
-}
-
-async function registerUser(body = {}) {
-  const username = String(body.username || "").trim();
-  const password = String(body.password || "");
-  const displayName = String(body.displayName || body.display_name || username).trim();
-  if (!/^[A-Za-z0-9_\-\u4e00-\u9fa5]{2,32}$/.test(username)) throw httpError(400, "用户名需为 2-32 位中文、字母、数字、下划线或短横线");
-  if (password.length < 4) throw httpError(400, "密码至少 4 位");
-  try {
-    const row = (await query(
-      "INSERT INTO app_users (username, password_hash, role, display_name) VALUES ($1,$2,'user',$3) RETURNING *",
-      [username, hashPassword(password), displayName],
-    )).rows[0];
-    return publicUser(row);
-  } catch (error) {
-    if (error.code === "23505") throw httpError(409, "用户名已存在");
-    throw error;
-  }
 }
 
 function defaultSettings() {
@@ -1019,7 +800,7 @@ async function ensureRuntimeSchema() {
       throw error;
     }
   }
-  await seedDefaultAdmin();
+  await authService.seedDefaultAdmin();
   if (process.env.RUN_EXTENDED_SCHEMA !== "true") {
     const mlRuntimeStatements = [
       `CREATE TABLE IF NOT EXISTS model_clusters (
@@ -6170,8 +5951,8 @@ async function main() {
   multiUserRouter = createMultiUserRouter({
     accessControl,
     collaborationService,
-    loginUser,
-    registerUser,
+    loginUser: authService.login,
+    registerUser: authService.register,
     listUsers: accessControl.listUsers,
     updateUser: async (userId, body, actor) => {
       accessControl.requireAdmin(actor);
