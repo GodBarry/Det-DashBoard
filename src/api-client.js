@@ -2,6 +2,8 @@ export const SESSION_STORAGE_KEY = "det-dashboard-user";
 export const UNAUTHORIZED_EVENT = "det-dashboard:unauthorized";
 export const ASSET_SCOPES = Object.freeze(["mine", "shared", "public"]);
 
+const FETCH_INTERCEPTOR_MARK = Symbol.for("det-dashboard.fetch-auth-interceptor");
+
 function storage() {
   try {
     return globalThis.localStorage || null;
@@ -110,6 +112,41 @@ function dispatchUnauthorized(error) {
   }
 }
 
+export function installGlobalFetchAuthInterceptor(target = globalThis) {
+  if (typeof target?.fetch !== "function") return () => {};
+  if (target.fetch[FETCH_INTERCEPTOR_MARK]) return target.fetch[FETCH_INTERCEPTOR_MARK].restore;
+
+  const nativeFetch = target.fetch.bind(target);
+  const interceptedFetch = async (input, init = {}) => {
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    new Headers(init.headers).forEach((value, name) => headers.set(name, value));
+
+    if (isSameOriginApi(input) && !headers.has("authorization")) {
+      const token = getSessionToken();
+      if (token) headers.set("authorization", `Bearer ${token}`);
+    }
+
+    const response = await nativeFetch(input, { ...init, headers });
+    if (response.status === 401 && isSameOriginApi(input)) {
+      clearSession();
+      dispatchUnauthorized(new ApiError("Session expired", {
+        status: 401,
+        method: String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase(),
+        url: response.url || requestUrl(input),
+        response,
+      }));
+    }
+    return response;
+  };
+
+  const restore = () => {
+    if (target.fetch === interceptedFetch) target.fetch = nativeFetch;
+  };
+  Object.defineProperty(interceptedFetch, FETCH_INTERCEPTOR_MARK, { value: { restore } });
+  target.fetch = interceptedFetch;
+  return restore;
+}
+
 async function decodeResponse(response) {
   if (response.status === 204 || response.status === 205) return null;
   const text = await response.text();
@@ -162,7 +199,6 @@ export async function apiFetch(input, init = {}) {
       url: response.url || url,
       response,
     });
-    if (response.status === 401) dispatchUnauthorized(error);
     throw error;
   }
 

@@ -10,6 +10,8 @@ ArrowUp,
 
 Bell,
 
+ClipboardList,
+
 Boxes,
 
 Brain,
@@ -38,6 +40,8 @@ Folder,
 
 FolderPlus,
 
+Globe2,
+
 FolderOpen,
 
 Grid,
@@ -63,6 +67,8 @@ RefreshCw,
 RotateCcw,
 
 Search,
+
+Share2,
 
 Settings,
 
@@ -96,31 +102,43 @@ import {
   taskLabel,
 } from "./shared/presentation.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "./shared/useWorkspaceColumns.jsx";
+import {
+  clearSession,
+  login as loginSession,
+  logout as logoutSession,
+  me as loadSession,
+  readSession,
+  register as registerSession,
+  UNAUTHORIZED_EVENT,
+  withScope,
+} from "./api-client.js";
+import { AdminCenter, AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from "./multi-user-ui.jsx";
 
 export default function App() {
 
 const restoredUiStateRef = useRef(readUiState());
 const restoredUiState = restoredUiStateRef.current;
 
-const [view, setView] = useState(() => restorableViews.has(restoredUiState.view) ? restoredUiState.view : "home");
+const [view, setView] = useState(() => restorableViews.has(restoredUiState.view) || restoredUiState.view === "admin" ? restoredUiState.view : "home");
 
 const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dark" : "light");
 
-const [currentUser, setCurrentUser] = useState(() => {
-  try {
-    return JSON.parse(window.localStorage.getItem("det-dashboard-user") || "null");
-  } catch {
-    return null;
-  }
-});
+const [currentUser, setCurrentUser] = useState(() => readSession());
 
 const [authMode, setAuthMode] = useState(() => window.localStorage.getItem("det-dashboard-user") ? null : "login");
 
-const signOut = () => {
-  window.localStorage.removeItem("det-dashboard-user");
+const signOut = async () => {
+  await logoutSession().catch(() => clearSession());
   setCurrentUser(null);
   setAuthMode("login");
 };
+
+const [datasetScope, setDatasetScope] = useState(() => window.localStorage.getItem("det-dashboard-dataset-scope") || "mine");
+const [assetScope, setAssetScope] = useState(() => window.localStorage.getItem("det-dashboard-asset-scope") || "mine");
+const [homeSection, setHomeSection] = useState(() => window.localStorage.getItem("det-dashboard-home-section") || "projects");
+const [projectShareResource, setProjectShareResource] = useState(null);
+const [projectPublicResource, setProjectPublicResource] = useState(null);
+const [collaborationViewer, setCollaborationViewer] = useState(null);
 
 const [showSettings, setShowSettings] = useState(false);
 
@@ -326,12 +344,35 @@ const restoredSelectedImageIdRef = useRef(restoredUiState.selectedImageId || nul
 const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
 useEffect(() => {
-
-refreshHome();
-
-fetch("/api/config").then((r) => r.json()).then((d) => setAppConfig(d)).catch(() => {});
-
+  const handleUnauthorized = () => {
+    clearSession();
+    setCurrentUser(null);
+    setAuthMode("login");
+  };
+  window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+  return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
 }, []);
+
+useEffect(() => {
+  if (!currentUser) return;
+  loadSession()
+    .then(() => setCurrentUser(readSession()))
+    .catch(() => {});
+}, [currentUser?.token]);
+
+useEffect(() => {
+  if (currentUser) refreshHome();
+}, [datasetScope, currentUser?.id]);
+
+useEffect(() => {
+  fetch("/api/config").then((r) => r.json()).then((d) => setAppConfig(d)).catch(() => {});
+}, []);
+
+useEffect(() => {
+  window.localStorage.setItem("det-dashboard-dataset-scope", datasetScope);
+  window.localStorage.setItem("det-dashboard-asset-scope", assetScope);
+  window.localStorage.setItem("det-dashboard-home-section", homeSection);
+}, [datasetScope, assetScope, homeSection]);
 
 useEffect(() => {
 
@@ -391,7 +432,7 @@ const timer = window.setInterval(() => loadMlPlatform(), 2500);
 
 return () => window.clearInterval(timer);
 
-}, [view]);
+}, [view, assetScope]);
 
 useEffect(() => {
   const persistedActiveProjectId = activeProject?.id || (view === "workspace" ? restoredActiveProjectIdRef.current : null);
@@ -609,7 +650,7 @@ trash: trashProjects.length,
 
 function refreshHome() {
 
-fetch("/api/projects").then((r) => r.json()).then((d) => {
+fetch(withScope("/api/projects", datasetScope)).then((r) => r.json()).then((d) => {
 
 const rows = d.projects || [];
 
@@ -631,15 +672,15 @@ fetch("/api/projects/trash").then((r) => r.json()).then((d) => setTrashProjects(
 
 function loadMlPlatform() {
 
-fetch("/api/ml/models").then((r) => r.json()).then((d) => setMlModels(d.models || [])).catch(() => {});
+fetch(withScope("/api/ml/models", assetScope)).then((r) => r.json()).then((d) => setMlModels(d.models || [])).catch(() => {});
 
-fetch("/api/ml/model-versions").then((r) => r.json()).then((d) => setModelVersions(d.versions || [])).catch(() => {});
+fetch(withScope("/api/ml/model-versions", assetScope)).then((r) => r.json()).then((d) => setModelVersions(d.versions || [])).catch(() => {});
 
 fetch("/api/ml/training-jobs").then((r) => r.json()).then((d) => setTrainingJobs(d.jobs || [])).catch(() => {});
 
 fetch("/api/ml/inference-jobs").then((r) => r.json()).then((d) => setInferenceJobs(sortRuntimeJobsByTime(d.jobs || []))).catch(() => {});
 
-fetch("/api/ml/algorithm-assets").then((r) => r.json()).then((d) => {
+fetch(withScope("/api/ml/algorithm-assets", assetScope)).then((r) => r.json()).then((d) => {
 
 const algorithms = d.algorithms || [];
 
@@ -657,13 +698,13 @@ capabilities_json: item.capabilities_json || { tasks: [item.task_type || "detect
 
 }).catch(() => {
 
-fetch("/api/ml/training-templates").then((r) => r.json()).then((d) => setTrainingTemplates(d.templates || [])).catch(() => {});
+fetch(withScope("/api/ml/training-templates", assetScope)).then((r) => r.json()).then((d) => setTrainingTemplates(d.templates || [])).catch(() => {});
 
 });
 
-fetch("/api/ml/python-envs").then((r) => r.json()).then((d) => setPythonEnvs(d.envs || [])).catch(() => {});
+fetch(withScope("/api/ml/python-envs", assetScope)).then((r) => r.json()).then((d) => setPythonEnvs(d.envs || [])).catch(() => {});
 
-fetch("/api/ml/asset-links").then((r) => r.json()).then((d) => setAssetLinks(d.links || [])).catch(() => setAssetLinks([]));
+fetch(withScope("/api/ml/asset-links", assetScope)).then((r) => r.json()).then((d) => setAssetLinks(d.links || [])).catch(() => setAssetLinks([]));
 
 refreshHome();
 
@@ -2123,6 +2164,10 @@ stats={homeStats}
 
 <div className="workspace-commandbar home-commandbar">
 
+<ScopeTabs value={datasetScope} onChange={(scope) => { setDatasetScope(scope); setCurrentFolderId(null); }} />
+
+<button className={homeSection === "annotation" ? "active" : ""} onClick={() => setHomeSection(homeSection === "annotation" ? "projects" : "annotation")}><ClipboardList size={16} />{"协同标注"}</button>
+
 {currentFolder && <button onClick={() => setCurrentFolderId(currentFolder.parent_id || null)}><ArrowLeft size={16} />返回</button>}
 
 <button onClick={createProject}><FolderPlus size={16} />新建项目</button>
@@ -2140,6 +2185,8 @@ stats={homeStats}
 </div>
 
 {error && <div className="error-msg home-error-msg">{error}</div>}
+
+{homeSection === "projects" ? <>
 
 <div className="home-filterbar">
 
@@ -2225,6 +2272,10 @@ cancelRenameProject={cancelRenameProject}
 
 <div className="project-actions">
 
+<button title={"分享项目"} onClick={(event) => { event.stopPropagation(); setProjectShareResource({ ...project, resourceType: "project" }); }}><Share2 size={16} /></button>
+
+<button title={"申请公开"} onClick={(event) => { event.stopPropagation(); setProjectPublicResource({ ...project, resourceType: "project" }); }}><Globe2 size={16} /></button>
+
 <button title="重命名" onClick={(event) => { event.stopPropagation(); startRenameProject(project); }}><Edit3 size={16} /></button>
 
 <button title="删除项目" aria-label={`删除 ${project.name}`} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); deleteProject(project.id); }}><Trash2 size={16} /></button>
@@ -2238,6 +2289,8 @@ cancelRenameProject={cancelRenameProject}
 {!visibleProjects.length && <div className="empty-state folder-empty">空文件夹</div>}
 
 </div>
+
+</> : <AnnotationTaskPanel projects={projects} currentUser={currentUser} onOpenItem={(item, context) => setCollaborationViewer({ item, context })} />}
 
 </section>
 
@@ -2261,6 +2314,12 @@ deleteProjectPermanently={deleteProjectPermanently}
 
 {authMode && <AuthDialog mode={authMode} setMode={setAuthMode} required={!currentUser} onClose={() => setAuthMode(null)} onSignedIn={setCurrentUser} />}
 
+<ShareDialog open={Boolean(projectShareResource)} resource={projectShareResource} onClose={() => setProjectShareResource(null)} />
+
+<PublicRequestDialog open={Boolean(projectPublicResource)} resource={projectPublicResource} onClose={() => setProjectPublicResource(null)} />
+
+{collaborationViewer && <ImageViewer items={[collaborationViewer.item]} index={0} setIndex={() => {}} onClose={() => setCollaborationViewer(null)} readOnly={collaborationViewer.context?.readOnly} saveAnnotations={collaborationViewer.context?.save} onSaved={() => setCollaborationViewer(null)} />}
+
 {showSettings && <SettingsDialog config={appConfig} onClose={() => setShowSettings(false)} />}
 
 </div>
@@ -2269,7 +2328,7 @@ deleteProjectPermanently={deleteProjectPermanently}
 
 }
 
-if (view === "training" || view === "inference" || view === "models" || view === "evaluation") {
+if (view === "training" || view === "inference" || view === "models" || view === "evaluation" || view === "admin") {
 
 return (
 
@@ -2356,6 +2415,8 @@ setActiveInferenceResult={setActiveInferenceResult}
 viewInferenceResults={viewInferenceResults}
 
 currentUser={currentUser}
+        assetScope={assetScope}
+        setAssetScope={setAssetScope}
         authMode={authMode}
         setAuthMode={setAuthMode}
         setCurrentUser={setCurrentUser}
@@ -2975,7 +3036,9 @@ theme,
 
 setTheme,
 
-currentUser,
+  currentUser,
+  assetScope,
+  setAssetScope,
   authMode,
   setAuthMode,
   setCurrentUser,
@@ -2985,7 +3048,7 @@ currentUser,
   appConfig,
 }) {
 
-const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "\u8d44\u4ea7";
+const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : view === "admin" ? "管理员中心" : "\u8d44\u4ea7";
 
 const supportedTasks = ["detect", "segment", "classify"];
 
@@ -3277,9 +3340,15 @@ drawerMode={assetDrawerMode}
 
 setDrawerMode={setAssetDrawerMode}
 
+assetScope={assetScope}
+
+setAssetScope={setAssetScope}
+
 />
 
 )}
+
+{view === "admin" && <AdminCenter />}
 
 {authMode && <AuthDialog mode={authMode} setMode={setAuthMode} required={!currentUser} onClose={() => setAuthMode(null)} onSignedIn={setCurrentUser} />}
         {showSettings && <SettingsDialog config={appConfig} onClose={() => setShowSettings(false)} />}
@@ -3319,23 +3388,10 @@ function AuthDialog({ mode, setMode, onClose, onSignedIn, required = false }) {
 
     try {
 
-      const response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/register", {
-
-        method: "POST",
-
-        headers: { "content-type": "application/json" },
-
-        body: JSON.stringify({ username: form.username.trim(), password: form.password, displayName: form.displayName.trim() }),
-
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) throw new Error(data.error || (mode === "login" ? "登录失败" : "注册失败"));
-
-      const signed = { ...(data.user || {}), token: data.token };
-
-      window.localStorage.setItem("det-dashboard-user", JSON.stringify(signed));
+      const credentials = { username: form.username.trim(), password: form.password, displayName: form.displayName.trim() };
+      const signed = mode === "login"
+        ? await loginSession(credentials)
+        : await registerSession(credentials);
 
       onSignedIn(signed);
 
@@ -3894,10 +3950,16 @@ drawerMode,
 
 setDrawerMode,
 
+assetScope,
+
+setAssetScope,
+
 }) {
 
 const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
 const [selectedExportAsset, setSelectedExportAsset] = useState(null);
+const [shareResource, setShareResource] = useState(null);
+const [publicResource, setPublicResource] = useState(null);
 const exportSelectedAsset = () => {
   if (!selectedExportAsset?.href) return;
   const anchor = document.createElement("a");
@@ -4000,6 +4062,8 @@ return (
 
 <div className="asset-toolbar">
 
+<ScopeTabs value={assetScope} onChange={setAssetScope} />
+
 <div className="workspace-path-row">
 
 <FolderOpen size={16} />
@@ -4086,7 +4150,7 @@ return (
 
 <b><ChevronDown size={13} /><FolderOpen size={15} />{family.family}</b>
 
-<span>{family.models[0]?.framework || "Ultralytics YOLO"}</span><span>--</span><span>--</span><em>正常</em><span>minio://models/{family.family.toLowerCase()}/</span><AssetActionButtons />
+<span>{family.models[0]?.framework || "Ultralytics YOLO"}</span><span>--</span><span>--</span><em>正常</em><span>minio://models/{family.family.toLowerCase()}/</span><AssetActionButtons resource={family.models[0] ? { ...family.models[0], resourceType: "model" } : null} onShare={setShareResource} onPublic={setPublicResource} />
 
 </div>
 
@@ -4098,7 +4162,7 @@ return (
 
 <span>{version.model_name || family.family}</span><span>{version.dataset_project_name || "未绑定数据集"}</span><span>{formatDateTime(version.created_at)}</span><em>正常</em><span>{version.artifact_root || `minio://models/${family.family.toLowerCase()}/`}</span>
 
-<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button><button title="更多"><MoreVertical size={13} /></button></div>
+<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="分享" onClick={() => setShareResource({ ...version, name: version.version_name, resourceType: "model_revision" })}><Share2 size={13} /></button><button title="申请公开" onClick={() => setPublicResource({ id: version.model_id, name: version.model_name, resourceType: "model" })}><Globe2 size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button></div>
 
 </div>
 
@@ -4124,7 +4188,7 @@ return (
 
 <div className="asset-table-row" key={env.id} title={envTooltip(env)}>
 
-<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons />
+<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons resource={{ ...env, resourceType: "runtime_env" }} onShare={setShareResource} onPublic={setPublicResource} />
 
 </div>
 
@@ -4146,7 +4210,7 @@ return (
 
 <div className="asset-table-row" key={algorithm.id || algorithm.name}>
 
-<b>{algorithm.name}</b><span>{algorithm.framework || "Custom"}</span><span>{algorithm.task_type || "目标检测"}</span><span>{algorithm.version || "builtin"}</span><span>{algorithm.minio_prefix || algorithm.manifest_key || `minio://adapters/${algorithm.algorithm_key || algorithm.template_key || "custom"}/`}</span><em>可用</em><AssetActionButtons />
+<b>{algorithm.name}</b><span>{algorithm.framework || "Custom"}</span><span>{algorithm.task_type || "目标检测"}</span><span>{algorithm.version || "builtin"}</span><span>{algorithm.minio_prefix || algorithm.manifest_key || `minio://adapters/${algorithm.algorithm_key || algorithm.template_key || "custom"}/`}</span><em>可用</em><AssetActionButtons resource={{ ...algorithm, resourceType: "algorithm" }} onShare={setShareResource} onPublic={setPublicResource} />
 
 </div>
 
@@ -4229,6 +4293,10 @@ createPythonEnv={createPythonEnv}
 />
 
 )}
+
+<ShareDialog open={Boolean(shareResource)} resource={shareResource} onClose={() => setShareResource(null)} />
+
+<PublicRequestDialog open={Boolean(publicResource)} resource={publicResource} onClose={() => setPublicResource(null)} />
 
 </div>
 
@@ -4468,13 +4536,17 @@ return (
 
 }
 
-function AssetActionButtons() {
+function AssetActionButtons({ resource, onShare, onPublic }) {
 
 return (
 
 <div className="asset-actions">
 
 <button title="查看"><Eye size={13} /></button>
+
+<button title="分享" disabled={!resource} onClick={() => onShare?.(resource)}><Share2 size={13} /></button>
+
+<button title="申请公开" disabled={!resource} onClick={() => onPublic?.(resource)}><Globe2 size={13} /></button>
 
 <button title="编辑"><Edit3 size={13} /></button>
 
@@ -5588,7 +5660,7 @@ return (
 
 <div className="user-menu-wrap">
 <button className="user-chip" onClick={() => user ? setUserMenuOpen((value) => !value) : onLogin()}><i>{(user?.username || "?").slice(0, 1).toUpperCase()}</i>{user?.displayName || user?.username || "未登"}<ChevronDown size={13} /></button>
-{userMenuOpen && <div className="user-menu"><span>{user?.username}</span><button onClick={() => { setUserMenuOpen(false); onLogout?.(); }}>退出登</button></div>}
+{userMenuOpen && <div className="user-menu"><span>{user?.username}</span>{user?.role === "admin" && <button onClick={() => { setUserMenuOpen(false); openPlatform("admin"); }}>管理员中心</button>}<button onClick={() => { setUserMenuOpen(false); onLogout?.(); }}>退出登录</button></div>}
 </div>
 
 </div>
@@ -8077,7 +8149,7 @@ return (
 
 }
 
-function ImageViewer({ items, index, setIndex, onClose, onSaved }) {
+function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations }) {
 
 const item = items[index];
 
@@ -8099,6 +8171,8 @@ const [editDrag, setEditDrag] = useState(null);
 
 const [defaultLabel, setDefaultLabel] = useState("");
 
+const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
+
 useEffect(() => {
 
 setScale(1);
@@ -8114,6 +8188,8 @@ setDraft((item?.annotations || []).map((ann) => ({ ...ann })));
 setSelectedAnnId(null);
 
 setDefaultLabel((item?.annotations || [])[0]?.label || "");
+
+setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.image_height || 1) });
 
 }, [item?.id]);
 
@@ -8155,9 +8231,9 @@ const prev = () => setIndex(Math.max(0, index - 1));
 
 const next = () => setIndex(Math.min(items.length - 1, index + 1));
 
-const width = Number(item.image_width || 1);
+const width = Number(item.image_width || naturalSize.width || 1);
 
-const height = Number(item.image_height || 1);
+const height = Number(item.image_height || naturalSize.height || 1);
 
 const shownAnnotations = editMode ? draft : item.annotations || [];
 
@@ -8197,7 +8273,31 @@ return { bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(
 
 };
 
-const save = () => {
+const save = async () => {
+
+if (saveAnnotations) {
+
+try {
+
+const data = await saveAnnotations(draft);
+
+const annotations = data?.annotations || draft;
+
+setDraft(annotations.map((ann) => ({ ...ann })));
+
+onSaved?.(item.id, annotations);
+
+setEditMode(false);
+
+} catch (error) {
+
+window.alert("提交失败: " + error.message);
+
+}
+
+return;
+
+}
 
 fetch(`/api/project-images/${item.id}/annotations/save`, {
 
@@ -8233,7 +8333,7 @@ return (
 
 <div className="viewer-topbar">
 
-<button className={editMode ? "active-tool edit-toggle" : "edit-toggle"} onClick={() => setEditMode((value) => !value)}>{editMode ? "退出编" : "编辑"}</button>
+{!readOnly && <button className={editMode ? "active-tool edit-toggle" : "edit-toggle"} onClick={() => setEditMode((value) => !value)}>{editMode ? "退出编" : "编辑"}</button>}
 
 <div className="viewer-file-identity">
 
@@ -8307,7 +8407,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<img src={`/api/project-images/${item.id}/full`} draggable="false" />
+<img src={`/api/project-images/${item.id}/full`} draggable="false" onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
 
 {editMode ? (
 
