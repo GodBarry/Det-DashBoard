@@ -25,6 +25,8 @@ const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats
 const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 const { evaluateDetections } = require("./evaluation-metrics");
 const { sendJson, sendError, httpError } = require("./http-response");
+const { createLifecycle } = require("./lifecycle");
+const { createStaticHandler } = require("./static-handler");
 const { createAccessControl } = require("./access-control");
 const { createResourceAccess } = require("./resource-access");
 const { createCollaborationService } = require("./collaboration-service");
@@ -50,6 +52,12 @@ const {
   yoloClassLine,
   parseMetricLine,
 } = require("./training-format");
+
+const lifecycle = createLifecycle();
+const staticHandler = createStaticHandler({
+  distRoot: path.resolve(__dirname, "..", "dist"),
+  sendError,
+});
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
@@ -1739,7 +1747,7 @@ async function importPath(body, actor) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
   await resourceAccess.assertProjectWrite(actor, projectId);
-  if (shuttingDown) {
+  if (lifecycle.isShuttingDown()) {
     const error = new Error("Service is shutting down and cannot accept new imports.");
     error.statusCode = 503;
     throw error;
@@ -1784,22 +1792,22 @@ async function importPath(body, actor) {
   body.actorId = actor.id;
   body.splitProjectIds = splitProjectIds;
 
-  setImmediate(() => {
-    const task = runImportBatch(batch.id, project, body).catch(async (error) => {
+  const importTask = new Promise((resolve) => setImmediate(resolve))
+    .then(() => runImportBatch(batch.id, project, body))
+    .catch(async (error) => {
       console.error("import failed", error);
       await query(
         "UPDATE import_batches SET status='failed', message=$1, finished_at=now() WHERE id=$2",
         [error.message || "导入失败", batch.id],
       ).catch(() => {});
-    }).finally(() => activeImportTasks.delete(task));
-    activeImportTasks.add(task);
-  });
+    });
+  lifecycle.trackImport(importTask);
 
   return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath) };
 }
 
 async function importCancelled(batchId) {
-  if (shuttingDown) return true;
+  if (lifecycle.isShuttingDown()) return true;
   const row = (await query("SELECT status FROM import_batches WHERE id=$1", [batchId])).rows[0];
   return !row || row.status === "cancel_requested" || row.status === "cancelled" || row.status === "deleted";
 }
@@ -1822,7 +1830,7 @@ async function runImportBatch(batchId, project, body) {
     for (const sourceRoot of sourceRoots) {
       const files = await walkAsync(sourceRoot, {
         shouldStop: async () => {
-          if (shuttingDown) return true;
+          if (lifecycle.isShuttingDown()) return true;
           const now = Date.now();
           if (now - lastCancellationCheck < 500) return false;
           lastCancellationCheck = now;
@@ -2044,10 +2052,6 @@ async function restoreImport(importId) {
     await client.query("UPDATE label_versions SET deleted_at=NULL, status='active' WHERE import_batch_id=$1", [importId]);
   });
 }
-
-let shuttingDown = false;
-const activeImportTasks = new Set();
-const activeExportTasks = new Set();
 
 async function cleanupUnreferencedAssets(client) {
   const images = await client.query(
@@ -4796,20 +4800,33 @@ function startInferenceWorker() {
   if (String(process.env.INFERENCE_WORKER_ENABLED || "true").toLowerCase() === "false") return;
   const workerId = `local-infer-${process.pid}`;
   let busy = false;
+  let stopped = false;
+  let activeTick = Promise.resolve();
   const tick = async () => {
-    if (busy) return;
+    if (stopped || busy) return activeTick;
     busy = true;
-    try {
-      const job = await claimInferenceJob(workerId);
-      if (job) await runInferenceJob(job, workerId);
-    } catch (error) {
-      console.error("inference worker error:", error);
-    } finally {
-      busy = false;
-    }
+    activeTick = (async () => {
+      try {
+        const job = await claimInferenceJob(workerId);
+        if (job) await runInferenceJob(job, workerId);
+      } catch (error) {
+        console.error("inference worker error:", error);
+      } finally {
+        busy = false;
+      }
+    })();
+    return activeTick;
   };
-  setInterval(tick, Number(process.env.INFERENCE_WORKER_INTERVAL_MS || 2500));
-  setTimeout(tick, 250);
+  const interval = setInterval(tick, Number(process.env.INFERENCE_WORKER_INTERVAL_MS || 2500));
+  const initialTick = setTimeout(tick, 250);
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(interval);
+      clearTimeout(initialTick);
+      await activeTick;
+    },
+  };
 }
 
 async function appendTrainingLog(jobId, stream, line) {
@@ -5448,20 +5465,33 @@ function startTrainingWorker() {
   if (String(process.env.TRAINING_WORKER_ENABLED || "true").toLowerCase() === "false") return;
   const workerId = `local-${process.pid}`;
   let busy = false;
+  let stopped = false;
+  let activeTick = Promise.resolve();
   const tick = async () => {
-    if (busy) return;
+    if (stopped || busy) return activeTick;
     busy = true;
-    try {
-      const job = await claimTrainingJob(workerId);
-      if (job) await runTrainingJob(job, workerId);
-    } catch (error) {
-      console.error("training worker error:", error);
-    } finally {
-      busy = false;
-    }
+    activeTick = (async () => {
+      try {
+        const job = await claimTrainingJob(workerId);
+        if (job) await runTrainingJob(job, workerId);
+      } catch (error) {
+        console.error("training worker error:", error);
+      } finally {
+        busy = false;
+      }
+    })();
+    return activeTick;
   };
-  setInterval(tick, Number(process.env.TRAINING_WORKER_INTERVAL_MS || 3000));
-  setTimeout(tick, 250);
+  const interval = setInterval(tick, Number(process.env.TRAINING_WORKER_INTERVAL_MS || 3000));
+  const initialTick = setTimeout(tick, 250);
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(interval);
+      clearTimeout(initialTick);
+      await activeTick;
+    },
+  };
 }
 
 async function saveImageAnnotations(projectImageId, body = {}, actor) {
@@ -5729,7 +5759,7 @@ async function streamProjectImage(res, projectImageId, thumb) {
 }
 
 async function exportProject(projectId, options = {}, actor) {
-  if (shuttingDown) {
+  if (lifecycle.isShuttingDown()) {
     const error = new Error("服务正在关闭，暂不接受新的导出任务");
     error.statusCode = 503;
     throw error;
@@ -5746,16 +5776,16 @@ async function exportProject(projectId, options = {}, actor) {
   const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,$2,now()) RETURNING *", [{ projectId, outputPath: exportRootDisplay, format }, `正在导出 ${format.toUpperCase()}`])).rows[0];
 
   await resourceAccess.assignOwner("jobs", job.id, actor);
-  setImmediate(() => {
-    const task = runExportProject(project, job, format).catch(async (error) => {
+  const exportTask = new Promise((resolve) => setImmediate(resolve))
+    .then(() => runExportProject(project, job, format))
+    .catch(async (error) => {
       console.error("export failed", error);
       await query(
         "UPDATE jobs SET status='failed', message=$1, finished_at=now() WHERE id=$2",
         [error.message || "导出失败", job.id],
       ).catch(() => {});
-    }).finally(() => activeExportTasks.delete(task));
-    activeExportTasks.add(task);
-  });
+    });
+  lifecycle.trackExport(exportTask);
 
   return { jobId: job.id, status: job.status, outputRoot: exportRootDisplay, format };
 }
@@ -5850,6 +5880,7 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/health/ready") {
     await query("SELECT 1");
+    const shuttingDown = lifecycle.isShuttingDown();
     return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
   }
   if (multiUserRouter && await multiUserRouter.handle(req, res)) return;
@@ -6037,73 +6068,7 @@ async function route(req, res) {
     return sendJson(res, { importBatch: rows.rows[0] || null });
   }
 
-  // Serve static files from dist/
-  if (method === "GET" || method === "HEAD") {
-    const distRoot = path.resolve(__dirname, "..", "dist");
-    let requestedPath;
-    try {
-      requestedPath = decodeURIComponent(parsed.pathname === "/" ? "/index.html" : parsed.pathname);
-    } catch {
-      return sendError(res, 400, "invalid path encoding");
-    }
-    const filePath = path.resolve(distRoot, `.${requestedPath}`);
-    if (filePath !== distRoot && !filePath.startsWith(`${distRoot}${path.sep}`)) {
-      return sendError(res, 403, "forbidden");
-    }
-    try {
-      if (fs.statSync(filePath).isFile()) {
-        const ext = path.extname(filePath).toLowerCase();
-        const mimeTypes = {
-          ".html": "text/html; charset=utf-8",
-          ".js": "application/javascript; charset=utf-8",
-          ".css": "text/css; charset=utf-8",
-          ".png": "image/png",
-          ".jpg": "image/jpeg",
-          ".jpeg": "image/jpeg",
-          ".webp": "image/webp",
-          ".svg": "image/svg+xml",
-          ".ico": "image/x-icon",
-          ".json": "application/json",
-          ".woff2": "font/woff2",
-          ".map": "application/json",
-        };
-        const contentType = mimeTypes[ext] || "application/octet-stream";
-        const cacheControl = requestedPath.startsWith("/assets/")
-          ? "public, max-age=31536000, immutable"
-          : ext === ".html" ? "no-store" : "public, max-age=3600";
-        res.writeHead(200, {
-          "content-type": contentType,
-          "cache-control": cacheControl,
-          "x-content-type-options": "nosniff",
-          "x-frame-options": "DENY",
-          "referrer-policy": "no-referrer",
-        });
-        if (method === "HEAD") {
-          res.end();
-        } else {
-          res.end(fs.readFileSync(filePath));
-        }
-        return;
-      }
-    } catch {
-      // File not found, fall through to 404
-    }
-    // SPA fallback: serve index.html for non-API, non-file routes
-    if (!parsed.pathname.startsWith("/api/")) {
-      try {
-        const indexHtml = fs.readFileSync(path.join(__dirname, "..", "dist", "index.html"));
-        res.writeHead(200, {
-          "content-type": "text/html; charset=utf-8",
-          "cache-control": "no-store",
-          "x-content-type-options": "nosniff",
-          "x-frame-options": "DENY",
-          "referrer-policy": "no-referrer",
-        });
-        res.end(method === "HEAD" ? undefined : indexHtml);
-        return;
-      } catch {}
-    }
-  }
+  if (staticHandler.handle(req, res, parsed)) return;
   sendError(res, 404, "not found");
 }
 
@@ -6230,26 +6195,26 @@ async function main() {
     console.log(`HOST_PATH_MODE=${hostPathMode}`);
     console.log(`STORAGE_ROOT=${storageRoot}`);
   });
-  startTrainingWorker();
-  startInferenceWorker();
+  const trainingWorker = startTrainingWorker();
+  const inferenceWorker = startInferenceWorker();
+  if (trainingWorker) lifecycle.registerWorker(trainingWorker);
+  if (inferenceWorker) lifecycle.registerWorker(inferenceWorker);
   return server;
 }
 
 let httpServer;
-let shutdownStarted = false;
 
 async function shutdown(signal) {
-  if (shutdownStarted) return;
-  shutdownStarted = true;
-  shuttingDown = true;
+  if (!lifecycle.beginShutdown()) return;
   console.log(`Received ${signal}; stopping gracefully`);
   const serverClosed = new Promise((resolve) => {
     if (!httpServer) return resolve();
     httpServer.close(resolve);
   });
-  const backgroundTasksStopped = Promise.allSettled([...activeImportTasks, ...activeExportTasks]);
+  const workersStopped = lifecycle.stopWorkers();
+  const backgroundTasksStopped = lifecycle.waitForBackgroundTasks();
   const timeout = new Promise((resolve) => setTimeout(resolve, 25000));
-  await Promise.race([Promise.all([serverClosed, backgroundTasksStopped]), timeout]);
+  await Promise.race([Promise.all([serverClosed, workersStopped, backgroundTasksStopped]), timeout]);
   await pool.end().catch((error) => console.error("PostgreSQL shutdown error:", error.message));
 }
 
