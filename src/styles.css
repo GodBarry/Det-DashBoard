@@ -7647,6 +7647,64 @@ button:disabled:hover {
   padding-left: 48px;
 }
 
+.asset-tree-children .asset-artifact-row {
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  padding-left: 58px;
+  color: var(--muted);
+}
+
+.model-tree-context-menu {
+  position: fixed;
+  z-index: 220;
+  width: 206px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 12px 30px rgba(10, 24, 36, .2);
+  color: var(--text);
+}
+
+.model-tree-context-menu strong {
+  display: block;
+  padding: 5px 7px 7px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-tree-context-menu button {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.model-tree-context-menu button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.model-tree-context-menu button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.model-tree-context-menu small {
+  display: block;
+  padding: 4px 8px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* Real inference boxes, scaled from source-image coordinates. */
 .result-thumb .prediction-box {
   position: absolute;
@@ -8543,6 +8601,13 @@ button:disabled:hover {
   min-height: 30px;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   padding: 0 7px 0 34px;
+}
+
+.asset-tree-children .asset-artifact-row {
+  min-height: 28px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  padding: 0 7px 0 48px;
+  font-size: 11px;
 }
 
 .asset-tree-children .asset-version-row > svg,
