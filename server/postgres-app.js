@@ -6178,8 +6178,9 @@ async function main() {
   await resourceAccess.initializeSchema();
   const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {
-      console.error(error);
-      if (!res.headersSent) sendError(res, error.statusCode || 500, error.message);
+      const statusCode = error.statusCode || 500;
+      if (statusCode >= 500) console.error(error);
+      if (!res.headersSent) sendError(res, statusCode, error.message);
       else res.end();
     });
   });
