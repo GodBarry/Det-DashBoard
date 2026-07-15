@@ -182,6 +182,7 @@ function fallbackHttpError(statusCode, message) {
 
 function createAccessControl(dependencies = {}) {
   const { query, transaction, httpError = fallbackHttpError } = dependencies;
+  const onPublicationStatus = dependencies.onPublicationStatus || null;
   if (typeof query !== "function") throw new TypeError("createAccessControl requires query(text, params)");
   if (typeof transaction !== "function") throw new TypeError("createAccessControl requires transaction(callback)");
   if (typeof httpError !== "function") throw new TypeError("httpError must be a function");
@@ -908,6 +909,7 @@ function createAccessControl(dependencies = {}) {
       [normalizedDecision, actor.id, String(note || "").slice(0, 4000), id],
     )).rows[0];
     if (!row) fail(409, "publication request is not pending");
+    if (onPublicationStatus) await onPublicationStatus(row.resource_type, row.resource_id, normalizedDecision === "approved", actor);
     await writeAudit({ actorUserId: actor.id, action: `publish.${normalizedDecision}`, resourceType: row.resource_type, resourceId: row.resource_id, details: { requestId: id, note: String(note || "") } });
     return row;
   }
@@ -939,6 +941,7 @@ function createAccessControl(dependencies = {}) {
       [String(note || "").slice(0, 4000), type, id],
     )).rows[0];
     if (!row) fail(404, "published resource not found");
+    if (onPublicationStatus) await onPublicationStatus(type, id, false, actor);
     await writeAudit({ actorUserId: actor.id, action: "publish.unpublish", resourceType: type, resourceId: id, details: { requestId: row.id, note: String(note || "") } });
     return row;
   }

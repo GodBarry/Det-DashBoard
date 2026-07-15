@@ -25,6 +25,10 @@ const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats
 const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 const { evaluateDetections } = require("./evaluation-metrics");
 const { sendJson, sendError, httpError } = require("./http-response");
+const { createAccessControl } = require("./access-control");
+const { createResourceAccess } = require("./resource-access");
+const { createCollaborationService } = require("./collaboration-service");
+const { createMultiUserRouter } = require("./api-router");
 const {
   imageObjectKey,
   videoObjectKey,
@@ -60,8 +64,25 @@ function verifyPassword(password, storedHash = "") {
   return crypto.timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
 }
 
-function userToken(user) {
-  return crypto.createHash("sha256").update(`${user.id}:${user.username}:${user.password_hash}`).digest("hex");
+let accessControl;
+let resourceAccess;
+let collaborationService;
+let multiUserRouter;
+
+function requestedScope(parsed, actor) {
+  return String(parsed?.query?.scope || (accessControl.isAdmin(actor) ? "all" : "mine")).toLowerCase();
+}
+
+function scopedSql(table, alias, actor, scope, params = []) {
+  return resourceAccess.scopeSql({ table, alias, actor, scope, params });
+}
+
+async function projectForImage(imageId) {
+  return (await query("SELECT project_id FROM project_images WHERE id=$1 AND deleted_at IS NULL", [imageId])).rows[0]?.project_id || null;
+}
+
+async function projectForImport(importId) {
+  return (await query("SELECT project_id FROM import_batches WHERE id=$1", [importId])).rows[0]?.project_id || null;
 }
 
 function psQuote(value) {
@@ -533,7 +554,7 @@ async function loginUser(body = {}) {
   if (!username || !password) throw httpError(400, "请输入用户名和密码");
   const user = (await query("SELECT * FROM app_users WHERE username=$1 AND status='active'", [username])).rows[0];
   if (!user || !verifyPassword(password, user.password_hash)) throw httpError(401, "账号或密码不正确");
-  return { user: publicUser(user), token: userToken(user) };
+  return publicUser(user);
 }
 
 async function registerUser(body = {}) {
@@ -547,7 +568,7 @@ async function registerUser(body = {}) {
       "INSERT INTO app_users (username, password_hash, role, display_name) VALUES ($1,$2,'user',$3) RETURNING *",
       [username, hashPassword(password), displayName],
     )).rows[0];
-    return { user: publicUser(row), token: userToken(row) };
+    return publicUser(row);
   } catch (error) {
     if (error.code === "23505") throw httpError(409, "用户名已存在");
     throw error;
@@ -1439,7 +1460,7 @@ async function cleanupLegacyHistoryProjects() {
   }
 }
 
-async function ensureSplitProjects(parentProject, splitPlan) {
+async function ensureSplitProjects(parentProject, splitPlan, ownerUserId = parentProject.owner_user_id) {
   if (!splitPlan) return {};
   const ids = {};
   for (const split of ["train", "val", "test"]) {
@@ -1450,9 +1471,10 @@ async function ensureSplitProjects(parentProject, splitPlan) {
       [parentProject.id, split],
     )).rows[0];
     if (!row) row = (await query(
-      "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,'dataset_split',$3) RETURNING id",
-      [split, `${parentProject.name} ${split} split`, parentProject.id],
+      "INSERT INTO projects (name, description, project_type, parent_id, owner_user_id, visibility) VALUES ($1,$2,'dataset_split',$3,$4,'private') RETURNING id",
+      [split, `${parentProject.name} ${split} split`, parentProject.id, ownerUserId],
     )).rows[0];
+    await accessControl.ensureAssetOwner({ id: ownerUserId }, "project", row.id);
     ids[split] = row.id;
   }
   return ids;
@@ -1512,11 +1534,12 @@ async function upsertVideoAsset(client, filePath) {
   return inserted.rows[0];
 }
 
-async function createProject(body) {
+async function createProject(body, actor) {
   const rawName = String(body.name || `project_${Date.now()}`);
   const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
   if (!segments.length) throw httpError(400, "项目名称不能为空");
   let parentId = body.parentId || body.parent_id || null;
+  if (parentId) await resourceAccess.assertProjectWrite(actor, parentId);
   if (!parentId && segments[0] === "历史项目") throw httpError(400, "历史项目是旧版虚拟目录名称，不能创建为项目");
   const parentDepth = parentId ? await projectDepth(parentId) : 0;
   if (parentDepth + segments.length > 3) throw httpError(400, "Project folder depth exceeds limit");
@@ -1529,12 +1552,14 @@ async function createProject(body) {
       [segment, parentId],
     )).rows[0] : null;
     if (existing) {
+      await resourceAccess.assertProjectWrite(actor, existing);
       project = existing;
     } else {
       project = (await query(
-        "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,$3,$4) RETURNING *",
-        [segment, body.description || "", body.project_type || "normal", parentId],
+        "INSERT INTO projects (name, description, project_type, parent_id, owner_user_id, visibility) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+        [segment, body.description || "", body.project_type || "normal", parentId, actor.id, body.visibility || "private"],
       )).rows[0];
+      project = await resourceAccess.assignOwner("projects", project.id, actor, { visibility: project.visibility });
     }
     parentId = project.id;
   }
@@ -1616,10 +1641,11 @@ async function restoreProjectTree(projectId) {
   );
 }
 
-async function listProjects(trash = false) {
+async function listProjects(trash = false, actor, scope = "mine") {
+  const scoped = scopedSql("projects", "p", actor, scope);
   const result = await query(
     `WITH RECURSIVE scoped_projects AS (
-       SELECT id FROM projects WHERE ${trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"}
+       SELECT p.id FROM projects p WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"} AND ${scoped.sql}
      ),
      subtree AS (
        SELECT p.id AS root_id, p.id AS project_id,
@@ -1701,15 +1727,18 @@ async function listProjects(trash = false) {
      LEFT JOIN annotation_counts ac ON ac.root_id = p.id
      LEFT JOIN import_times it ON it.root_id = p.id
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
+       AND p.id IN (SELECT id FROM scoped_projects)
        AND NOT (p.parent_id IS NULL AND p.name='历史项目')
      ORDER BY p.created_at DESC`,
+    scoped.params,
   );
   return result.rows;
 }
 
-async function importPath(body) {
+async function importPath(body, actor) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
+  await resourceAccess.assertProjectWrite(actor, projectId);
   if (shuttingDown) {
     const error = new Error("Service is shutting down and cannot accept new imports.");
     error.statusCode = 503;
@@ -1750,7 +1779,9 @@ async function importPath(body) {
     )).rows[0];
     return { project: projectRow, batch: batchRow };
   });
-  const splitProjectIds = await ensureSplitProjects(project, splitPlan);
+  await resourceAccess.assignOwner("import_batches", batch.id, actor);
+  const splitProjectIds = await ensureSplitProjects(project, splitPlan, actor.id);
+  body.actorId = actor.id;
   body.splitProjectIds = splitProjectIds;
 
   setImmediate(() => {
@@ -1822,7 +1853,7 @@ async function runImportBatch(batchId, project, body) {
   const splitPlan = body.splitPlan || discoverDatasetSplitPlan(sourceGroups);
   const splitProjectIds = Object.keys(body.splitProjectIds || {}).length
     ? body.splitProjectIds
-    : await ensureSplitProjects(project, splitPlan);
+    : await ensureSplitProjects(project, splitPlan, body.actorId || project.owner_user_id);
   const splitResult = serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath);
 
   await query(
@@ -1843,6 +1874,7 @@ async function runImportBatch(batchId, project, body) {
        VALUES ($1,$2,'image','active',$3) RETURNING *`,
       [targetProjectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
     )).rows[0];
+    await resourceAccess.assignOwner("label_versions", version.id, { id: body.actorId || project.owner_user_id });
     versionsByProject.set(String(targetProjectId), version);
     await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, targetProjectId]);
   }
@@ -2335,7 +2367,7 @@ async function createBaselinePreview(body = {}) {
   return { runId, summary, logs: logs.slice(0, 200) };
 }
 
-async function applyBaselineRun(runId, body = {}) {
+async function applyBaselineRun(runId, body = {}, actor) {
   const run = (await query("SELECT * FROM baseline_merge_runs WHERE id=$1", [runId])).rows[0];
   if (!run) throw new Error("baseline run not found");
   if (run.status === "applied") throw new Error("baseline run already applied");
@@ -2348,16 +2380,16 @@ async function applyBaselineRun(runId, body = {}) {
     if (!byAsset.has(key)) byAsset.set(key, []);
     byAsset.get(key).push(row);
   }
-  return transaction(async (client) => {
+  const result = await transaction(async (client) => {
     const decisions = await client.query("SELECT * FROM baseline_conflicts WHERE merge_run_id=$1", [runId]);
     const decisionByAsset = new Map(decisions.rows.map((row) => [String(row.image_asset_id), row]));
     const project = (await client.query(
-      "INSERT INTO projects (name, description, project_type) VALUES ($1,$2,'baseline') RETURNING *",
-      [body.name || run.name, `Baseline generated from ${sourceProjectIds.length} projects`],
+      "INSERT INTO projects (name, description, project_type, owner_user_id, visibility) VALUES ($1,$2,'baseline',$3,'private') RETURNING *",
+      [body.name || run.name, `Baseline generated from ${sourceProjectIds.length} projects`, actor.id],
     )).rows[0];
     const version = (await client.query(
-      "INSERT INTO label_versions (project_id, name, target_type, status) VALUES ($1,$2,'image','active') RETURNING *",
-      [project.id, "baseline_v1"],
+      "INSERT INTO label_versions (project_id, name, target_type, status, created_by_user_id) VALUES ($1,$2,'image','active',$3) RETURNING *",
+      [project.id, "baseline_v1", actor.id],
     )).rows[0];
     let imageCount = 0;
     let annCount = 0;
@@ -2392,17 +2424,21 @@ async function applyBaselineRun(runId, body = {}) {
     await client.query("UPDATE baseline_merge_runs SET baseline_project_id=$1, status='applied', applied_at=now() WHERE id=$2", [project.id, runId]);
     return { project, imageCount, annotationCount: annCount };
   });
+  await accessControl.ensureAssetOwner(actor, "project", result.project.id);
+  return result;
 }
 
-async function listMlModels() {
+async function listMlModels(actor, scope = "mine") {
+  const scoped = scopedSql("model_clusters", "m", actor, scope);
   try {
     const rows = await query(
       `SELECT m.*,
         (SELECT count(*)::int FROM model_revisions mv WHERE mv.model_id=m.id) AS version_count,
         (SELECT max(mv.created_at) FROM model_revisions mv WHERE mv.model_id=m.id) AS last_version_at
        FROM model_clusters m
-       WHERE m.deleted_at IS NULL
+       WHERE m.deleted_at IS NULL AND ${scoped.sql}
        ORDER BY m.created_at DESC`,
+      scoped.params,
     );
     return rows.rows;
   } catch (error) {
@@ -2410,14 +2446,15 @@ async function listMlModels() {
     const rows = await query(
       `SELECT m.*, 0::int AS version_count, NULL::timestamptz AS last_version_at
        FROM model_clusters m
-       WHERE m.deleted_at IS NULL
+       WHERE m.deleted_at IS NULL AND ${scoped.sql}
        ORDER BY m.created_at DESC`,
+      scoped.params,
     );
     return rows.rows;
   }
 }
 
-async function createMlModel(body = {}) {
+async function createMlModel(body = {}, actor) {
   const name = String(body.name || "").trim();
   if (!name) throw new Error("模型名称不能为空");
   const taskType = String(body.taskType || body.task_type || "detect").trim() || "detect";
@@ -2428,7 +2465,7 @@ async function createMlModel(body = {}) {
      VALUES ($1,$2,$3,$4) RETURNING *`,
     [name, taskType, framework, description],
   );
-  return rows.rows[0];
+  return resourceAccess.assignOwner("model_clusters", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
 }
 
 function dateCode() {
@@ -2452,9 +2489,10 @@ async function nextModelVersionName(prefix, modelId) {
   return `${base}_${String((rows.rows[0]?.count || 0) + 1).padStart(3, "0")}`;
 }
 
-async function createModelVersion(body = {}) {
+async function createModelVersion(body = {}, actor) {
   const modelId = body.modelId || body.model_id;
   if (!modelId) throw new Error("Select a model cluster.");
+  await resourceAccess.assertIndependentAccess?.("model_clusters", modelId, actor, "write");
   const model = (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
   if (!model) throw new Error("模型簇不存在");
   const requestedStage = String(body.stage || "pretrained").trim().toLowerCase();
@@ -2470,6 +2508,7 @@ async function createModelVersion(body = {}) {
      VALUES ($1,$2,$3,$4,$5) RETURNING *`,
     [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
   )).rows[0];
+  await resourceAccess.assignOwner("model_revisions", version.id, actor);
   if (sourcePath) {
     if (!fs.existsSync(sourcePath)) throw new Error("Weight file does not exist.");
     const ext = path.extname(sourcePath).toLowerCase() || ".pt";
@@ -2573,20 +2612,24 @@ async function clearModelAssets(body = {}) {
   };
 }
 
-async function listDatasetSnapshots() {
+async function listDatasetSnapshots(actor, scope = "mine") {
+  const scoped = scopedSql("dataset_snapshots", "ds", actor, scope);
   const rows = await query(
     `SELECT ds.*, p.name AS source_project_name
      FROM dataset_snapshots ds
      LEFT JOIN projects p ON p.id=ds.source_project_id
+     WHERE ${scoped.sql}
      ORDER BY ds.created_at DESC
      LIMIT 200`,
+    scoped.params,
   );
   return rows.rows;
 }
 
-async function listTrainingTemplates() {
+async function listTrainingTemplates(actor, scope = "mine") {
   try {
-    return (await query("SELECT * FROM training_templates ORDER BY created_at DESC")).rows;
+    const scoped = scopedSql("training_templates", "t", actor, scope);
+    return (await query(`SELECT t.* FROM training_templates t WHERE ${scoped.sql} ORDER BY created_at DESC`, scoped.params)).rows;
   } catch (error) {
     if (error.code !== "42P01") throw error;
     return builtinAlgorithmAssets.filter((asset) => ["ultralytics_yolo", "dinov3_faster_rcnn"].includes(asset.algorithmKey)).map((asset) => ({
@@ -2777,14 +2820,19 @@ async function syncMinioAlgorithmAssets() {
     );
   }
 }
-async function listAlgorithmAssets() {
+async function listAlgorithmAssets(actor, scope = "mine") {
   try {
     await ensureBuiltinAlgorithmAssets();
     await syncMinioAlgorithmAssets();
+    const adminId = await resourceAccess.getAdminId();
+    await query("UPDATE algorithm_assets SET owner_user_id=$1 WHERE owner_user_id IS NULL", [adminId]);
+    await query("UPDATE algorithm_assets SET visibility='public' WHERE source_type='builtin' OR version='builtin'");
+    const scoped = scopedSql("algorithm_assets", "a", actor, scope);
     const rows = await query(
-      `SELECT * FROM algorithm_assets
-       WHERE deleted_at IS NULL
+      `SELECT a.* FROM algorithm_assets a
+       WHERE a.deleted_at IS NULL AND ${scoped.sql}
        ORDER BY source_type='builtin' DESC, name, version`,
+      scoped.params,
     );
     return rows.rows;
   } catch (error) {
@@ -2821,7 +2869,7 @@ function templateCapabilities(body = {}) {
   return { tasks: [body.taskType || body.task_type || "detect"], autoDetected: false };
 }
 
-async function createTrainingTemplate(body = {}) {
+async function createTrainingTemplate(body = {}, actor) {
   const name = String(body.name || "").trim();
   if (!name) throw new Error("模板名称不能为空");
   const capabilities = templateCapabilities(body);
@@ -2840,11 +2888,12 @@ async function createTrainingTemplate(body = {}) {
       body.description || "",
     ],
   );
-  return rows.rows[0];
+  return resourceAccess.assignOwner("training_templates", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
 }
 
-async function listPythonEnvs() {
-  return (await query("SELECT * FROM runtime_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
+async function listPythonEnvs(actor, scope = "mine") {
+  const scoped = scopedSql("runtime_envs", "e", actor, scope);
+  return (await query(`SELECT e.* FROM runtime_envs e WHERE ${scoped.sql} ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC`, scoped.params)).rows;
 }
 
 async function streamPythonEnvArtifact(res, envId) {
@@ -2877,7 +2926,7 @@ function defaultPythonEnvName(info = {}, accelerator = "cpu", fallback = "python
   return parts.join("-");
 }
 
-async function createPythonEnv(body = {}) {
+async function createPythonEnv(body = {}, actor) {
   const rawSourceType = body.sourceType || body.source_type || "server_managed";
   const sourceType = rawSourceType === "server_python" ? "server_managed" : rawSourceType;
   if (sourceType === "conda_pack") {
@@ -2965,7 +3014,7 @@ async function createPythonEnv(body = {}) {
         unpackPath,
       ],
     );
-    return rows.rows[0];
+    return resourceAccess.assignOwner("runtime_envs", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
   }
 
   const pythonPath = path.resolve(String(body.pythonPath || body.python_path || "").trim());
@@ -3031,16 +3080,19 @@ async function createPythonEnv(body = {}) {
       "",
     ],
   );
-  return rows.rows[0];
+  return resourceAccess.assignOwner("runtime_envs", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
 }
 
-async function listModelVersions(modelId) {
+async function listModelVersions(modelId, actor, scope = "mine") {
   const params = [];
   const where = [];
   if (modelId) {
     params.push(modelId);
     where.push(`mv.model_id=$${params.length}`);
   }
+  const scoped = scopedSql("model_clusters", "m", actor, scope, params);
+  params.splice(0, params.length, ...scoped.params);
+  where.push(scoped.sql);
   const rows = await query(
     `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name,
        tj.name AS training_job_name, tj.current_epoch AS training_current_epoch,
@@ -3157,16 +3209,18 @@ async function presentTrainingJobs(jobs) {
   });
 }
 
-async function listTrainingJobs() {
+async function listTrainingJobs(actor, scope = "mine") {
   try {
+    const scoped = scopedSql("runtime_training_jobs", "tj", actor, scope);
     const rows = await query(
       `SELECT tj.*, p.name AS dataset_project_name, m.name AS model_name, ds.name AS dataset_snapshot_name
        FROM runtime_training_jobs tj
        LEFT JOIN projects p ON p.id=tj.dataset_project_id
        LEFT JOIN model_clusters m ON m.id=tj.model_id
        LEFT JOIN dataset_snapshots ds ON ds.id=tj.dataset_snapshot_id
+       WHERE ${scoped.sql}
        ORDER BY tj.priority DESC, tj.created_at DESC, tj.id DESC
-       LIMIT 200`,
+       LIMIT 200`, scoped.params,
     );
     return presentTrainingJobs(rows.rows);
   } catch (error) {
@@ -3175,7 +3229,7 @@ async function listTrainingJobs() {
   }
 }
 
-async function normalizeTrainingInitialization(body, params) {
+async function normalizeTrainingInitialization(body, params, actor) {
   const versionId = body.initialModelVersionId || body.initial_model_version_id || params.initialModelVersionId || null;
   const strategy = String(body.initializationStrategy || body.initialization_strategy || params.initializationStrategy || (versionId ? "pretrained" : "random")).toLowerCase();
   if (!["random", "zero", "pretrained", "training"].includes(strategy)) throw new Error(`Unsupported initialization strategy: ${strategy}`);
@@ -3185,6 +3239,7 @@ async function normalizeTrainingInitialization(body, params) {
   if (resume && strategy !== "training") throw new Error("Resume is only supported for a previous training checkpoint");
   let checkpoint = null;
   if (versionId) {
+    await resourceAccess.assertIndependentAccess("model_revisions", versionId, actor, "read");
     const row = (await query(
       `SELECT mv.*, mc.name AS model_name, mc.framework,
          (SELECT jsonb_build_object('id', mf.id, 'path', mf.path, 'sha256', mf.sha256, 'size', mf.size, 'metadata', mf.metadata_json)
@@ -3200,12 +3255,13 @@ async function normalizeTrainingInitialization(body, params) {
   return { strategy, versionId, resume, checkpoint };
 }
 
-async function createTrainingJob(body = {}) {
+async function createTrainingJob(body = {}, actor) {
   const params = { ...(body.params || {}) };
   const datasetSplits = normalizeTrainingDatasetSplits(body, params, body.datasetProjectId || body.dataset_project_id || null);
   const datasetProjectId = datasetSplits.trainProjectIds[0] || null;
   if (!datasetProjectId) throw new Error("请选择训练数据集项目");
   const selectedProjectIds = [...new Set([...datasetSplits.trainProjectIds, ...datasetSplits.valProjectIds, ...datasetSplits.testProjectIds])];
+  await Promise.all(selectedProjectIds.map((projectId) => resourceAccess.assertProjectRead(actor, projectId)));
   const projects = (await query("SELECT id, name FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedProjectIds])).rows;
   if (projects.length !== selectedProjectIds.length) throw new Error("One or more selected dataset projects do not exist");
   const projectById = new Map(projects.map((item) => [String(item.id), item]));
@@ -3213,6 +3269,7 @@ async function createTrainingJob(body = {}) {
   if (!project) throw new Error("训练数据集项目不存在");
   const modelId = body.modelId || body.model_id || null;
   if (modelId) {
+    await resourceAccess.assertIndependentAccess("model_clusters", modelId, actor, "read");
     const model = (await query("SELECT id FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
     if (!model) throw new Error("模型不存在");
   }
@@ -3221,6 +3278,7 @@ async function createTrainingJob(body = {}) {
     const template = (await query("SELECT * FROM training_templates WHERE id=$1", [templateId])).rows[0];
     const algorithm = template ? null : (await query("SELECT * FROM algorithm_assets WHERE id=$1 AND deleted_at IS NULL", [templateId])).rows[0];
     const selected = template || algorithm;
+    if (selected) await resourceAccess.assertIndependentAccess(template ? "training_templates" : "algorithm_assets", templateId, actor, "read");
     if (!selected) throw new Error("训练算法适配器不存在");
     Object.assign(params, selected.default_params_json || {}, params);
     const requestedTask = String(body.taskType || body.task_type || params.taskType || selected.task_type || "detect");
@@ -3233,13 +3291,14 @@ async function createTrainingJob(body = {}) {
     params.taskType = requestedTask;
   }
   if (body.pythonEnvId || body.python_env_id) {
+    await resourceAccess.assertIndependentAccess("runtime_envs", body.pythonEnvId || body.python_env_id, actor, "read");
     let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
     if (!env) throw new Error("Python 环境不存在");
     env = await resolveRuntimePythonEnv(env);
     params.pythonEnvId = env.id;
     params.python = env.python_path;
   }
-  const initialization = await normalizeTrainingInitialization(body, params);
+  const initialization = await normalizeTrainingInitialization(body, params, actor);
   params.initializationStrategy = initialization.strategy;
   params.initialModelVersionId = initialization.versionId;
   params.resume = initialization.resume;
@@ -3259,6 +3318,7 @@ async function createTrainingJob(body = {}) {
     [name, template, datasetProjectId, modelId, JSON.stringify(params), totalEpochs, "已进入训练队列，等待训练 worker 接管"],
   );
   const job = inserted.rows[0];
+  await resourceAccess.assignOwner("runtime_training_jobs", job.id, actor);
   await query(
     `UPDATE runtime_training_jobs
      SET initial_model_version_id=$1, initialization_strategy=$2, resume_from_checkpoint=$3, save_period=$4
@@ -3350,16 +3410,18 @@ async function deleteTrainingJob(jobId) {
   return { deleted: true, id: deleted.rows[0].id };
 }
 
-async function listInferenceJobs() {
+async function listInferenceJobs(actor, scope = "mine") {
   try {
+    const scoped = scopedSql("runtime_inference_jobs", "ij", actor, scope);
     const rows = await query(
       `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
        FROM runtime_inference_jobs ij
        LEFT JOIN model_revisions mv ON mv.id=ij.model_version_id
        LEFT JOIN model_clusters m ON m.id=mv.model_id
        LEFT JOIN projects p ON p.id=ij.dataset_project_id
+       WHERE ${scoped.sql}
        ORDER BY ij.priority DESC, ij.created_at DESC, ij.id DESC
-       LIMIT 200`,
+       LIMIT 200`, scoped.params,
     );
     return rows.rows.map((row) => {
       const params = typeof row.params_json === "string" ? JSON.parse(row.params_json || "{}") : (row.params_json || {});
@@ -3383,16 +3445,19 @@ async function listInferenceJobs() {
 }
 
 
-async function moveRuntimeJobPriority(tableName, jobId, direction) {
+async function moveRuntimeJobPriority(tableName, jobId, direction, actor) {
   const allowedTables = new Set(["runtime_training_jobs", "runtime_inference_jobs"]);
   if (!allowedTables.has(tableName)) throw new Error("unsupported queue type");
   if (!["up", "down"].includes(direction)) throw new Error("direction must be up or down");
   return transaction(async (client) => {
+    const ownerFilter = accessControl.isAdmin(actor) ? { sql: "", params: [] } : { sql: "WHERE created_by_user_id=$1", params: [actor.id] };
     const rows = (await client.query(
       `SELECT id, COALESCE(priority, 0)::int AS priority, created_at
        FROM ${tableName}
+       ${ownerFilter.sql}
        ORDER BY COALESCE(priority, 0) DESC, created_at DESC, id DESC
        LIMIT 200`,
+      ownerFilter.params,
     )).rows;
     const index = rows.findIndex((row) => String(row.id) === String(jobId));
     if (index < 0) throw new Error("job not found");
@@ -3588,14 +3653,16 @@ async function requeueInferenceJob(jobId) {
   return { ...updated, params_json: params };
 }
 
-async function createInferenceJob(body = {}) {
+async function createInferenceJob(body = {}, actor) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
+  if (datasetProjectId) await resourceAccess.assertProjectRead(actor, datasetProjectId);
   if (!datasetProjectId) throw new Error("请选择推理数据集项目");
   const project = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
   if (!project) throw new Error("推理数据集项目不存在");
   const modelVersionId = body.modelVersionId || body.model_version_id || null;
   let modelFramework = "";
   if (modelVersionId) {
+    await resourceAccess.assertIndependentAccess("model_revisions", modelVersionId, actor, "read");
     const version = (await query(
       `SELECT mv.id, mc.framework
        FROM model_revisions mv
@@ -3608,7 +3675,8 @@ async function createInferenceJob(body = {}) {
   }
   const params = body.params || {};
   const requestedAlgorithmAssetId = body.algorithmAssetId || body.algorithm_asset_id || params.algorithmAssetId || params.templateId || null;
-  const algorithms = await listAlgorithmAssets();
+  const algorithmScopes = await Promise.all(["mine", "shared", "public"].map((scope) => listAlgorithmAssets(actor, scope)));
+  const algorithms = [...new Map(algorithmScopes.flat().map((item) => [String(item.id), item])).values()];
   const algorithm = requestedAlgorithmAssetId
     ? algorithms.find((item) => String(item.id) === String(requestedAlgorithmAssetId) || item.algorithm_key === requestedAlgorithmAssetId || item.template_key === requestedAlgorithmAssetId)
     : algorithms.find((item) => modelFramework && String(item.framework || "").toLowerCase() === modelFramework)
@@ -3630,6 +3698,7 @@ async function createInferenceJob(body = {}) {
     [name, modelVersionId, datasetProjectId, JSON.stringify(params), "正在准备推理输入缓存"],
   );
   const job = inserted.rows[0];
+  await resourceAccess.assignOwner("runtime_inference_jobs", job.id, actor);
   const outputRoot = path.join(storageRoot, "runtime", "inference", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
   const updated = await query("UPDATE runtime_inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
@@ -4828,6 +4897,7 @@ async function createLegacyDatasetSnapshotForTraining(job) {
      VALUES ($1,$2,$3,'yolo',$4,$5,$6,$7,$8) RETURNING *`,
     [snapshotName, project.id, project.active_label_version_id, JSON.stringify(split), snapshotRoot, rows.length, annRows.length, JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml") })],
   )).rows[0];
+  await resourceAccess.assignOwner("dataset_snapshots", snapshot.id, { id: job.created_by_user_id });
   await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
   await appendTrainingLog(job.id, "system", `dataset snapshot created: ${snapshotRoot}`);
   return snapshot;
@@ -4944,6 +5014,7 @@ async function createDatasetSnapshotForTraining(job) {
     [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, imageCount, annotationCount,
       JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
   )).rows[0];
+  await resourceAccess.assignOwner("dataset_snapshots", snapshot.id, { id: job.created_by_user_id });
   await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
   await appendTrainingLog(job.id, "system", `dataset snapshot created: train=${split.train}, val=${split.val}, test=${split.test}, duplicates=${duplicateImageCount}`);
   return snapshot;
@@ -5186,7 +5257,7 @@ async function ensureTrainingModelRevision(job) {
     taskType: "detect",
     framework: "ultralytics",
     description: "Auto-created from training job",
-  })).id;
+  }, { id: job.created_by_user_id })).id;
   const project = (await query("SELECT name FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
   const params = job.params_json || {};
   const prefix = `detect_${project?.name || "dataset"}_yolo_ep${Number(params.epochs || job.total_epochs || 0) || "x"}_${dateCode()}`;
@@ -5196,6 +5267,7 @@ async function ensureTrainingModelRevision(job) {
      VALUES ($1,$2,$3,$4,$5,'training',$6,$7) RETURNING *`,
     [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify({ ...params, assetCategory: "training" }), job.output_root],
   )).rows[0];
+  await resourceAccess.assignOwner("model_revisions", version.id, { id: job.created_by_user_id });
   await query(
     "UPDATE runtime_training_jobs SET model_id=$1, generated_model_version_id=$2 WHERE id=$3",
     [modelId, version.id, job.id],
@@ -5392,7 +5464,7 @@ function startTrainingWorker() {
   setTimeout(tick, 250);
 }
 
-async function saveImageAnnotations(projectImageId, body = {}) {
+async function saveImageAnnotations(projectImageId, body = {}, actor) {
   const image = (await query(
     `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, p.active_label_version_id, p.id AS project_id
      FROM project_images pi
@@ -5411,6 +5483,7 @@ async function saveImageAnnotations(projectImageId, body = {}) {
       [image.project_id, `manual_${new Date().toISOString()}`],
     )).rows[0];
     labelVersionId = version.id;
+    await resourceAccess.assignOwner("label_versions", labelVersionId, actor);
     await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [labelVersionId, image.project_id]);
   }
 
@@ -5655,7 +5728,7 @@ async function streamProjectImage(res, projectImageId, thumb) {
   stream.pipe(res);
 }
 
-async function exportProject(projectId, options = {}) {
+async function exportProject(projectId, options = {}, actor) {
   if (shuttingDown) {
     const error = new Error("服务正在关闭，暂不接受新的导出任务");
     error.statusCode = 503;
@@ -5672,6 +5745,7 @@ async function exportProject(projectId, options = {}) {
   fs.mkdirSync(exportRoot, { recursive: true });
   const job = (await query("INSERT INTO jobs (type,status,progress,payload,message,started_at) VALUES ('export','running',0,$1,$2,now()) RETURNING *", [{ projectId, outputPath: exportRootDisplay, format }, `正在导出 ${format.toUpperCase()}`])).rows[0];
 
+  await resourceAccess.assignOwner("jobs", job.id, actor);
   setImmediate(() => {
     const task = runExportProject(project, job, format).catch(async (error) => {
       console.error("export failed", error);
@@ -5778,8 +5852,10 @@ async function route(req, res) {
     await query("SELECT 1");
     return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
   }
-  if (method === "POST" && parsed.pathname === "/api/auth/login") return sendJson(res, await loginUser(await readBody(req)));
-  if (method === "POST" && parsed.pathname === "/api/auth/register") return sendJson(res, await registerUser(await readBody(req)));
+  if (multiUserRouter && await multiUserRouter.handle(req, res)) return;
+  const actor = parsed.pathname.startsWith("/api/")
+    ? await accessControl.authenticateRequest(req)
+    : null;
   if (method === "GET" && parsed.pathname === "/api/settings") return sendJson(res, { settings: await getAppSettings() });
   if (method === "PUT" && parsed.pathname === "/api/settings") return sendJson(res, { settings: await saveAppSettings(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/config") {
@@ -5819,123 +5895,134 @@ async function route(req, res) {
       storageRoot,
     });
   }
-  if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await listProjects(false) });
-  if (method === "GET" && parsed.pathname === "/api/projects/trash") return sendJson(res, { projects: await listProjects(true) });
-  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") return sendJson(res, await emptyProjectTrash());
-  if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await listProjects(false, actor, requestedScope(parsed, actor)) });
+  if (method === "GET" && parsed.pathname === "/api/projects/trash") return sendJson(res, { projects: await listProjects(true, actor, requestedScope(parsed, actor)) });
+  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") { accessControl.requireAdmin(actor); return sendJson(res, await emptyProjectTrash()); }
+  if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await createProject(await readBody(req), actor) });
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
-  if (method === "PATCH" && deleteProject) return sendJson(res, { project: await renameProject(deleteProject[1], await readBody(req)) });
+  if (method === "PATCH" && deleteProject) { await resourceAccess.assertProjectWrite(actor, deleteProject[1]); return sendJson(res, { project: await renameProject(deleteProject[1], await readBody(req)) }); }
   if (method === "DELETE" && deleteProject) {
+    await resourceAccess.assertProjectDelete(actor, deleteProject[1]);
     await softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
   const permanentDeleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/permanent$/);
-  if (method === "DELETE" && permanentDeleteProject) return sendJson(res, await deleteProjectPermanently(permanentDeleteProject[1]));
+  if (method === "DELETE" && permanentDeleteProject) { await resourceAccess.assertProjectDelete(actor, permanentDeleteProject[1]); return sendJson(res, await deleteProjectPermanently(permanentDeleteProject[1])); }
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
+    await resourceAccess.assertProjectWrite(actor, restoreProject[1]);
     await restoreProjectTree(restoreProject[1]);
     return sendJson(res, { ok: true });
   }
-  if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req)));
-  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await listMlModels() });
-  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") return sendJson(res, await clearModelAssets(await readBody(req)));
-  if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets() });
-  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await listRuntimeAssetLinks() });
-  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates() });
-  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs() });
-  if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await createPythonEnv(await readBody(req)) });
+  if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req), actor));
+  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await listMlModels(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req), actor) });
+  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req), actor) });
+  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await clearModelAssets(await readBody(req))); }
+  if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") { accessControl.requireAdmin(actor); return sendJson(res, { links: await listRuntimeAssetLinks() }); }
+  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req), actor) });
+  if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await createPythonEnv(await readBody(req), actor) });
   const pythonEnvDownload = parsed.pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
-  if (method === "GET" && pythonEnvDownload) return streamPythonEnvArtifact(res, pythonEnvDownload[1]);
+  if (method === "GET" && pythonEnvDownload) { await resourceAccess.assertIndependentAccess("runtime_envs", pythonEnvDownload[1], actor, "read"); return streamPythonEnvArtifact(res, pythonEnvDownload[1]); }
   const renameModelVersionMatch = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
-  if (method === "PATCH" && renameModelVersionMatch) return sendJson(res, { version: await renameModelVersion(renameModelVersionMatch[1], await readBody(req)) });
+  if (method === "PATCH" && renameModelVersionMatch) { await resourceAccess.assertIndependentAccess("model_revisions", renameModelVersionMatch[1], actor, "write"); return sendJson(res, { version: await renameModelVersion(renameModelVersionMatch[1], await readBody(req)) }); }
   const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
-  if (method === "GET" && modelVersionDownload) return streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id);
-  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots() });
-  if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs() });
-  if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req)) });
+  if (method === "GET" && modelVersionDownload) { await resourceAccess.assertIndependentAccess("model_revisions", modelVersionDownload[1], actor, "read"); return streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id); }
+  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots(actor, requestedScope(parsed, actor)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req), actor) });
   const trainingPriorityMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && trainingPriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction) });
+  if (method === "PATCH" && trainingPriorityMatch) { await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]); return sendJson(res, { job: await moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction, actor) }); }
   const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
-  if (method === "POST" && requeueTrainingMatch) return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) });
+  if (method === "POST" && requeueTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, requeueTrainingMatch[1]); return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) }); }
   const pauseTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/pause$/);
-  if (method === "POST" && pauseTrainingMatch) return sendJson(res, { job: await pauseTrainingJob(pauseTrainingMatch[1]) });
+  if (method === "POST" && pauseTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, pauseTrainingMatch[1]); return sendJson(res, { job: await pauseTrainingJob(pauseTrainingMatch[1]) }); }
   const resumeTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/resume$/);
-  if (method === "POST" && resumeTrainingMatch) return sendJson(res, { job: await resumeTrainingJob(resumeTrainingMatch[1]) });
+  if (method === "POST" && resumeTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, resumeTrainingMatch[1]); return sendJson(res, { job: await resumeTrainingJob(resumeTrainingMatch[1]) }); }
   const deleteTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)$/);
-  if (method === "DELETE" && deleteTrainingMatch) return sendJson(res, await deleteTrainingJob(deleteTrainingMatch[1]));
+  if (method === "DELETE" && deleteTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, deleteTrainingMatch[1]); return sendJson(res, await deleteTrainingJob(deleteTrainingMatch[1])); }
   const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
   if (method === "GET" && trainingLogsMatch) {
+    await resourceAccess.assertTrainingJobRead(actor, trainingLogsMatch[1]);
     const rows = await query("SELECT * FROM runtime_training_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
     return sendJson(res, { logs: rows.rows.reverse() });
   }
   const trainingMetricsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/metrics$/);
   if (method === "GET" && trainingMetricsMatch) {
+    await resourceAccess.assertTrainingJobRead(actor, trainingMetricsMatch[1]);
     const rows = await query("SELECT * FROM runtime_training_metrics WHERE job_id=$1 ORDER BY id DESC LIMIT 500", [trainingMetricsMatch[1]]);
     return sendJson(res, { metrics: rows.rows.reverse() });
   }
-  if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs() });
-  if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req), actor) });
   const inferencePriorityMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && inferencePriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction) });
+  if (method === "PATCH" && inferencePriorityMatch) { await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]); return sendJson(res, { job: await moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction, actor) }); }
   const requeueInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/requeue$/);
-  if (method === "POST" && requeueInferenceMatch) return sendJson(res, { job: await requeueInferenceJob(requeueInferenceMatch[1]) });
+  if (method === "POST" && requeueInferenceMatch) { await resourceAccess.assertInferenceJobWrite(actor, requeueInferenceMatch[1]); return sendJson(res, { job: await requeueInferenceJob(requeueInferenceMatch[1]) }); }
   const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
-  if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
+  if (method === "DELETE" && deleteInferenceMatch) { await resourceAccess.assertInferenceJobWrite(actor, deleteInferenceMatch[1]); return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1])); }
   const inferenceEvaluationMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/evaluation$/);
-  if (method === "GET" && inferenceEvaluationMatch) return sendJson(res, { evaluation: await getInferenceEvaluation(inferenceEvaluationMatch[1]) });
+  if (method === "GET" && inferenceEvaluationMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceEvaluationMatch[1]); return sendJson(res, { evaluation: await getInferenceEvaluation(inferenceEvaluationMatch[1]) }); }
   const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
-  if (method === "GET" && inferenceResultsMatch) return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) });
-  if (method === "POST" && parsed.pathname === "/api/baselines/preview") return sendJson(res, await createBaselinePreview(await readBody(req)));
+  if (method === "GET" && inferenceResultsMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]); return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) }); }
+  if (method === "POST" && parsed.pathname === "/api/baselines/preview") { accessControl.requireAdmin(actor); return sendJson(res, await createBaselinePreview(await readBody(req))); }
   const baselineConflicts = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/conflicts$/);
-  if (method === "GET" && baselineConflicts) return sendJson(res, { conflicts: await listBaselineConflicts(baselineConflicts[1]) });
-  if (method === "POST" && baselineConflicts) return sendJson(res, await resolveBaselineConflicts(baselineConflicts[1], await readBody(req)));
+  if (method === "GET" && baselineConflicts) { accessControl.requireAdmin(actor); return sendJson(res, { conflicts: await listBaselineConflicts(baselineConflicts[1]) }); }
+  if (method === "POST" && baselineConflicts) { accessControl.requireAdmin(actor); return sendJson(res, await resolveBaselineConflicts(baselineConflicts[1], await readBody(req))); }
   const applyBaseline = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/apply$/);
-  if (method === "POST" && applyBaseline) return sendJson(res, await applyBaselineRun(applyBaseline[1], await readBody(req)));
+  if (method === "POST" && applyBaseline) { accessControl.requireAdmin(actor); return sendJson(res, await applyBaselineRun(applyBaseline[1], await readBody(req), actor)); }
   const imports = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports$/);
-  if (method === "GET" && imports) return sendJson(res, { imports: await listImports(imports[1], parsed.query.trash === "1") });
+  if (method === "GET" && imports) { await resourceAccess.assertProjectRead(actor, imports[1]); return sendJson(res, { imports: await listImports(imports[1], parsed.query.trash === "1") }); }
   const emptyImportsTrash = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports\/trash\/empty$/);
-  if (method === "DELETE" && emptyImportsTrash) return sendJson(res, await emptyImportTrash(emptyImportsTrash[1]));
+  if (method === "DELETE" && emptyImportsTrash) { await resourceAccess.assertProjectWrite(actor, emptyImportsTrash[1]); return sendJson(res, await emptyImportTrash(emptyImportsTrash[1])); }
   const deleteImport = parsed.pathname.match(/^\/api\/imports\/([^/]+)$/);
   if (method === "DELETE" && deleteImport) {
+    await resourceAccess.assertProjectWrite(actor, await projectForImport(deleteImport[1]));
     await softDeleteImport(deleteImport[1]);
     return sendJson(res, { ok: true });
   }
   const cancelImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/cancel$/);
   if (method === "POST" && cancelImportMatch) {
+    await resourceAccess.assertProjectWrite(actor, await projectForImport(cancelImportMatch[1]));
     await cancelImport(cancelImportMatch[1]);
     return sendJson(res, { ok: true });
   }
   const restoreImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/restore$/);
   if (method === "POST" && restoreImportMatch) {
+    await resourceAccess.assertProjectWrite(actor, await projectForImport(restoreImportMatch[1]));
     await restoreImport(restoreImportMatch[1]);
     return sendJson(res, { ok: true });
   }
   const summary = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/summary$/);
-  if (method === "GET" && summary) return sendJson(res, { summary: await projectSummary(summary[1]) });
+  if (method === "GET" && summary) { await resourceAccess.assertProjectRead(actor, summary[1]); return sendJson(res, { summary: await projectSummary(summary[1]) }); }
   const imageList = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images$/);
-  if (method === "GET" && imageList) return sendJson(res, await listProjectImages(imageList[1], parsed.query));
+  if (method === "GET" && imageList) { await resourceAccess.assertProjectRead(actor, imageList[1]); return sendJson(res, await listProjectImages(imageList[1], parsed.query)); }
   const deleteImagesMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images\/delete$/);
   if (method === "POST" && deleteImagesMatch) {
+    await resourceAccess.assertProjectWrite(actor, deleteImagesMatch[1]);
     return sendJson(res, await softDeleteProjectImages(deleteImagesMatch[1], (await readBody(req)).ids));
   }
   const exportMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
-  if (method === "POST" && exportMatch) return sendJson(res, await exportProject(exportMatch[1], await readBody(req)));
+  if (method === "POST" && exportMatch) { await resourceAccess.assertProjectRead(actor, exportMatch[1]); return sendJson(res, await exportProject(exportMatch[1], await readBody(req), actor)); }
   const thumb = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/thumb$/);
-  if (method === "GET" && thumb) return streamProjectImage(res, thumb[1], true);
+  if (method === "GET" && thumb) { await resourceAccess.assertProjectRead(actor, await projectForImage(thumb[1])); return streamProjectImage(res, thumb[1], true); }
   const full = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/full$/);
-  if (method === "GET" && full) return streamProjectImage(res, full[1], false);
+  if (method === "GET" && full) { await resourceAccess.assertProjectRead(actor, await projectForImage(full[1])); return streamProjectImage(res, full[1], false); }
   const saveAnnotationsMatch = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/annotations\/save$/);
-  if (method === "POST" && saveAnnotationsMatch) return sendJson(res, await saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req)));
+  if (method === "POST" && saveAnnotationsMatch) { await resourceAccess.assertProjectWrite(actor, await projectForImage(saveAnnotationsMatch[1])); return sendJson(res, await saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req), actor)); }
   if (method === "GET" && parsed.pathname === "/api/jobs") {
-    const rows = await query("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50");
+    const scoped = scopedSql("jobs", "j", actor, requestedScope(parsed, actor));
+    const rows = await query(`SELECT j.* FROM jobs j WHERE ${scoped.sql} ORDER BY created_at DESC LIMIT 50`, scoped.params);
     return sendJson(res, { jobs: rows.rows });
   }
   if (method === "GET" && parsed.pathname === "/api/imports/latest") {
     const projectId = parsed.query.projectId || parsed.query.project_id;
+    if (!projectId) throw httpError(400, "projectId is required");
+    await resourceAccess.assertProjectRead(actor, projectId);
     const params = [];
     const where = ["deleted_at IS NULL"];
     if (projectId) {
@@ -6024,6 +6111,98 @@ async function main() {
   console.log("Boot: ensureRuntimeSchema start");
   await ensureRuntimeSchema();
   console.log("Boot: ensureRuntimeSchema done");
+  accessControl = createAccessControl({
+    query,
+    transaction,
+    httpError,
+    onPublicationStatus: async (resourceType, resourceId, published) => {
+      const tables = {
+        project: "projects",
+        model: "model_clusters",
+        runtime_env: "runtime_envs",
+        algorithm: "algorithm_assets",
+        training_template: "training_templates",
+      };
+      const table = tables[resourceType];
+      if (!table) throw httpError(400, `resource type cannot be published: ${resourceType}`);
+      await query(`UPDATE ${table} SET visibility=$1 WHERE id=$2`, [published ? "public" : "private", resourceId]);
+    },
+  });
+  await accessControl.ensureSchema();
+  resourceAccess = createResourceAccess({ query, transaction, httpError, accessControl });
+  await resourceAccess.initializeSchema();
+  collaborationService = createCollaborationService({
+    query,
+    transaction,
+    httpError,
+    checkPermission: async (action, { actor, resource }) => {
+      if (!actor?.id) return false;
+      if (action === "review:create") return accessControl.isAdmin(actor);
+      let projectId = resource.projectId || resource.project_id || null;
+      if (action === "task:list" && !projectId && !accessControl.isAdmin(actor)) {
+        throw httpError(400, "projectId is required");
+      }
+      if (!projectId && resource.taskId) {
+        projectId = (await query(
+          `SELECT dv.project_id FROM annotation_tasks t JOIN dataset_versions dv ON dv.id=t.dataset_version_id WHERE t.id=$1`,
+          [resource.taskId],
+        )).rows[0]?.project_id;
+      }
+      if (!projectId && resource.itemId) {
+        projectId = (await query(
+          `SELECT dv.project_id FROM annotation_items i JOIN annotation_tasks t ON t.id=i.task_id JOIN dataset_versions dv ON dv.id=t.dataset_version_id WHERE i.id=$1`,
+          [resource.itemId],
+        )).rows[0]?.project_id;
+      }
+      if (!projectId && resource.lockToken) {
+        projectId = (await query(
+          `SELECT dv.project_id FROM annotation_locks l JOIN annotation_tasks t ON t.id=l.task_id JOIN dataset_versions dv ON dv.id=t.dataset_version_id WHERE l.token=$1`,
+          [resource.lockToken],
+        )).rows[0]?.project_id;
+      }
+      if (projectId) await resourceAccess.assertProjectWrite(actor, projectId);
+      return true;
+    },
+    audit: ({ action, actor, entityType, entityId, details }) => accessControl.writeAudit({
+      actorUserId: actor.id,
+      action: `collaboration.${action}`,
+      resourceType: entityType,
+      resourceId: entityId,
+      details,
+    }),
+  });
+  await collaborationService.ensureSchema();
+  multiUserRouter = createMultiUserRouter({
+    accessControl,
+    collaborationService,
+    loginUser,
+    registerUser,
+    listUsers: accessControl.listUsers,
+    updateUser: async (userId, body, actor) => {
+      accessControl.requireAdmin(actor);
+      if (body.status) await accessControl.setUserStatus(userId, body.status, actor);
+      const role = body.role === undefined ? null : String(body.role).toLowerCase();
+      if (role !== null && !["admin", "user"].includes(role)) throw httpError(400, "role must be admin or user");
+      const displayName = body.displayName ?? body.display_name ?? null;
+      if (!body.status && role === null && displayName === null) throw httpError(400, "no user fields to update");
+      const row = (await query(
+        `UPDATE app_users SET role=COALESCE($1,role), display_name=COALESCE($2,display_name), updated_at=now()
+         WHERE id=$3 RETURNING *`,
+        [role, displayName === null ? null : String(displayName).trim(), userId],
+      )).rows[0];
+      if (!row) throw httpError(404, "user not found");
+      await accessControl.writeAudit({ actorUserId: actor.id, action: "user.update", resourceType: "user", resourceId: userId, details: { role, displayName } });
+      return accessControl.publicUser(row);
+    },
+    getUserPermissions: async (userId, actor) => {
+      if (String(userId) !== String(actor.id)) accessControl.requireAdmin(actor);
+      const row = (await query("SELECT role FROM app_users WHERE id=$1", [userId])).rows[0];
+      if (!row) throw httpError(404, "user not found");
+      if (row.role === "admin") return ["*"];
+      return (await query("SELECT permission FROM user_permissions WHERE user_id=$1 ORDER BY permission", [userId])).rows.map((item) => item.permission);
+    },
+    updateUserPermissions: accessControl.setUserPermissions,
+  });
   await cleanupLegacyHistoryProjects();
   await backfillUnknownScenes();
   console.log("Boot: ensureBucketSafe start");
@@ -6031,6 +6210,7 @@ async function main() {
   await store.ensureBucketSafe();
   console.log("Boot: ensureBucketSafe done");
   await ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
+  await resourceAccess.initializeSchema();
   const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {
       console.error(error);

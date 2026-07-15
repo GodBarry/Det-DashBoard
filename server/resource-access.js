@@ -87,8 +87,7 @@ function createResourceAccess(dependencies = {}) {
       name TEXT NOT NULL,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
-    const applied = await query("SELECT version FROM resource_access_schema_migrations WHERE version=1");
-    if (applied.rows.length) return { version: 1 };
+    await query("SELECT version FROM resource_access_schema_migrations WHERE version=1");
 
     await transaction(async (client) => {
       const adminId = await getAdminId(client.query.bind(client));
@@ -97,7 +96,7 @@ function createResourceAccess(dependencies = {}) {
         await client.query(`ALTER TABLE ${tableSql} ADD COLUMN IF NOT EXISTS owner_user_id UUID REFERENCES app_users(id)`);
         await client.query(`ALTER TABLE ${tableSql} ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'`);
         await client.query(`UPDATE ${tableSql} SET owner_user_id=$1 WHERE owner_user_id IS NULL`, [adminId]);
-        await client.query(`ALTER TABLE ${tableSql} ALTER COLUMN owner_user_id SET NOT NULL`);
+        await client.query(`ALTER TABLE ${tableSql} ALTER COLUMN owner_user_id DROP NOT NULL`);
         await client.query(`ALTER TABLE ${tableSql} DROP CONSTRAINT IF EXISTS ${identifier(`${table}_visibility_check`, "constraint")}`);
         await client.query(`ALTER TABLE ${tableSql} ADD CONSTRAINT ${identifier(`${table}_visibility_check`, "constraint")} CHECK (visibility IN ('private','public'))`);
         await client.query(`CREATE INDEX IF NOT EXISTS ${identifier(`idx_${table}_owner`, "index")} ON ${tableSql}(owner_user_id)`);
@@ -108,7 +107,7 @@ function createResourceAccess(dependencies = {}) {
         const tableSql = identifier(table, "resource table");
         await client.query(`ALTER TABLE ${tableSql} ADD COLUMN IF NOT EXISTS created_by_user_id UUID REFERENCES app_users(id)`);
         await client.query(`UPDATE ${tableSql} SET created_by_user_id=$1 WHERE created_by_user_id IS NULL`, [adminId]);
-        await client.query(`ALTER TABLE ${tableSql} ALTER COLUMN created_by_user_id SET NOT NULL`);
+        await client.query(`ALTER TABLE ${tableSql} ALTER COLUMN created_by_user_id DROP NOT NULL`);
         await client.query(`CREATE INDEX IF NOT EXISTS ${identifier(`idx_${table}_created_by`, "index")} ON ${tableSql}(created_by_user_id)`);
       }
 
@@ -117,7 +116,7 @@ function createResourceAccess(dependencies = {}) {
       // Existing templates are platform-provided; newly-created templates retain the private default.
       await client.query("UPDATE training_templates SET visibility='public' WHERE owner_user_id=$1", [adminId]);
       await client.query(
-        "INSERT INTO resource_access_schema_migrations (version,name) VALUES (1,'resource ownership and visibility')",
+        "INSERT INTO resource_access_schema_migrations (version,name) VALUES (1,'resource ownership and visibility') ON CONFLICT (version) DO NOTHING",
       );
     });
     return { version: 1 };
@@ -147,13 +146,20 @@ function createResourceAccess(dependencies = {}) {
     if (permission === "read" && row.visibility === VISIBILITIES.PUBLIC) return row;
     const currentActor = requireActor(actor);
     if (canOwn(currentActor, row, definition.ownerColumn)) return row;
-    const aclPermission = permission === "read" ? (permissions.VIEW || "asset:view") : (permissions.EDIT || "asset:edit");
+    const aclPermission = permission === "read"
+      ? (permissions.VIEW || "asset:view")
+      : permission === "delete" ? (permissions.DELETE || "asset:delete") : (permissions.EDIT || "asset:edit");
     if (await hasAcl(currentActor, definition.resourceType, row.id, aclPermission, false)) return row;
+    if (table === "model_revisions" && row.model_id) {
+      await assertIndependentAccess("model_clusters", row.model_id, currentActor, permission);
+      return row;
+    }
     fail(403, `${permission} access denied for ${definition.resourceType.replaceAll("_", " ")}`);
   }
 
   const assertProjectRead = (actor, project) => assertIndependentAccess("projects", project, actor, "read");
   const assertProjectWrite = (actor, project) => assertIndependentAccess("projects", project, actor, "write");
+  const assertProjectDelete = (actor, project) => assertIndependentAccess("projects", project, actor, "delete");
 
   async function assertRuntimeJobAccess(table, actor, value, permission) {
     const definition = definitionFor(table);
@@ -164,11 +170,6 @@ function createResourceAccess(dependencies = {}) {
     if (canOwn(currentActor, row, definition.ownerColumn)) return row;
     const aclPermission = permission === "read" ? (permissions.VIEW || "asset:view") : (permissions.EDIT || "asset:edit");
     if (await hasAcl(currentActor, definition.resourceType, row.id, aclPermission, false)) return row;
-    if (row.dataset_project_id) {
-      return permission === "read"
-        ? assertProjectRead(currentActor, row.dataset_project_id).then(() => row)
-        : assertProjectWrite(currentActor, row.dataset_project_id).then(() => row);
-    }
     fail(403, `${permission} access denied for ${definition.resourceType.replaceAll("_", " ")}`);
   }
 
@@ -258,6 +259,8 @@ function createResourceAccess(dependencies = {}) {
     initialize: initializeSchema,
     assertProjectRead,
     assertProjectWrite,
+    assertProjectDelete,
+    assertIndependentAccess,
     assertTrainingJobRead,
     assertTrainingJobWrite,
     assertInferenceJobRead,

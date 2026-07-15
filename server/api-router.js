@@ -272,6 +272,7 @@ function createMultiUserRouter(deps = {}) {
   const authenticate = deps.authenticate || pickFunction(accessControl, ["authenticateRequest", "authenticateToken", "resolveSession"], true);
   const adminGuard = deps.requireAdmin || pickFunction(accessControl, ["requireAdmin"]);
   const login = pickFunction(deps, ["authenticateCredentials", "loginUser", "login"]);
+  const register = pickFunction(deps, ["registerUser", "register"]);
   const listUsers = pickFunction(deps, ["listUsers"]);
   const updateUser = pickFunction(deps, ["updateUser"]);
   const getUserPermissions = pickFunction(deps, ["getUserPermissions", "listUserPermissions"]);
@@ -291,6 +292,14 @@ function createMultiUserRouter(deps = {}) {
     const authenticated = await login(body, req);
     const user = authenticated?.user || authenticated;
     if (!user?.id) throw httpError(401, "invalid credentials");
+    const session = await accessControl.createSession(user, clientMetadata(req));
+    return { ...session, user: session.user || accessControl.publicUser?.(user) || user };
+  });
+  router.post("/api/auth/register", { access: "public" }, async ({ body, req }) => {
+    if (!register) throw httpError(501, "registration is not configured");
+    const registered = await register(body, req);
+    const user = registered?.user || registered;
+    if (!user?.id) throw httpError(500, "registration did not return a user");
     const session = await accessControl.createSession(user, clientMetadata(req));
     return { ...session, user: session.user || accessControl.publicUser?.(user) || user };
   });
