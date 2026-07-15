@@ -785,6 +785,7 @@ async function ensureRuntimeSchema() {
       dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
       dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
       model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
+      generated_model_version_id UUID,
       status TEXT NOT NULL DEFAULT 'pending',
       priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1054,6 +1055,7 @@ async function ensureRuntimeSchema() {
         dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
         dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
         model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
+        generated_model_version_id UUID,
         status TEXT NOT NULL DEFAULT 'pending',
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1211,6 +1213,7 @@ async function ensureRuntimeSchema() {
         dataset_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
         dataset_snapshot_id UUID,
         model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
+        generated_model_version_id UUID,
         status TEXT NOT NULL DEFAULT 'pending',
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1321,6 +1324,32 @@ async function ensureRuntimeSchema() {
     if (process.env.RUN_ML_SCHEMA === "true") await seedMlRuntimeConfig();
   }
   if (process.env.RUN_EXTENDED_SCHEMA === "true") await seedMlRuntimeConfig();
+
+  const modelArtifactMigrationStatements = [
+    `ALTER TABLE IF EXISTS runtime_training_jobs
+       ADD COLUMN IF NOT EXISTS generated_model_version_id UUID`,
+    `DO $$
+     BEGIN
+       IF to_regclass('runtime_training_jobs') IS NOT NULL
+          AND to_regclass('model_revisions') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='runtime_training_jobs_generated_model_version_fk'
+          ) THEN
+         ALTER TABLE runtime_training_jobs
+           ADD CONSTRAINT runtime_training_jobs_generated_model_version_fk
+           FOREIGN KEY (generated_model_version_id) REFERENCES model_revisions(id) ON DELETE SET NULL;
+       END IF;
+     END $$`,
+    `DELETE FROM model_files newer
+       USING model_files older
+       WHERE newer.model_version_id=older.model_version_id
+         AND newer.path=older.path
+         AND (newer.created_at, newer.id) < (older.created_at, older.id)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_model_files_version_path_unique
+       ON model_files (model_version_id, path)`,
+  ];
+  for (const sql of modelArtifactMigrationStatements) await query(sql);
 
 }
 
@@ -2806,7 +2835,22 @@ async function listModelVersions(modelId) {
     where.push(`mv.model_id=$${params.length}`);
   }
   const rows = await query(
-    `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name
+    `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name,
+       COALESCE((
+         SELECT jsonb_agg(
+           jsonb_build_object(
+             'id', mf.id,
+             'artifact_type', mf.artifact_type,
+             'path', mf.path,
+             'size', mf.size,
+             'sha256', mf.sha256,
+             'metadata_json', mf.metadata_json,
+             'created_at', mf.created_at
+           ) ORDER BY mf.created_at, mf.id
+         )
+         FROM model_files mf
+         WHERE mf.model_version_id=mv.id
+       ), '[]'::jsonb) AS artifacts
      FROM model_revisions mv
      JOIN model_clusters m ON m.id=mv.model_id
      LEFT JOIN projects p ON p.id=mv.dataset_project_id
@@ -4405,30 +4449,28 @@ async function claimTrainingJob(workerId) {
   });
 }
 
-async function scanArtifacts(job, modelVersionId) {
-  const root = job.output_root;
-  const files = walk(root).filter((file) => fs.statSync(file).isFile());
-  const saved = [];
-  for (const file of files) {
-    const rel = path.relative(root, file).replace(/\\/g, "/");
-    const ext = path.extname(file).toLowerCase();
-    const artifactType = ext === ".pt" || ext === ".onnx" ? "weights" : ext === ".png" || ext === ".jpg" ? "figure" : ext === ".yaml" || ext === ".json" ? "config" : "file";
-    const objectKey = `ml/artifacts/training/${job.id}/${rel}`;
-    await store.putFile(objectKey, file);
-    const stat = fs.statSync(file);
-    const sha = stat.size < 1024 * 1024 * 1024 ? await hashFile(file).catch(() => null) : null;
-    const row = (await query(
-      `INSERT INTO model_files (model_version_id, training_job_id, artifact_type, path, size, sha256, metadata_json)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [modelVersionId, job.id, artifactType, objectKey, stat.size, sha, JSON.stringify({ localPath: file, relativePath: rel })],
-    )).rows[0];
-    saved.push(row);
+async function ensureTrainingModelRevision(job) {
+  if (job.generated_model_version_id) {
+    const generated = (await query("SELECT * FROM model_revisions WHERE id=$1", [job.generated_model_version_id])).rows[0];
+    if (generated) return generated;
   }
-  return saved;
-}
-
-async function finishTrainingJob(job) {
-  const modelId = job.model_id || (await createMlModel({ name: `${job.name}_model`, taskType: "detect", framework: "ultralytics", description: "Auto-created from training job" })).id;
+  const existing = (await query(
+    "SELECT * FROM model_revisions WHERE training_job_id=$1 ORDER BY created_at, id LIMIT 1",
+    [job.id],
+  )).rows[0];
+  if (existing) {
+    await query(
+      "UPDATE runtime_training_jobs SET model_id=$1, generated_model_version_id=$2 WHERE id=$3",
+      [existing.model_id, existing.id, job.id],
+    );
+    return existing;
+  }
+  const modelId = job.model_id || (await createMlModel({
+    name: `${job.name}_model`,
+    taskType: "detect",
+    framework: "ultralytics",
+    description: "Auto-created from training job",
+  })).id;
   const project = (await query("SELECT name FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
   const params = job.params_json || {};
   const prefix = `detect_${project?.name || "dataset"}_yolo_ep${Number(params.epochs || job.total_epochs || 0) || "x"}_${dateCode()}`;
@@ -4436,14 +4478,78 @@ async function finishTrainingJob(job) {
   const version = (await query(
     `INSERT INTO model_revisions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
      VALUES ($1,$2,$3,$4,$5,'candidate',$6,$7) RETURNING *`,
-    [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify(job.params_json || {}), job.output_root],
+    [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify(params), job.output_root],
   )).rows[0];
-  const artifacts = await scanArtifacts(job, version.id);
   await query(
-    "UPDATE runtime_training_jobs SET model_id=$1, status='done', progress=100, message=$2, finished_at=now(), heartbeat_at=now() WHERE id=$3",
-    [modelId, `训练完成，生成模型版本 ${version.version_name}，登记 ${artifacts.length} 个 artifact`, job.id],
+    "UPDATE runtime_training_jobs SET model_id=$1, generated_model_version_id=$2 WHERE id=$3",
+    [modelId, version.id, job.id],
   );
-  await appendTrainingLog(job.id, "system", `model version created: ${version.version_name}; artifacts=${artifacts.length}`);
+  await appendTrainingLog(job.id, "system", `model version created: ${version.version_name}`);
+  return version;
+}
+
+async function syncTrainingWeightArtifacts(job, modelVersionId) {
+  const root = job.output_root;
+  if (!root || !fs.existsSync(root)) return [];
+  const files = walk(root).filter((file) => {
+    if (!fs.statSync(file).isFile()) return false;
+    const parts = path.relative(root, file).split(path.sep).map((part) => part.toLowerCase());
+    return parts.includes("weights") && [".pt", ".pth", ".onnx"].includes(path.extname(file).toLowerCase());
+  });
+  const saved = [];
+  for (const file of files) {
+    const rel = path.relative(root, file).replace(/\\/g, "/");
+    const objectKey = `ml/artifacts/training/${job.id}/${rel}`;
+    const stat = fs.statSync(file);
+    const previous = (await query(
+      "SELECT * FROM model_files WHERE model_version_id=$1 AND path=$2",
+      [modelVersionId, objectKey],
+    )).rows[0];
+    const previousMeta = previous?.metadata_json || {};
+    if (previous && Number(previous.size) === stat.size && Number(previousMeta.sourceMtimeMs) === stat.mtimeMs) {
+      saved.push(previous);
+      continue;
+    }
+    await store.putFile(objectKey, file);
+    const sha = stat.size < 1024 * 1024 * 1024 ? await hashFile(file).catch(() => null) : null;
+    const baseName = path.basename(file).toLowerCase();
+    const epochMatch = baseName.match(/^epoch(\d+)\.(?:pt|pth|onnx)$/);
+    const weightRole = baseName.startsWith("best.") ? "best" : baseName.startsWith("last.") ? "last" : epochMatch ? "epoch" : "other";
+    const metadata = {
+      localPath: file,
+      relativePath: rel,
+      weightRole,
+      epoch: epochMatch ? Number(epochMatch[1]) : null,
+      sourceMtimeMs: stat.mtimeMs,
+      uploadedAt: new Date().toISOString(),
+    };
+    const row = (await query(
+      `INSERT INTO model_files (model_version_id, training_job_id, artifact_type, path, size, sha256, metadata_json)
+       VALUES ($1,$2,'weights',$3,$4,$5,$6)
+       ON CONFLICT (model_version_id, path) DO UPDATE SET
+         training_job_id=EXCLUDED.training_job_id,
+         artifact_type=EXCLUDED.artifact_type,
+         size=EXCLUDED.size,
+         sha256=EXCLUDED.sha256,
+         metadata_json=EXCLUDED.metadata_json
+       RETURNING *`,
+      [modelVersionId, job.id, objectKey, stat.size, sha, JSON.stringify(metadata)],
+    )).rows[0];
+    saved.push(row);
+  }
+  return saved;
+}
+
+async function finalizeTrainingModelRevision(job, version) {
+  const artifacts = await syncTrainingWeightArtifacts(job, version.id);
+  await query(
+    `UPDATE runtime_training_jobs
+     SET model_id=$1, generated_model_version_id=$2, status='done', progress=100,
+         message=$3, finished_at=now(), heartbeat_at=now()
+     WHERE id=$4`,
+    [version.model_id, version.id, `Training completed; model version ${version.version_name}; registered ${artifacts.length} weight artifacts`, job.id],
+  );
+  await appendTrainingLog(job.id, "system", `model version finalized: ${version.version_name}; weight artifacts=${artifacts.length}`);
 }
 
 function parseMetricLine(line) {
@@ -4462,9 +4568,22 @@ function parseMetricLine(line) {
 }
 
 async function runTrainingJob(job, workerId) {
+  let version = null;
+  let artifactTimer = null;
+  let artifactSyncPromise = null;
+  const syncWeights = async () => {
+    if (!version) return [];
+    if (artifactSyncPromise) return artifactSyncPromise;
+    artifactSyncPromise = syncTrainingWeightArtifacts(job, version.id).finally(() => {
+      artifactSyncPromise = null;
+    });
+    return artifactSyncPromise;
+  };
   try {
     fs.mkdirSync(job.output_root, { recursive: true });
     const snapshot = await createDatasetSnapshotForTraining(job);
+    job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
+    version = await ensureTrainingModelRevision(job);
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     if (job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
       const weightPath = await findWeightArtifact(job.params_json.initialModelVersionId);
@@ -4478,6 +4597,9 @@ async function runTrainingJob(job, workerId) {
     await appendTrainingLog(job.id, "system", `command: ${command} ${args.join(" ")}`);
     const child = spawn(command, args, { cwd: job.output_root, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
     await query("UPDATE runtime_training_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]);
+    artifactTimer = setInterval(() => {
+      syncWeights().catch((error) => console.warn(`training artifact sync failed for ${job.id}:`, error.message));
+    }, Number(process.env.TRAINING_ARTIFACT_SYNC_INTERVAL_MS || 2000));
     const onData = (stream) => async (chunk) => {
       const text = chunk.toString("utf8");
       for (const line of text.split(/\r?\n/).filter(Boolean)) {
@@ -4491,11 +4613,16 @@ async function runTrainingJob(job, workerId) {
     child.stdout.on("data", onData("stdout"));
     child.stderr.on("data", onData("stderr"));
     const exitCode = await new Promise((resolve) => child.on("close", resolve));
+    clearInterval(artifactTimer);
+    artifactTimer = null;
+    await syncWeights();
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     if (!job || job.status === "paused") return;
     if (exitCode !== 0) throw new Error(`训练命令退出码 ${exitCode}`);
-    await finishTrainingJob(job);
+    await finalizeTrainingModelRevision(job, version);
   } catch (error) {
+    if (artifactTimer) clearInterval(artifactTimer);
+    await syncWeights().catch((syncError) => appendTrainingLog(job.id, "error", `final artifact sync failed: ${syncError.message}`));
     await appendTrainingLog(job.id, "error", error.stack || error.message);
     await query("UPDATE runtime_training_jobs SET status='failed', message=$1, finished_at=now(), heartbeat_at=now() WHERE id=$2", [error.message || "训练失败", job.id]).catch(() => {});
   }
@@ -5208,9 +5335,3 @@ main()
     console.error(error);
     process.exit(1);
   });
-
-
-
-
-
-
