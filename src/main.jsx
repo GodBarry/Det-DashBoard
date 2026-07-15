@@ -1056,6 +1056,19 @@ loadMlPlatform();
 
 }
 
+function requeueInferenceJob(jobId) {
+  fetch(`/api/ml/inference-jobs/${jobId}/requeue`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  })
+    .then((r) => Promise.all([r.status, r.json().catch(() => ({}))]))
+    .then(([status, data]) => {
+      if (status >= 400) throw new Error(data.error || "重新开始推理任务失败");
+      loadMlPlatform();
+    })
+    .catch((err) => setError(err.message || "重新开始推理任务失败"));
+}
+
 function deleteInferenceJobs(jobIds) {
 
 const ids = Array.from(new Set((jobIds || []).filter(Boolean)));
@@ -2226,6 +2239,8 @@ deleteInferenceJob={deleteInferenceJob}
 
 deleteInferenceJobs={deleteInferenceJobs}
 
+requeueInferenceJob={requeueInferenceJob}
+
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 
 activeInferenceResult={activeInferenceResult}
@@ -2831,6 +2846,8 @@ submitInferenceJob,
 deleteInferenceJob,
 
 deleteInferenceJobs,
+
+requeueInferenceJob,
 
 moveRuntimeQueueJob,
 
@@ -3556,7 +3573,7 @@ function TrainingWorkspace({
 
         </div>
 
-        <section className="training-queue reference-queue"><h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2><div className="training-table-head"><span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span><span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span></div>{queueRows.map((job, index) => (<div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}><b>{job.name || '训练任务'}</b><span>{job.dataset_project_name || selectedProject.name || '--'}</span><span>{job.model_name || selectedModel.name || '--'}</span><em className={'status-badge ' + (String(job.status).includes('fail') ? 'status-failed' : '')}>{runStatusLabel(job.status)}</em><i className="mini-progress"><b style={{ width: (job.progress ?? progress) + '%' }} /></i><span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span><span>0.{482 + index * 13}</span><span>{index ? '71.11%' : '71.10%'}</span><span>{index ? '--' : '18m'}</span><div className="training-row-actions"><button title={"\u67e5\u770b\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0a\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0b\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && !["done", "failed", "cancelled"].includes(job.status) && <button title={job.status === "paused" ? "\u7ee7\u7eed\u4efb\u52a1" : "\u6682\u505c\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>}{job.id && !String(job.id).startsWith("mock-") && <button className="danger-icon" title={"\u5220\u9664\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>}<button title={"\u6253\u5f00 TensorBoard"} onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button></div></div>))}</section>
+        <section className="training-queue reference-queue"><h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2><div className="training-table-head"><span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span><span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span></div>{queueRows.map((job, index) => (<div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}><b>{job.name || '训练任务'}</b><span>{job.dataset_project_name || selectedProject.name || '--'}</span><span>{job.model_name || selectedModel.name || '--'}</span><em className={'status-badge ' + (String(job.status).includes('fail') ? 'status-failed' : '')}>{runStatusLabel(job.status)}</em><i className="mini-progress"><b style={{ width: (job.progress ?? progress) + '%' }} /></i><span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span><span>0.{482 + index * 13}</span><span>{index ? '71.11%' : '71.10%'}</span><span>{index ? '--' : '18m'}</span><div className="training-row-actions"><button title={"\u67e5\u770b\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0a\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0b\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u91cd\u65b0\u5f00\u59cb"} onClick={(event) => { event.stopPropagation(); requeueTrainingJob?.(job.id); }}><RefreshCw size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && !["done", "failed", "cancelled"].includes(job.status) && <button title={job.status === "paused" ? "\u7ee7\u7eed\u4efb\u52a1" : "\u6682\u505c\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>}{job.id && !String(job.id).startsWith("mock-") && <button className="danger-icon" title={"\u5220\u9664\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>}<button title={"\u6253\u5f00 TensorBoard"} onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button></div></div>))}</section>
 
       </main>
 
@@ -5986,7 +6003,7 @@ return (
                 <div className="queue-actions">
                   <span className="queue-action-row">
                     <button type="button" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
-                    <button type="button"><RefreshCw size={14} /></button>
+                    <button type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RefreshCw size={14} /></button>
                     <button type="button" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
                   </span>
                   <span className="queue-priority">

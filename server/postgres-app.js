@@ -3235,6 +3235,21 @@ async function deleteInferenceJob(jobId) {
   return { deleted: true, id: deleted.rows[0].id };
 }
 
+async function requeueInferenceJob(jobId) {
+  const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw new Error("推理任务不存在");
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const updated = (await query(
+    `UPDATE runtime_inference_jobs
+     SET status='pending', progress=0, metrics_json='{}'::jsonb, message=$1,
+         started_at=NULL, finished_at=NULL, heartbeat_at=NULL, worker_id='', process_pid=NULL,
+         created_at=now(), priority=COALESCE(priority, 0)
+     WHERE id=$2 RETURNING *`,
+    ["推理任务已重新排队，等待 worker 接管", jobId],
+  )).rows[0];
+  return { ...updated, params_json: params };
+}
+
 async function createInferenceJob(body = {}) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
   if (!datasetProjectId) throw new Error("请选择推理数据集项目");
@@ -4992,6 +5007,8 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req)) });
   const inferencePriorityMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
   if (method === "PATCH" && inferencePriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction) });
+  const requeueInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/requeue$/);
+  if (method === "POST" && requeueInferenceMatch) return sendJson(res, { job: await requeueInferenceJob(requeueInferenceMatch[1]) });
   const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
   if (method === "DELETE" && deleteInferenceMatch) return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1]));
   const inferenceEvaluationMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/evaluation$/);
@@ -5190,8 +5207,6 @@ main()
     console.error(error);
     process.exit(1);
   });
-
-
 
 
 
