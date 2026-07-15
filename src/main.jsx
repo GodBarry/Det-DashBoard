@@ -164,9 +164,32 @@ function sortRuntimeJobsByTime(jobs = []) {
     return rightTime - leftTime;
   });
 }
+
+const uiStateStorageKey = "det-dashboard-ui-state-v1";
+const restorableViews = new Set(["home", "workspace", "models", "training", "inference", "evaluation"]);
+
+function readUiState() {
+  try {
+    return JSON.parse(window.localStorage.getItem(uiStateStorageKey) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function updateUiState(patch) {
+  try {
+    window.localStorage.setItem(uiStateStorageKey, JSON.stringify({ ...readUiState(), ...patch }));
+  } catch {
+    // State restoration is best-effort when storage is unavailable.
+  }
+}
+
 function App() {
 
-const [view, setView] = useState("home");
+const restoredUiStateRef = useRef(readUiState());
+const restoredUiState = restoredUiStateRef.current;
+
+const [view, setView] = useState(() => restorableViews.has(restoredUiState.view) ? restoredUiState.view : "home");
 
 const [theme, setTheme] = useState("light");
 
@@ -190,7 +213,7 @@ const [showSettings, setShowSettings] = useState(false);
 
 const [projects, setProjects] = useState([]);
 
-const [currentFolderId, setCurrentFolderId] = useState(null);
+const [currentFolderId, setCurrentFolderId] = useState(() => restoredUiState.currentFolderId || null);
 
 const [trashProjects, setTrashProjects] = useState([]);
 
@@ -280,9 +303,9 @@ const [assetLinks, setAssetLinks] = useState([]);
 
 const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
 
-const [trainingForm, setTrainingForm] = useState({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0" });
+const [trainingForm, setTrainingForm] = useState(() => ({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0", ...(restoredUiState.trainingForm || {}) }));
 
-const [inferenceForm, setInferenceForm] = useState({
+const [inferenceForm, setInferenceForm] = useState(() => ({
 
 name: "",
 
@@ -334,17 +357,23 @@ createLabelVersion: false,
 
 fakeReferenceMode: false,
 
-});
+...(restoredUiState.inferenceForm || {}),
+
+}));
 
 const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
 
 const [envForm, setEnvForm] = useState({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
 
-const [activeTrainingJobId, setActiveTrainingJobId] = useState(null);
+const [activeTrainingJobId, setActiveTrainingJobId] = useState(() => restoredUiState.activeTrainingJobId || null);
 
 const [trainingLogs, setTrainingLogs] = useState([]);
 
 const importRefreshKeyRef = useRef("");
+
+const restoredActiveProjectIdRef = useRef(restoredUiState.view === "workspace" ? restoredUiState.activeProjectId || null : null);
+
+const restoredSelectedImageIdRef = useRef(restoredUiState.selectedImageId || null);
 
 const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
@@ -408,11 +437,41 @@ useEffect(() => {
 
 if (!["training", "inference", "models", "evaluation"].includes(view)) return;
 
+loadMlPlatform();
+
 const timer = window.setInterval(() => loadMlPlatform(), 2500);
 
 return () => window.clearInterval(timer);
 
 }, [view]);
+
+useEffect(() => {
+  const persistedActiveProjectId = activeProject?.id || (view === "workspace" ? restoredActiveProjectIdRef.current : null);
+  const persistedSelectedImageId = selected?.id || (view === "workspace" ? restoredSelectedImageIdRef.current : null);
+  updateUiState({
+    view,
+    currentFolderId,
+    activeProjectId: persistedActiveProjectId,
+    selectedImageId: persistedSelectedImageId,
+    activeTrainingJobId,
+    trainingForm: {
+      datasetProjectId: trainingForm.datasetProjectId,
+      modelId: trainingForm.modelId,
+      initialModelVersionId: trainingForm.initialModelVersionId,
+      templateId: trainingForm.templateId,
+      taskType: trainingForm.taskType,
+      pythonEnvId: trainingForm.pythonEnvId,
+    },
+    inferenceForm: {
+      datasetProjectId: inferenceForm.datasetProjectId,
+      modelId: inferenceForm.modelId,
+      modelVersionId: inferenceForm.modelVersionId,
+      templateId: inferenceForm.templateId,
+      taskType: inferenceForm.taskType,
+      pythonEnvId: inferenceForm.pythonEnvId,
+    },
+  });
+}, [view, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
 useEffect(() => {
 
@@ -586,7 +645,13 @@ const rows = d.projects || [];
 
 setProjects(rows);
 
-setActiveProject((current) => current ? rows.find((project) => project.id === current.id) || null : null);
+setActiveProject((current) => {
+  const projectId = current?.id || restoredActiveProjectIdRef.current;
+  restoredActiveProjectIdRef.current = null;
+  return projectId ? rows.find((project) => project.id === projectId) || null : null;
+});
+
+setCurrentFolderId((current) => current && rows.some((project) => project.id === current) ? current : null);
 
 }).catch(() => {});
 
@@ -1180,6 +1245,16 @@ if (filters[key]?.length) params.set(key, filters[key].join(","));
 fetch(`/api/projects/${projectId}/images?${params}`).then((r) => r.json()).then((d) => {
 
 setItems(d.items || []);
+
+const restoredSelected = restoredSelectedImageIdRef.current
+  ? d.items?.find((item) => item.id === restoredSelectedImageIdRef.current)
+  : null;
+
+if (restoredSelected) {
+  setSelected(restoredSelected);
+  restoredSelectedImageIdRef.current = null;
+  return;
+}
 
 if (!selected && d.items?.[0]) setSelected(d.items[0]);
 
@@ -2909,6 +2984,12 @@ const [activeEvaluationTask, setActiveEvaluationTask] = useState(null);
 
 const [activeEvaluationReportTask, setActiveEvaluationReportTask] = useState(null);
 
+const [selectedEvaluationTaskId, setSelectedEvaluationTaskId] = useState(() => readUiState().evaluation?.selectedTaskId || "");
+
+useEffect(() => {
+  updateUiState({ evaluation: { selectedTaskId: selectedEvaluationTaskId } });
+}, [selectedEvaluationTaskId]);
+
 const evaluationTasks = inferenceJobs
 
 .filter((job) => !hiddenEvaluationJobIds.includes(job.id))
@@ -3116,6 +3197,10 @@ type={evaluationType}
 setType={setEvaluationType}
 
 tasks={filteredEvaluationTasks}
+
+selectedTaskId={selectedEvaluationTaskId}
+
+setSelectedTaskId={setSelectedEvaluationTaskId}
 
 projects={projects}
 
@@ -4604,9 +4689,7 @@ function EvaluationSampleViewer({ rows = [], initialIndex = 0, filter, onClose }
   );
 
 }
-function EvaluationPage({ tasks }) {
-
-const [selectedTaskId, setSelectedTaskId] = useState(tasks[0]?.id || "");
+function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId }) {
 
 const [searchText, setSearchText] = useState("");
 
@@ -4623,6 +4706,8 @@ const [errorFilter, setErrorFilter] = useState("false_negative");
   const [sampleViewer, setSampleViewer] = useState(null);
 
 useEffect(() => {
+
+if (!tasks.length) return;
 
 if (!tasks.some((task) => task.id === selectedTaskId)) setSelectedTaskId(tasks[0]?.id || "");
 
