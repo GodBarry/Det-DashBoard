@@ -3,7 +3,6 @@ const fs = require("fs");
 const path = require("path");
 const url = require("url");
 const crypto = require("crypto");
-const YAML = require("yaml");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
 const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
@@ -25,25 +24,28 @@ const {
 const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats");
 const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 const { evaluateDetections } = require("./evaluation-metrics");
-
-function sendJson(res, data, code = 200) {
-  res.writeHead(code, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  res.end(JSON.stringify(data));
-}
-
-function sendError(res, code, message) {
-  sendJson(res, { error: message }, code);
-}
-
-function httpError(statusCode, message) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  return error;
-}
+const { sendJson, sendError, httpError } = require("./http-response");
+const {
+  imageObjectKey,
+  videoObjectKey,
+  rawLabelObjectKey,
+  pythonEnvObjectKey,
+  pythonEnvManifestKey,
+  modelWeightManifestKey,
+  serverPythonEnvObjectKey,
+  algorithmAssetPrefix,
+  algorithmManifestKey,
+  algorithmAdapterKey,
+} = require("./storage-keys");
+const { discoverDatasetSplitPlan, splitForImage, serializeSplitPlan } = require("./dataset-split-plan");
+const {
+  normalizeTrainingDatasetSplits,
+  normalizeTrainingDatasetFilters,
+  trainingImageMatchesFilter,
+  yamlScalar,
+  yoloClassLine,
+  parseMetricLine,
+} = require("./training-format");
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
@@ -273,49 +275,6 @@ function listFolders(target, scope = "browse") {
     parent: allDrives && parent === current ? "__drives__" : (parent && parent !== current && (allDrives || isInsideRoot(root, parent)) ? toDisplayDataPath(parent) : ""),
     dirs,
   };
-}
-
-function imageObjectKey(sha256, ext) {
-  return `objects/images/sha256/${sha256.slice(0, 2)}/${sha256}${ext}`;
-}
-
-function videoObjectKey(sha256, ext) {
-  return `objects/videos/sha256/${sha256.slice(0, 2)}/${sha256}${ext}`;
-}
-
-function rawLabelObjectKey(projectId, versionId, name) {
-  return `objects/raw-labels/${projectId}/${versionId}/${name}`;
-}
-
-function pythonEnvObjectKey(sha256, name) {
-  const safeName = path.basename(name || `${sha256}.tar.gz`).replace(/[\\/:*?"<>|]/g, "_");
-  return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/${safeName}`;
-}
-
-function pythonEnvManifestKey(sha256) {
-  return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/manifest.json`;
-}
-
-function modelWeightManifestKey(modelId, versionId) {
-  return `ml/artifacts/models/${modelId}/${versionId}/manifest.json`;
-}
-
-function serverPythonEnvObjectKey(sha256) {
-  return `envs/python/server-python/${sha256.slice(0, 2)}/${sha256}/metadata.json`;
-}
-
-function algorithmAssetPrefix(algorithmKey, version = "builtin") {
-  const safeKey = cleanName(algorithmKey || "custom_algorithm", "algorithm").toLowerCase();
-  const safeVersion = cleanName(version || "builtin", "version").toLowerCase();
-  return `code-assets/algorithms/${safeKey}/${safeVersion}`;
-}
-
-function algorithmManifestKey(algorithmKey, version = "builtin") {
-  return `${algorithmAssetPrefix(algorithmKey, version)}/manifest.json`;
-}
-
-function algorithmAdapterKey(algorithmKey, version = "builtin") {
-  return `${algorithmAssetPrefix(algorithmKey, version)}/adapter.py`;
 }
 
 const builtinAlgorithmAssets = [
@@ -1480,111 +1439,6 @@ async function cleanupLegacyHistoryProjects() {
   }
 }
 
-function splitName(value) {
-  const match = String(value || "").toLowerCase().match(/(?:^|[\\/_\-.])(train(?:ing)?|val(?:id|idation)?|test)\d*(?:[\\/_\-.]|$)/);
-  if (!match) return "";
-  if (match[1] === "training") return "train";
-  if (match[1] === "valid" || match[1] === "validation") return "val";
-  return match[1];
-}
-
-function addSplitReference(plan, split, reference, baseDir, sourceRoot) {
-  if (!plan[split] || !reference) return;
-  const raw = String(reference).trim().replace(/^['"]|['"]$/g, "");
-  if (!raw || /^https?:\/\//i.test(raw)) return;
-  const candidates = [path.resolve(baseDir, raw), path.resolve(sourceRoot, raw)];
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate)) continue;
-    const stat = fs.statSync(candidate);
-    if (stat.isDirectory()) plan[split].directories.add(path.resolve(candidate));
-    else if (IMAGE_EXTS.has(path.extname(candidate).toLowerCase())) plan[split].files.add(imageKey(candidate));
-    else if (/\.txt$/i.test(candidate)) {
-      const lines = fs.readFileSync(candidate, "utf8").split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
-      for (const line of lines) addSplitReference(plan, split, line, path.dirname(candidate), sourceRoot);
-      plan[split].manifests.add(candidate);
-    }
-    break;
-  }
-}
-
-function discoverDatasetSplitPlan(sourceGroups) {
-  const plan = Object.fromEntries(["train", "val", "test"].map((name) => [name, { files: new Set(), directories: new Set(), manifests: new Set() }]));
-  for (const group of sourceGroups) {
-    const yamlFiles = group.files.filter((file) => /(^|[\\/])(data|dataset)\.ya?ml$/i.test(file));
-    for (const yamlFile of yamlFiles) {
-      try {
-        const document = YAML.parse(fs.readFileSync(yamlFile, "utf8")) || {};
-        const datasetRoot = document.path ? path.resolve(path.dirname(yamlFile), String(document.path)) : group.sourceRoot;
-        for (const split of ["train", "val", "test"]) {
-          const references = Array.isArray(document[split]) ? document[split] : [document[split]];
-          for (const reference of references) addSplitReference(plan, split, reference, datasetRoot, group.sourceRoot);
-          if (document[split]) plan[split].manifests.add(yamlFile);
-        }
-      } catch {}
-    }
-    for (const textFile of group.files.filter((file) => /(^|[\\/])(train|val|test)\.txt$/i.test(file))) {
-      const split = path.basename(textFile, path.extname(textFile)).toLowerCase();
-      addSplitReference(plan, split, textFile, path.dirname(textFile), group.sourceRoot);
-    }
-    for (const jsonFile of group.files.filter((file) => /\.json$/i.test(file))) {
-      const split = splitName(path.relative(group.sourceRoot, jsonFile));
-      if (!split) continue;
-      try {
-        const document = JSON.parse(fs.readFileSync(jsonFile, "utf8"));
-        if (!Array.isArray(document.images) || !Array.isArray(document.annotations)) continue;
-        const groupImages = group.images || group.files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
-        for (const image of document.images) {
-          const reference = String(image.file_name || "").replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-          const matches = groupImages.filter((file) => {
-            const relative = path.relative(group.sourceRoot, file).replace(/\\/g, "/").toLowerCase();
-            return relative === reference || relative.endsWith(`/${reference}`) || path.basename(relative) === path.basename(reference);
-          });
-          if (matches.length === 1) plan[split].files.add(imageKey(matches[0]));
-          else addSplitReference(plan, split, image.file_name, path.dirname(jsonFile), group.sourceRoot);
-        }
-        plan[split].manifests.add(jsonFile);
-      } catch {}
-    }
-  }
-  const active = Object.entries(plan).filter(([, entry]) => entry.files.size || entry.directories.size);
-  return active.length ? plan : null;
-}
-
-function splitForImage(file, splitPlan) {
-  if (!splitPlan) return "";
-  const resolved = path.resolve(file);
-  const key = imageKey(resolved);
-  for (const split of ["train", "val", "test"]) {
-    const entry = splitPlan[split];
-    if (entry.files.has(key)) return split;
-    if ([...entry.directories].some((directory) => resolved === directory || resolved.startsWith(`${directory}${path.sep}`))) return split;
-  }
-  return "";
-}
-
-function serializeSplitPlan(splitPlan, projectIds = {}) {
-  if (!splitPlan) return { detected: false, splits: {} };
-  const splits = {};
-  for (const split of ["train", "val", "test"]) {
-    const entry = splitPlan[split];
-    if (!entry.files.size && !entry.directories.size) continue;
-    const listedImageKeys = new Set(entry.files);
-    for (const directory of entry.directories) {
-      if (!fs.existsSync(directory)) continue;
-      for (const file of walk(directory)) {
-        if (fs.statSync(file).isFile() && IMAGE_EXTS.has(path.extname(file).toLowerCase())) listedImageKeys.add(imageKey(file));
-      }
-    }
-    splits[split] = {
-      projectId: projectIds[split] || null,
-      listedImages: listedImageKeys.size,
-      sourceDirectories: entry.directories.size,
-      manifests: [...entry.manifests].map(toDisplayDataPath),
-    };
-  }
-  return { detected: Object.keys(splits).length > 0, splits };
-}
-
 async function ensureSplitProjects(parentProject, splitPlan) {
   if (!splitPlan) return {};
   const ids = {};
@@ -1910,7 +1764,7 @@ async function importPath(body) {
     activeImportTasks.add(task);
   });
 
-  return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds) };
+  return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath) };
 }
 
 async function importCancelled(batchId) {
@@ -1969,7 +1823,7 @@ async function runImportBatch(batchId, project, body) {
   const splitProjectIds = Object.keys(body.splitProjectIds || {}).length
     ? body.splitProjectIds
     : await ensureSplitProjects(project, splitPlan);
-  const splitResult = serializeSplitPlan(splitPlan, splitProjectIds);
+  const splitResult = serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath);
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
@@ -3281,46 +3135,6 @@ async function streamModelArtifact(res, modelVersionId, artifactId) {
   stream.pipe(res);
 }
 
-function normalizeProjectIdList(value) {
-  const values = Array.isArray(value) ? value : (value ? [value] : []);
-  return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))];
-}
-
-function normalizeTrainingDatasetSplits(body = {}, params = {}, fallbackTrainProjectId = null) {
-  const requested = body.datasetSplits || body.dataset_splits || params.datasetSplits || {};
-  const read = (name) => normalizeProjectIdList(
-    body[`${name}ProjectIds`] || body[`${name}_project_ids`]
-      || requested[`${name}ProjectIds`] || requested[`${name}_project_ids`]
-      || body[`${name}ProjectId`] || body[`${name}_project_id`]
-      || requested[`${name}ProjectId`] || requested[`${name}_project_id`]
-      || (name === "train" ? fallbackTrainProjectId : null),
-  );
-  return { trainProjectIds: read("train"), valProjectIds: read("val"), testProjectIds: read("test") };
-}
-
-function normalizeTrainingDatasetFilters(body = {}, params = {}) {
-  const requested = body.datasetFilters || body.dataset_filters || params.datasetFilters || params.dataset_filters || {};
-  const list = (value) => [...new Set((Array.isArray(value) ? value : String(value || "").split(",")).map((item) => String(item || "").trim()).filter(Boolean))];
-  const normalize = (filter = {}) => ({
-    scenes: list(filter.scenes || filter.scene),
-    views: list(filter.views || filter.view),
-    modalities: list(filter.modalities || filter.modality),
-    labels: list(filter.labels || filter.label),
-    keywords: list(filter.keywords || filter.keyword),
-  });
-  return { train: normalize(requested.train), val: normalize(requested.val), test: normalize(requested.test) };
-}
-
-function trainingImageMatchesFilter(image, annotations = [], filter = {}) {
-  const includes = (values, value) => !values?.length || values.includes(String(value || ""));
-  if (!includes(filter.scenes, image.scene)) return false;
-  if (!includes(filter.views, image.view)) return false;
-  if (!includes(filter.modalities, image.modality)) return false;
-  if (filter.keywords?.length && !filter.keywords.some((value) => String(image.keyword || "").toLowerCase().includes(value.toLowerCase()))) return false;
-  if (filter.labels?.length && !annotations.some((annotation) => filter.labels.includes(String(annotation.label || "")))) return false;
-  return true;
-}
-
 async function presentTrainingJobs(jobs) {
   const selections = jobs.map((job) => normalizeTrainingDatasetSplits({}, job.params_json || {}, job.dataset_project_id));
   const ids = [...new Set(selections.flatMap((item) => [...item.trainProjectIds, ...item.valProjectIds, ...item.testProjectIds]))];
@@ -3829,26 +3643,6 @@ async function createInferenceJob(body = {}) {
     });
   });
   return updated.rows[0];
-}
-
-function yamlScalar(value) {
-  return JSON.stringify(String(value ?? ""));
-}
-
-function yoloClassLine(ann, width, height, labelIndex) {
-  const x = Number(ann.bbox_x || 0);
-  const y = Number(ann.bbox_y || 0);
-  const w = Number(ann.bbox_w || 0);
-  const h = Number(ann.bbox_h || 0);
-  const cx = (x + w / 2) / Math.max(1, Number(width || 1));
-  const cy = (y + h / 2) / Math.max(1, Number(height || 1));
-  return [
-    labelIndex,
-    Math.max(0, Math.min(1, cx)).toFixed(8),
-    Math.max(0, Math.min(1, cy)).toFixed(8),
-    Math.max(0, Math.min(1, w / Math.max(1, Number(width || 1)))).toFixed(8),
-    Math.max(0, Math.min(1, h / Math.max(1, Number(height || 1)))).toFixed(8),
-  ].join(" ");
 }
 
 async function writeObjectToFile(objectKey, targetPath) {
@@ -5508,21 +5302,6 @@ async function recordTrainingAssetLink(job, version, artifact) {
     output: { metrics, primaryArtifactId: artifact?.id || null },
   };
   await recordRuntimeAssetLink({ ...job, params_json: relationParams, model_version_id: version.id }, metrics);
-}
-
-function parseMetricLine(line) {
-  const metrics = [];
-  const patterns = [
-    ["box_loss", /box_loss[=: ]+([0-9.]+)/i],
-    ["cls_loss", /cls_loss[=: ]+([0-9.]+)/i],
-    ["dfl_loss", /dfl_loss[=: ]+([0-9.]+)/i],
-    ["map50", /mAP50(?:\S*)?[=: ]+([0-9.]+)/i],
-  ];
-  for (const [key, regex] of patterns) {
-    const match = String(line).match(regex);
-    if (match) metrics.push({ key, value: Number(match[1]) });
-  }
-  return metrics;
 }
 
 async function runTrainingJob(job, workerId) {
