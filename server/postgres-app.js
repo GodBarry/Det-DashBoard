@@ -5,9 +5,11 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
-const { pool, query, transaction } = require("./db");
-const store = require("./object-store");
+const { createRuntimeContext } = require("./bootstrap/runtime-context");
+const runtime = createRuntimeContext();
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = runtime.config;
+const { pool, query, transaction } = runtime.database;
+const store = runtime.store;
 const {
   IMAGE_EXTS,
   VIDEO_EXTS,
@@ -24,9 +26,7 @@ const {
 const { buildDatasetMatches, imageKey, shapeToBox } = require("./dataset-formats");
 const { normalizeExportFormat, labelmeDocument, cocoDocument, yoloDocuments } = require("./export-formats");
 const { evaluateDetections } = require("./evaluation-metrics");
-const { sendJson, sendError, httpError } = require("./http-response");
-const { createLifecycle } = require("./lifecycle");
-const { createStaticHandler } = require("./static-handler");
+const { sendJson, sendError, httpError } = runtime.http;
 const { createAccessControl } = require("./access-control");
 const { createResourceAccess } = require("./resource-access");
 const { createCollaborationService } = require("./collaboration-service");
@@ -53,11 +53,8 @@ const {
   parseMetricLine,
 } = require("./training-format");
 
-const lifecycle = createLifecycle();
-const staticHandler = createStaticHandler({
-  distRoot: path.resolve(__dirname, "..", "dist"),
-  sendError,
-});
+const lifecycle = runtime.lifecycle;
+const staticHandler = runtime.staticHandler;
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
