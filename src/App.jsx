@@ -89,6 +89,10 @@ X,
 } from "lucide-react";
 
 import { AuthDialog as AuthDialogView } from "./features/auth/AuthDialog.jsx";
+import { MainNav } from "./components/layout/MainNav.jsx";
+import { EvaluationConfusionMatrix } from "./features/evaluation/EvaluationConfusionMatrix.jsx";
+import { EvaluationCurve } from "./features/evaluation/EvaluationCurve.jsx";
+import { EvaluationSampleViewer } from "./features/evaluation/EvaluationSampleViewer.jsx";
 import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
 
 import { readUiState, restorableViews, updateUiState } from "./app/ui-state.js";
@@ -3253,6 +3257,8 @@ deleteInferenceJob={deleteInferenceJob}
 
 deleteInferenceJobs={deleteInferenceJobs}
 
+requeueInferenceJob={requeueInferenceJob}
+
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 
 />
@@ -4691,102 +4697,7 @@ function DrawerInputWithIcon({ copyIcon = false, ...inputProps }) {
 
 }
 
-const evaluationPalette = { pr: "#0d8f89", f1: "#7c3aed", precision: "#f59e0b", recall: "#2563eb" };
-
 const evaluationBarPalette = ["#0d8f89", "#2563eb", "#7c3aed", "#f59e0b", "#ef4444", "#10b981", "#06b6d4", "#f97316"];
-
-function EvaluationCurve({ kind = "pr", curves = [] }) {
-
-const points = curves.length ? curves : [{ confidence: 0, precision: 0, recall: 0, f1: 0 }];
-
-const xValue = (row) => kind === "pr" ? Number(row.recall || 0) : Number(row.confidence || 0);
-
-const yValue = (row) => kind === "pr" ? Number(row.precision || 0) : Number(row[kind] || 0);
-
-const ordered = kind === "pr" ? points.slice().sort((a, b) => xValue(a) - xValue(b)) : points;
-
-const stroke = evaluationPalette[kind] || evaluationPalette.pr;
-
-const path = ordered.map((row, index) => {
-
-const x = 38 + Math.max(0, Math.min(1, xValue(row))) * 372;
-
-const y = 202 - Math.max(0, Math.min(1, yValue(row))) * 178;
-
-return (index ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
-
-}).join(" ");
-
-return (
-
-<svg className={`evaluation-chart-svg chart-${kind}`} viewBox="0 0 430 224" preserveAspectRatio={kind === "pr" ? "xMidYMid meet" : "none"} aria-hidden="true">
-
-{[60, 95, 131, 166].map((y) => <line key={"y" + y} x1="38" y1={y} x2="410" y2={y} />)}
-
-{[100, 162, 224, 286, 348].map((x) => <line key={"x" + x} x1={x} y1="24" x2={x} y2="202" />)}
-
-<line className="axis" x1="38" y1="202" x2="410" y2="202" />
-
-<line className="axis" x1="38" y1="24" x2="38" y2="202" />
-
-{[0, .2, .4, .6, .8, 1].map((value, index) => <text key={"xt" + index} x={38 + index * 74.4} y="214" textAnchor="middle">{value.toFixed(1)}</text>)}
-
-{[0, .2, .4, .6, .8, 1].map((value, index) => <text key={"yt" + index} x="32" y={202 - index * 35.6} textAnchor="end">{value.toFixed(1)}</text>)}
-
-{kind === "pr" && <><text className="axis-title" x="224" y="221" textAnchor="middle">Recall</text><text className="axis-title" x="9" y="113" textAnchor="middle" transform="rotate(-90 9 113)">Precision</text></>}
-
-<path d={path} style={{ stroke }} />
-
-</svg>
-
-);
-
-}
-
-function EvaluationConfusionMatrix({ matrix }) {
-
-const labels = matrix?.labels || [];
-
-const values = matrix?.values || [];
-
-const maxValue = Math.max(1, ...values.flat());
-
-if (!labels.length) return <div className="empty-state">当前任务没有可用的混淆矩阵</div>;
-
-return (
-
-<div className="evaluation-live-matrix" style={{ "--matrix-size": labels.length }}>
-
-<div className="matrix-corner">真实 / 预测</div>
-
-{labels.map((label) => <b key={"head-" + label}>{label}</b>)}
-
-{labels.map((truth, rowIndex) => (
-
-<React.Fragment key={truth}>
-
-<b>{truth}</b>
-
-{labels.map((predicted, columnIndex) => {
-
-const value = Number(values[rowIndex]?.[columnIndex] || 0);
-
-const ratio = value / maxValue;
-
-return <button key={truth + "-" + predicted} title={"真实" + truth + "；预测：" + predicted + "；数量：" + value} style={{ background: "rgba(15,157,151," + (0.08 + ratio * .82).toFixed(2) + ")" }}>{value}</button>;
-
-})}
-
-</React.Fragment>
-
-))}
-
-</div>
-
-);
-
-}
-
 function evaluationErrorBoxes(row = {}, filter = "false_negative") {
 
   const errors = Array.isArray(row.errors) ? row.errors : [];
@@ -4813,95 +4724,6 @@ function evaluationErrorBoxes(row = {}, filter = "false_negative") {
 
 }
 
-function EvaluationSampleViewer({ rows = [], initialIndex = 0, filter, onClose }) {
-
-  const [index, setIndex] = useState(() => Math.max(0, Math.min(rows.length - 1, initialIndex)));
-
-  const [imageFailed, setImageFailed] = useState(false);
-
-  const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
-
-  const row = rows[index];
-
-  const move = (delta) => setIndex((value) => Math.max(0, Math.min(rows.length - 1, value + delta)));
-
-  useEffect(() => {
-
-    setImageFailed(false);
-
-  }, [index]);
-
-  useEffect(() => {
-
-    const onKeyDown = (event) => {
-
-      if (event.key === "ArrowLeft") move(-1);
-
-      if (event.key === "ArrowRight") move(1);
-
-      if (event.key === "Escape") onClose();
-
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => window.removeEventListener("keydown", onKeyDown);
-
-  }, [rows.length, onClose]);
-
-  if (!row) return null;
-
-  const imageId = row.project_image_id || row.projectImageId || row.id;
-
-  const imageSrc = imageId ? `/api/project-images/${imageId}/full` : (row.image_url || row.thumb_url || "");
-
-  const boxes = evaluationErrorBoxes(row, filter);
-
-  return (
-
-    <div className={`viewer-overlay evaluation-sample-dialog viewer-${viewerTheme}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-
-      <div className="viewer-toolbar">
-
-        <div><b>错误样本检</b><span>{row.display_name || "未命名图"}</span></div>
-
-        <span className="viewer-counter">{index + 1} / {rows.length}</span>
-
-        <em>{filter === "false_negative" ? "漏检" : filter === "false_positive" ? "误检" : filter === "localization" ? "定位偏差" : "类别错误"}</em>
-
-        <button className="viewer-theme-toggle" onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换查看器明暗模"><Sun size={17} /></button>
-
-        <button onClick={onClose} title="关闭"><X size={18} /></button>
-
-      </div>
-
-      <button className="viewer-page-button viewer-page-prev" disabled={index <= 0} onClick={() => move(-1)} title="上一"><ChevronRight size={28} /></button>
-
-      <div className="viewer-stage">
-
-        <div className="evaluation-sample-large">
-
-          {imageSrc && !imageFailed ? <img src={imageSrc} draggable="false" alt={row.display_name || "错误样本"} onError={() => setImageFailed(true)} /> : <div className="evaluation-sample-load-error"><ImageIcon size={34} /><b>图片加载失败</b><span>{imageId ? `图片索引：${imageId}` : "该记录没有关联图片索"}</span></div>}
-
-          {boxes.map((box, boxIndex) => {
-
-            const style = predictionBoxStyle(box.item, row);
-
-            return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null;
-
-          })}
-
-        </div>
-
-      </div>
-
-      <button className="viewer-page-button viewer-page-next" disabled={index >= rows.length - 1} onClick={() => move(1)} title="下一"><ChevronRight size={28} /></button>
-
-    </div>
-
-  );
-
-}
 function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId }) {
 
 const [searchText, setSearchText] = useState("");
@@ -5229,7 +5051,7 @@ return (
 
 </aside>
 
-{sampleViewer && <EvaluationSampleViewer rows={sampleViewer.rows} initialIndex={sampleViewer.index} filter={errorFilter} onClose={() => setSampleViewer(null)} />}
+{sampleViewer && <EvaluationSampleViewer rows={sampleViewer.rows} initialIndex={sampleViewer.index} filter={errorFilter} onClose={() => setSampleViewer(null)} getErrorBoxes={evaluationErrorBoxes} getBoxStyle={predictionBoxStyle} />}
 
 </div>
 
@@ -5523,59 +5345,6 @@ onClick={() => setExpandedAp(group.name)}
 
 }
 
-function MainNav({ view, goHome, openPlatform, theme, setTheme, user, onLogin, onLogout, onSettings }) {
-
-const [userMenuOpen, setUserMenuOpen] = useState(false);
-
-return (
-
-<nav className="main-nav">
-
-<div className="brand-mark">
-
-<Boxes size={18} />
-
-<span>Det Dashboard</span>
-
-</div>
-
-<div className="nav-tabs">
-
-<button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据</button>
-
-<button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />{"\u8d44\u4ea7"}</button>
-
-<button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练</button>
-
-<button className={view === "inference" ? "active" : ""} onClick={() => openPlatform("inference")}><Cpu size={16} />推理</button>
-
-<button className={view === "evaluation" ? "active" : ""} onClick={() => openPlatform("evaluation")}><Search size={16} />评估</button>
-
-</div>
-
-<div className="nav-tools">
-
-<button title="帮助"><HelpCircle size={16} /></button>
-
-<button title="通知"><Bell size={16} /></button>
-
-<button title="设置" onClick={onSettings}><Settings size={16} /></button>
-
-<button className="theme-toggle" aria-label="切换明暗模式" title="切换明暗模式" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}><Sun size={16} /></button>
-
-<div className="user-menu-wrap">
-<button className="user-chip" onClick={() => user ? setUserMenuOpen((value) => !value) : onLogin()}><i>{(user?.username || "?").slice(0, 1).toUpperCase()}</i>{user?.displayName || user?.username || "未登"}<ChevronDown size={13} /></button>
-{userMenuOpen && <div className="user-menu"><span>{user?.username}</span>{user?.role === "admin" && <button onClick={() => { setUserMenuOpen(false); openPlatform("admin"); }}>管理员中心</button>}<button onClick={() => { setUserMenuOpen(false); onLogout?.(); }}>退出登录</button></div>}
-</div>
-
-</div>
-
-</nav>
-
-);
-
-}
-
 function modelFamilyLabel(name = "") {
 
 const text = String(name || "").trim();
@@ -5755,6 +5524,8 @@ viewInferenceResults,
 deleteInferenceJob,
 
 deleteInferenceJobs,
+
+requeueInferenceJob,
 
 moveRuntimeQueueJob,
 
