@@ -218,7 +218,7 @@ const pageSize = 48;
 
 const [error, setError] = useState(null);
 
-const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", hostDialogUrl: "", nativeDialogMode: "server" });
+const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", browseAllDrives: false, hostDialogUrl: "", nativeDialogMode: "server" });
 
 const [showImportDialog, setShowImportDialog] = useState(false);
 
@@ -586,7 +586,7 @@ const rows = d.projects || [];
 
 setProjects(rows);
 
-setActiveProject((current) => current ? rows.find((project) => project.id === current.id) || current : null);
+setActiveProject((current) => current ? rows.find((project) => project.id === current.id) || null : null);
 
 }).catch(() => {});
 
@@ -760,6 +760,54 @@ loadMlPlatform();
 
 }
 
+function updateTrainingJobState(jobId, action) {
+
+fetch(`/api/ml/training-jobs/${jobId}/${action}`, {
+
+method: "POST",
+
+headers: { "content-type": "application/json" },
+
+})
+
+.then((r) => Promise.all([r.status, r.json()]))
+
+.then(([status, data]) => {
+
+if (status >= 400) throw new Error(data.error || "训练任务状态更新失败");
+
+setActiveTrainingJobId(jobId);
+
+loadMlPlatform();
+
+})
+
+.catch((err) => setError(err.message));
+
+}
+
+function deleteTrainingJob(jobId) {
+
+if (!window.confirm("确定删除该训练任务吗？正在运行的任务会先停止。")) return;
+
+fetch(`/api/ml/training-jobs/${jobId}`, { method: "DELETE" })
+
+.then((r) => Promise.all([r.status, r.json()]))
+
+.then(([status, data]) => {
+
+if (status >= 400) throw new Error(data.error || "删除训练任务失败");
+
+if (activeTrainingJobId === jobId) setActiveTrainingJobId(null);
+
+loadMlPlatform();
+
+})
+
+.catch((err) => setError(err.message));
+
+}
+
 function createModelVersion() {
 
 fetch("/api/ml/model-versions", {
@@ -790,7 +838,7 @@ loadMlPlatform();
 
 function createPythonEnv() {
 
-const payload = envForm.sourceType === "server_python" ? { ...envForm, preferCondaPack: true } : envForm;
+const payload = envForm.sourceType === "server_managed" || envForm.sourceType === "server_python" ? { ...envForm, sourceType: "server_managed", preferCondaPack: false } : envForm;
 
 fetch("/api/ml/python-envs", {
 
@@ -1008,7 +1056,49 @@ loadMlPlatform();
 
 }
 
+function deleteInferenceJobs(jobIds) {
 
+const ids = Array.from(new Set((jobIds || []).filter(Boolean)));
+
+if (!ids.length) {
+
+setError("请选择要删除的推理任务");
+
+return Promise.resolve(false);
+
+}
+
+if (!window.confirm(`确认删除 ${ids.length} 个推理任务？`)) return Promise.resolve(false);
+
+return Promise.all(ids.map((jobId) => fetch(`/api/ml/inference-jobs/${jobId}`, { method: "DELETE" })
+
+.then((r) => Promise.all([r.status, r.json().catch(() => ({}))]))
+
+.then(([status, data]) => {
+
+if (status >= 400) throw new Error(data.error || "删除推理任务失败");
+
+return data;
+
+})))
+
+.then(() => {
+
+loadMlPlatform();
+
+return true;
+
+})
+
+.catch((err) => {
+
+setError(err.message);
+
+return false;
+
+});
+
+}
 function moveRuntimeQueueJob(kind, jobId, direction) {
 
 const path = kind === "training" ? "training-jobs" : "inference-jobs";
@@ -1148,7 +1238,7 @@ method: "POST",
 
 headers: { "content-type": "application/json" },
 
-body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId, createDefaultSplits: !isWorkspace }),
+body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId }),
 
 })
 
@@ -1552,7 +1642,7 @@ setError(null);
 
 const selectedPaths = splitImportPaths(importPath);
 
-const initialPath = selectedPaths[selectedPaths.length - 1] || appConfig.browseRootDisplay || "/";
+const initialPath = selectedPaths[selectedPaths.length - 1] || (appConfig.browseAllDrives ? "__drives__" : appConfig.browseRootDisplay || "/");
 
 if (appConfig.nativeDialogMode === "disabled") {
 
@@ -1616,7 +1706,7 @@ setError(null);
 
 setDirPickerBusy(true);
 
-fetch(`/api/fs/dirs?path=${encodeURIComponent(pathValue || appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot)}`)
+fetch(`/api/fs/dirs?path=${encodeURIComponent(pathValue || (appConfig.browseAllDrives ? "__drives__" : appConfig.browseRootDisplay || appConfig.dataRootDisplay || appConfig.dataRoot))}`)
 
 .then((r) => r.json().then((d) => {
 
@@ -2126,9 +2216,15 @@ renameModelVersion={renameModelVersion}
 
 submitTrainingJob={submitTrainingJob}
 
+updateTrainingJobState={updateTrainingJobState}
+
+deleteTrainingJob={deleteTrainingJob}
+
 submitInferenceJob={submitInferenceJob}
 
 deleteInferenceJob={deleteInferenceJob}
+
+deleteInferenceJobs={deleteInferenceJobs}
 
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 
@@ -2480,7 +2576,7 @@ rows={4}
 
 <button onClick={() => openDataRootPicker(dirPicker.parent)} disabled={!dirPicker.parent || dirPickerBusy}><ArrowLeft size={14} />上一</button>
 
-<button className="primary" onClick={() => chooseDir(dirPicker.current)} disabled={dirPickerBusy}><FolderOpen size={14} />选择当前文件</button>
+<button className="primary" onClick={() => chooseDir(dirPicker.current)} disabled={dirPickerBusy || dirPicker.current === "__drives__"}><FolderOpen size={14} />选择当前文件夹</button>
 
 </div>
 
@@ -2726,9 +2822,15 @@ renameModelVersion,
 
 submitTrainingJob,
 
+updateTrainingJobState,
+
+deleteTrainingJob,
+
 submitInferenceJob,
 
 deleteInferenceJob,
+
+deleteInferenceJobs,
 
 moveRuntimeQueueJob,
 
@@ -2760,7 +2862,7 @@ currentUser,
   appConfig,
 }) {
 
-const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "资产管理";
+const title = view === "training" ? "训练平台" : view === "inference" ? "推理平台" : view === "evaluation" ? "测试评估平台" : "\u8d44\u4ea7";
 
 const supportedTasks = ["detect", "segment", "classify"];
 
@@ -2892,6 +2994,12 @@ return (
 
             submitTrainingJob={submitTrainingJob}
 
+            updateTrainingJobState={updateTrainingJobState}
+
+            deleteTrainingJob={deleteTrainingJob}
+
+            moveRuntimeQueueJob={moveRuntimeQueueJob}
+
           />
 
         )}
@@ -2929,6 +3037,8 @@ submitInferenceJob={submitInferenceJob}
 viewInferenceResults={viewInferenceResults}
 
 deleteInferenceJob={deleteInferenceJob}
+
+deleteInferenceJobs={deleteInferenceJobs}
 
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 
@@ -3262,6 +3372,12 @@ function TrainingWorkspace({
 
   submitTrainingJob,
 
+  updateTrainingJobState,
+
+  deleteTrainingJob,
+
+  moveRuntimeQueueJob,
+
 }) {
 
   const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
@@ -3440,7 +3556,7 @@ function TrainingWorkspace({
 
         </div>
 
-        <section className="training-queue reference-queue"><h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2><div className="training-table-head"><span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span><span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span></div>{queueRows.map((job, index) => (<div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}><b>{job.name || '训练任务'}</b><span>{job.dataset_project_name || selectedProject.name || '--'}</span><span>{job.model_name || selectedModel.name || '--'}</span><em className={'status-badge ' + (String(job.status).includes('fail') ? 'status-failed' : '')}>{runStatusLabel(job.status)}</em><i className="mini-progress"><b style={{ width: (job.progress ?? progress) + '%' }} /></i><span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span><span>0.{482 + index * 13}</span><span>{index ? '71.11%' : '71.10%'}</span><span>{index ? '--' : '18m'}</span><div className="training-row-actions"><button><Eye size={14} /></button><button title="打开 TensorBoard" onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button></div></div>))}</section>
+        <section className="training-queue reference-queue"><h2>训练任务队列 <span>共 {queueRows.length} 条</span></h2><div className="training-table-head"><span>任务名称</span><span>数据</span><span>模型</span><span>状态</span><span>进度</span><span>Epoch</span><span>box_loss</span><span>mAP50</span><span>ETA</span><span>操作</span></div>{queueRows.map((job, index) => (<div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}><b>{job.name || '训练任务'}</b><span>{job.dataset_project_name || selectedProject.name || '--'}</span><span>{job.model_name || selectedModel.name || '--'}</span><em className={'status-badge ' + (String(job.status).includes('fail') ? 'status-failed' : '')}>{runStatusLabel(job.status)}</em><i className="mini-progress"><b style={{ width: (job.progress ?? progress) + '%' }} /></i><span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span><span>0.{482 + index * 13}</span><span>{index ? '71.11%' : '71.10%'}</span><span>{index ? '--' : '18m'}</span><div className="training-row-actions"><button title={"\u67e5\u770b\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0a\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && <button title={"\u4e0b\u79fb"} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>}{job.id && !String(job.id).startsWith("mock-") && !["done", "failed", "cancelled"].includes(job.status) && <button title={job.status === "paused" ? "\u7ee7\u7eed\u4efb\u52a1" : "\u6682\u505c\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>}{job.id && !String(job.id).startsWith("mock-") && <button className="danger-icon" title={"\u5220\u9664\u4efb\u52a1"} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>}<button title={"\u6253\u5f00 TensorBoard"} onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button></div></div>))}</section>
 
       </main>
 
@@ -3602,7 +3718,7 @@ return (
 
 <FolderOpen size={16} />
 
-<button>资产管理</button>
+<button>{"\u8d44\u4ea7"}</button>
 
 <ChevronRight size={14} />
 
@@ -3720,7 +3836,7 @@ return (
 
 <div className="asset-table-row" key={env.id} title={envTooltip(env)}>
 
-<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.artifact_key || env.python_path}</span><AssetActionButtons />
+<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons />
 
 </div>
 
@@ -4150,21 +4266,21 @@ function AssetDrawer({
 
           <>
 
-            <DrawerField label="来源类型"><select value={envForm.sourceType} onChange={(e) => setEnvForm({ ...envForm, sourceType: e.target.value })}><option value="conda_pack">conda-pack 环境包入 MinIO</option><option value="server_python">服务器 Python 路径快速登记</option></select></DrawerField>
+            <DrawerField label="来源类型"><select value={envForm.sourceType} onChange={(e) => setEnvForm({ ...envForm, sourceType: e.target.value })}><option value="conda_pack">conda-pack 环境包入 MinIO</option><option value="server_managed">服务器托管 Python</option></select></DrawerField>
 
             <DrawerField label="环境"><input value={envForm.name} onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })} placeholder="留空自动生成 py3.12-torch2.12-cpu" /></DrawerField>
 
-            {envForm.sourceType === "server_python" ? (
+            {envForm.sourceType === "server_managed" || envForm.sourceType === "server_python" ? (
 
-              <DrawerField label="Python 路径"><DrawerInputWithIcon value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="D:\\ProgramData\\miniforge3\\python.exe" /></DrawerField>
+              <DrawerField label="Python 路径"><DrawerInputWithIcon value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="D:\\Program Files\\miniforge3\\envs\\yolo\\python.exe" /></DrawerField>
 
             ) : (
 
-              <DrawerField label="环境包路"><DrawerInputWithIcon value={envForm.condaPackPath} onChange={(e) => setEnvForm({ ...envForm, condaPackPath: e.target.value })} placeholder="F:\\envs\\yolo.tar.gz" /></DrawerField>
+              <DrawerField label="环境包路"><DrawerInputWithIcon value={envForm.condaPackPath} onChange={(e) => setEnvForm({ ...envForm, condaPackPath: e.target.value })} placeholder="E:\\projects\\DD-runtime\\minio\\zbh-datasets\\envs\\yolo.tar.gz" /></DrawerField>
 
             )}
 
-            <DrawerField label="解包后路径"><input value={envForm.pythonPath} onChange={(e) => setEnvForm({ ...envForm, pythonPath: e.target.value })} placeholder="可留空；用于检测 Python/Torch/CUDA" /></DrawerField>
+            {envForm.sourceType === "conda_pack" && (<DrawerField label="解包后路径"><input value={envForm.unpackPath} onChange={(e) => setEnvForm({ ...envForm, unpackPath: e.target.value })} placeholder="可留空；默认解包到 MinIO envs/python 目录" /></DrawerField>)}
 
             <div className="auto-parse-card"><h3>检测结</h3><p><span>Python</span><b>提交后检</b></p><p><span>Torch</span><b>提交后检</b></p><p><span>CUDA</span><b>提交后检</b></p></div>
 
@@ -5064,7 +5180,7 @@ return (
 
 <button className={view === "home" ? "active" : ""} onClick={goHome}><FolderOpen size={16} />数据</button>
 
-<button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />资产管理</button>
+<button className={view === "models" ? "active" : ""} onClick={() => openPlatform("models")}><Brain size={16} />{"\u8d44\u4ea7"}</button>
 
 <button className={view === "training" ? "active" : ""} onClick={() => openPlatform("training")}><Play size={16} />训练</button>
 
@@ -5262,6 +5378,8 @@ submitInferenceJob,
 viewInferenceResults,
 
 deleteInferenceJob,
+
+deleteInferenceJobs,
 
 moveRuntimeQueueJob,
 
@@ -5585,6 +5703,69 @@ onClick: () => setField("pythonEnvId", env.id),
 ];
 
 const displayJobs = sortedInferenceJobs.slice(0, 5);
+const [selectedInferenceJobIds, setSelectedInferenceJobIds] = useState(() => new Set());
+
+const selectedInferenceCount = selectedInferenceJobIds.size;
+
+const allVisibleInferenceJobsSelected = displayJobs.length > 0 && displayJobs.every((job) => selectedInferenceJobIds.has(job.id));
+
+const selectedInferenceQueueLabel = selectedInferenceCount ? `删除已选 ${selectedInferenceCount}` : "删除队列";
+
+useEffect(() => {
+
+setSelectedInferenceJobIds((current) => {
+
+const validIds = new Set(sortedInferenceJobs.map((job) => job.id));
+
+const next = new Set(Array.from(current).filter((id) => validIds.has(id)));
+
+return next.size === current.size ? current : next;
+
+});
+
+}, [inferenceJobs]);
+
+const toggleInferenceJobSelection = (jobId) => {
+
+setSelectedInferenceJobIds((current) => {
+
+const next = new Set(current);
+
+if (next.has(jobId)) next.delete(jobId);
+
+else next.add(jobId);
+
+return next;
+
+});
+
+};
+
+const toggleVisibleInferenceJobsSelection = () => {
+
+setSelectedInferenceJobIds((current) => {
+
+const next = new Set(current);
+
+if (allVisibleInferenceJobsSelected) displayJobs.forEach((job) => next.delete(job.id));
+
+else displayJobs.forEach((job) => next.add(job.id));
+
+return next;
+
+});
+
+};
+
+const deleteInferenceQueue = () => {
+
+const ids = selectedInferenceCount ? Array.from(selectedInferenceJobIds) : sortedInferenceJobs.map((job) => job.id);
+
+const result = deleteInferenceJobs?.(ids);
+
+if (result?.then) result.then((deleted) => { if (deleted) setSelectedInferenceJobIds(new Set()); });
+
+};
 
 const previewItems = previewRows.slice(0, 12);
 
@@ -5667,7 +5848,7 @@ return (
         <div className="workspace-commandbar inference-commandbar">
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
-          <button className="danger-outline" type="button"><Trash2 size={16} />停止任务</button>
+          <button className="danger-outline" type="button" disabled={!sortedInferenceJobs.length} onClick={deleteInferenceQueue} title={selectedInferenceCount ? "删除选中的推理任务" : "删除全部推理任务队列"}><Trash2 size={16} />{selectedInferenceQueueLabel}</button>
           <button type="button"><RefreshCw size={16} />刷新</button>
         </div>
       </div>
@@ -5784,7 +5965,7 @@ return (
         </div>
         <div className="inference-table">
           <div className="inference-table-head">
-            <span className="inference-task-name"><input type="checkbox" />任务名称</span>
+            <span className="inference-task-name"><input type="checkbox" checked={allVisibleInferenceJobsSelected} onChange={toggleVisibleInferenceJobsSelection} disabled={!displayJobs.length} />任务名称</span>
             <span>数据集</span><span>模型</span><span>状态</span><span>进度</span><span>图像数</span><span>预测数</span><span>Precision</span><span>Recall</span><span>mAP50</span><span>操作</span>
           </div>
           {displayJobs.map((job) => {
@@ -5792,7 +5973,7 @@ return (
             const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
             return (
               <div className="inference-table-row" key={job.id}>
-                <b className="inference-task-name"><input type="checkbox" /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
+                <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span>{job.model_name || selectedVersion?.model_name || "YOLOv8n"}</span>
                 <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
@@ -6570,6 +6751,8 @@ return (
 <span>共 {formatCount(trashProjects.length)} 项</span>
 
 <button title="刷新回收" onDoubleClick={emptyProjectTrash}><RefreshCw size={14} /></button>
+
+<button title="清空项目回收站" disabled={!trashProjects.length} onClick={emptyProjectTrash}><Trash2 size={14} />全部清除</button>
 
 </div>
 
@@ -8009,9 +8192,3 @@ setEditDrag({ type: "resize", id: ann.id, handle, start, origin: { x: Number(ann
 }
 
 createRoot(document.getElementById("root")).render(<App />);
-
-
-
-
-
-

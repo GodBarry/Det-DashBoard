@@ -5,7 +5,7 @@ const url = require("url");
 const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
-const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
+const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
 const { pool, query, transaction } = require("./db");
 const store = require("./object-store");
 const {
@@ -121,7 +121,6 @@ async function selectFolder(defaultPath, description) {
 
   return { status: "unavailable", selectedPath: "", error: `暂不支持 ${process.platform} 系统文件夹选择器` };
 }
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -247,6 +246,15 @@ function toScopedInternalPath(value, internalRoot, displayRoot) {
 function listFolders(target, scope = "browse") {
   const root = scope === "data" ? dataRoot : browseRoot;
   const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
+  const allDrives = scope === "browse" && browseAllDrives && process.platform === "win32";
+  if (allDrives && (!target || target === "__drives__")) {
+    const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      .split("")
+      .map((letter) => `${letter}:\\`)
+      .filter((drive) => fs.existsSync(drive))
+      .map((drive) => ({ name: drive, path: drive }));
+    return { root: "__drives__", current: "__drives__", parent: "", dirs };
+  }
   const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
   const stat = fs.statSync(current);
   if (!stat.isDirectory()) throw httpError(400, "路径必须是文件夹");
@@ -261,7 +269,7 @@ function listFolders(target, scope = "browse") {
   return {
     root: displayRoot,
     current: toDisplayDataPath(current),
-    parent: parent && parent !== current && isInsideRoot(root, parent) ? toDisplayDataPath(parent) : "",
+    parent: allDrives && parent === current ? "__drives__" : (parent && parent !== current && (allDrives || isInsideRoot(root, parent)) ? toDisplayDataPath(parent) : ""),
     dirs,
   };
 }
@@ -281,6 +289,14 @@ function rawLabelObjectKey(projectId, versionId, name) {
 function pythonEnvObjectKey(sha256, name) {
   const safeName = path.basename(name || `${sha256}.tar.gz`).replace(/[\\/:*?"<>|]/g, "_");
   return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/${safeName}`;
+}
+
+function pythonEnvManifestKey(sha256) {
+  return `envs/python/conda-pack/${sha256.slice(0, 2)}/${sha256}/manifest.json`;
+}
+
+function modelWeightManifestKey(modelId, versionId) {
+  return `ml/artifacts/models/${modelId}/${versionId}/manifest.json`;
 }
 
 function serverPythonEnvObjectKey(sha256) {
@@ -309,7 +325,7 @@ const builtinAlgorithmAssets = [
     taskType: "detect",
     version: "builtin",
     tasks: ["detect", "segment", "classify"],
-    description: "Ultralytics YOLO 通用训练和推理适配入口。",
+    description: "Ultralytics YOLO training and inference adapter.",
     params: { conf: 0.25, iou: 0.7, imgsz: 640, batch: 16, device: "0", max_det: 300 },
     adapter: [
       "# Platform adapter placeholder for Ultralytics YOLO.",
@@ -326,7 +342,7 @@ const builtinAlgorithmAssets = [
     taskType: "detect",
     version: "builtin",
     tasks: ["detect"],
-    description: "DINOv3 + Faster R-CNN 目录推理适配入口。",
+    description: "DINOv3 + Faster R-CNN inference adapter.",
     params: { scoreThr: 0.25, width: 1920, height: 1080, nmsAgnostic: false },
     adapter: "# Platform adapter placeholder for DINOv3 Faster R-CNN.\n",
   },
@@ -337,7 +353,7 @@ const builtinAlgorithmAssets = [
     taskType: "detect",
     version: "builtin",
     tasks: ["detect"],
-    description: "RT-DETR 检测算法适配入口。",
+    description: "RT-DETR detection adapter.",
     params: { conf: 0.25, imgsz: 640, device: "0" },
     adapter: "# Platform adapter placeholder for RT-DETR.\n",
   },
@@ -364,7 +380,6 @@ const builtinAlgorithmAssets = [
     adapter: "# Platform adapter placeholder for empty detector.\n",
   },
 ];
-
 function uniqueExistingPaths(paths) {
   return Array.from(new Set(paths.filter(Boolean).map((item) => path.resolve(item)))).filter((item) => fs.existsSync(item));
 }
@@ -420,13 +435,30 @@ function inspectPythonEnv(pythonPath) {
   return { version, packages, platform, accelerator, status };
 }
 
-function inspectCondaPackArchive(sourcePath, unpackPath, pythonPath) {
-  const candidates = uniqueExistingPaths([
+function condaPythonCandidates(unpackPath, pythonPath) {
+  return uniqueExistingPaths([
     pythonPath,
     path.join(unpackPath || "", "bin", "python"),
     path.join(unpackPath || "", "python.exe"),
     path.join(unpackPath || "", "Scripts", "python.exe"),
   ]);
+}
+
+function ensureCondaPackUnpacked(sourcePath, unpackPath, pythonPath) {
+  const existing = condaPythonCandidates(unpackPath, pythonPath)[0];
+  if (existing) return existing;
+  fs.mkdirSync(unpackPath, { recursive: true });
+  const result = spawnSync("tar", ["-xf", sourcePath, "-C", unpackPath], { encoding: "utf8", timeout: 600000, maxBuffer: 4 * 1024 * 1024 });
+  if (result.status !== 0) {
+    throw new Error(`conda-pack 环境包解包失败：${String(result.stderr || result.stdout || "tar 执行失败").trim()}`);
+  }
+  const extracted = condaPythonCandidates(unpackPath, pythonPath)[0];
+  if (!extracted) throw new Error(`conda-pack 环境包已解包，但未找到 Python：${unpackPath}`);
+  return extracted;
+}
+
+function inspectCondaPackArchive(sourcePath, unpackPath, pythonPath) {
+  const candidates = condaPythonCandidates(unpackPath, pythonPath);
   if (candidates[0]) {
     const info = inspectPythonEnv(candidates[0]);
     return { ...info, pythonPath: candidates[0], detectedFrom: "python" };
@@ -540,7 +572,7 @@ async function seedMlRuntimeConfig() {
         "detect",
         JSON.stringify({ epochs: 100, imgsz: 640, batch: 16, device: "0" }),
         JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }),
-        "自动识别为支持 detect / segment / classify 的 Ultralytics YOLO 模板",
+        "Ultralytics YOLO template supporting detect / segment / classify",
       ],
     );
   }
@@ -551,7 +583,7 @@ async function seedMlRuntimeConfig() {
          description=CASE WHEN description='' THEN $2 ELSE description END,
          updated_at=now()
      WHERE framework='ultralytics' AND (capabilities_json = '{}'::jsonb OR capabilities_json->'tasks' IS NULL)`,
-    [JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }), "自动识别为支持 detect / segment / classify 的 Ultralytics YOLO 模板"],
+    [JSON.stringify({ tasks: ["detect", "segment", "classify"], autoDetected: true }), "Ultralytics YOLO template supporting detect / segment / classify"],
   );
   const dinoTemplate = (await query("SELECT id FROM training_templates WHERE template_key=$1", ["dinov3_faster_rcnn"])).rows[0];
   if (!dinoTemplate) {
@@ -569,7 +601,7 @@ async function seedMlRuntimeConfig() {
         }),
         JSON.stringify({ scoreThr: 0.25, width: 1920, height: 1080, nmsAgnostic: false, outputFormats: ["json", "voc_xml"] }),
         JSON.stringify({ tasks: ["detect"], algorithmRole: "inference", input: "image_dir", output: ["predictions_json", "voc_xml"] }),
-        "基于 MMDetection 的 DINOv3 + Faster R-CNN 目录推理入口，读取平台 input-cache/images 并输出 predictions.json/VOC XML。",
+        "DINOv3 + Faster R-CNN directory inference entry for predictions.json/VOC XML.",
       ],
     );
   }
@@ -579,14 +611,14 @@ async function seedMlRuntimeConfig() {
       `INSERT INTO training_templates (name, template_key, framework, task_type, command_json, default_params_json, capabilities_json, description)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
-        "空检测模型推理",
+        "Empty detector inference",
         "dummy_empty_detector",
         "builtin",
         "detect",
         JSON.stringify({ builtin: "empty_predictions" }),
         JSON.stringify({}),
         JSON.stringify({ tasks: ["detect"], algorithmRole: "inference", input: "manifest", output: ["predictions_json"] }),
-        "平台内置空模型，用于打通推理流程：读取 input-cache/manifest.json，为每张图片输出空预测。",
+        "Built-in empty model for inference workflow smoke tests.",
       ],
     );
   }
@@ -596,7 +628,7 @@ async function seedMlRuntimeConfig() {
     dummyModelId = (await query(
       `INSERT INTO model_clusters (name, task_type, framework, description)
        VALUES ($1,'detect','builtin',$2) RETURNING id`,
-      ["Dummy Empty Detector", "平台内置空检测模型，用于测试推理任务、输入缓存和结果写回。"],
+      ["Dummy Empty Detector", "Built-in empty detector for inference tests."],
     )).rows[0].id;
   }
   const dummyVersion = (await query("SELECT id FROM model_revisions WHERE model_id=$1 AND version_name=$2", [dummyModelId, "empty_v1"])).rows[0];
@@ -1371,9 +1403,8 @@ async function createProject(body) {
   const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
   if (!segments.length) throw httpError(400, "项目名称不能为空");
   let parentId = body.parentId || body.parent_id || null;
-  const originalParentId = parentId;
   const parentDepth = parentId ? await projectDepth(parentId) : 0;
-  if (parentDepth + segments.length > 3) throw httpError(400, "项目文件夹最多支持 3 级");
+  if (parentDepth + segments.length > 3) throw httpError(400, "Project folder depth exceeds limit");
   let project = null;
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
@@ -1391,19 +1422,6 @@ async function createProject(body) {
       )).rows[0];
     }
     parentId = project.id;
-  }
-  if ((body.createDefaultSplits || body.create_default_splits) && !originalParentId && project?.id) {
-    for (const splitName of ["train", "val", "test"]) {
-      await query(
-        `INSERT INTO projects (name, description, project_type, parent_id)
-         SELECT $1, '', 'normal', $2
-         WHERE NOT EXISTS (
-           SELECT 1 FROM projects
-           WHERE deleted_at IS NULL AND name=$1 AND parent_id IS NOT DISTINCT FROM $2
-         )`,
-        [splitName, project.id],
-      );
-    }
   }
   return project;
 }
@@ -1561,7 +1579,7 @@ async function importPath(body) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
   if (shuttingDown) {
-    const error = new Error("服务正在关闭，暂不接受新的导入任务");
+    const error = new Error("Service is shutting down and cannot accept new imports.");
     error.statusCode = 503;
     throw error;
   }
@@ -1569,10 +1587,10 @@ async function importPath(body) {
     ? body.sourcePaths
     : String(body.sourcePath || "").split(";").map((item) => item.trim()).filter(Boolean);
   const sourcePaths = Array.from(new Set(rawSourcePaths.map((item) => toInternalDataPath(item)).filter(Boolean)));
-  if (!sourcePaths.length) throw httpError(400, "请输入或选择数据文件夹路径");
+  if (!sourcePaths.length) throw httpError(400, "No dataset folder path was selected.");
   for (const sourcePath of sourcePaths) {
-    if (!fs.existsSync(sourcePath)) throw httpError(400, `导入路径不存在：${sourcePath}`);
-    if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, `导入路径必须是文件夹：${sourcePath}`);
+    if (!fs.existsSync(sourcePath)) throw httpError(400, "Import path does not exist: " + sourcePath);
+    if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "Import path must be a folder: " + sourcePath);
   }
   body.sourcePath = sourcePaths[0];
   body.sourcePaths = sourcePaths;
@@ -1586,7 +1604,7 @@ async function importPath(body) {
       [projectId],
     )).rows[0];
     if (active) {
-      const error = new Error("该项目已有导入任务正在运行，请等待完成或先取消当前任务");
+      const error = new Error("An import task is already running for this project.");
       error.statusCode = 409;
       throw error;
     }
@@ -1650,7 +1668,7 @@ async function runImportBatch(batchId, project, body) {
     }
   } catch (error) {
     if (error.code !== "SCAN_CANCELLED") throw error;
-    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
     return;
   }
   const images = sourceGroups.flatMap((group) => group.images.map((file) => ({ file, sourceRoot: group.sourceRoot, matches: group.matches })));
@@ -1670,7 +1688,7 @@ async function runImportBatch(batchId, project, body) {
     [images.length + videos.length, `扫描完成：${images.length} 图片，${videos.length} 视频；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`, batchId],
   );
   if (await importCancelled(batchId)) {
-    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["导入已取消", batchId]);
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
     return;
   }
 
@@ -1693,7 +1711,7 @@ async function runImportBatch(batchId, project, body) {
   for (const imageEntry of images) {
     const imageFile = imageEntry.file;
     if (imageCount % 5 === 0 && await importCancelled(batchId)) {
-      await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [imageCount, "导入已取消", batchId]);
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
       return;
     }
     const matched = imageEntry.matches.get(imageKey(imageFile));
@@ -1741,7 +1759,7 @@ async function runImportBatch(batchId, project, body) {
   for (const videoEntry of videos) {
     const videoFile = videoEntry.file;
     if (await importCancelled(batchId)) {
-      await query("UPDATE import_batches SET status='cancelled', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videoCount, "导入已取消", batchId]);
+    await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
       return;
     }
     const asset = await upsertVideoAsset(client, videoFile);
@@ -2032,7 +2050,7 @@ function analyzeImageGroup(rows, params) {
   const log = [];
 
   if (!normalized.length) {
-    log.push("无标注图片，保留图片但不生成标注");
+    log.push("Annotation counts differ across sources.");
     return { chosenRow, annotations: [], conflictType: "", severity: "low", autoResolved: true, log };
   }
   const counts = new Map(rows.map((row) => [row.project_id, row.annotations.length]));
@@ -2040,7 +2058,7 @@ function analyzeImageGroup(rows, params) {
     conflictType = "count_conflict";
     severity = "high";
     autoResolved = false;
-    log.push("不同来源目标数量不一致");
+    log.push("Annotation counts differ across sources.");
   }
   for (const ann of normalized) {
     const best = chosen.reduce((acc, item) => {
@@ -2113,7 +2131,7 @@ async function resolveBaselineConflicts(runId, body = {}) {
 
 async function createBaselinePreview(body = {}) {
   const sourceProjectIds = Array.from(new Set((body.sourceProjectIds || []).map(String).filter(Boolean)));
-  if (sourceProjectIds.length < 1) throw new Error("请选择至少一个来源项目");
+  if (sourceProjectIds.length < 1) throw new Error("Select at least one source project.");
   const params = {
     iouSame: Number(body.iouSame ?? 0.9),
     iouLight: Number(body.iouLight ?? 0.75),
@@ -2264,7 +2282,7 @@ async function nextModelVersionName(prefix, modelId) {
 
 async function createModelVersion(body = {}) {
   const modelId = body.modelId || body.model_id;
-  if (!modelId) throw new Error("请选择模型簇");
+  if (!modelId) throw new Error("Select a model cluster.");
   const model = (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
   if (!model) throw new Error("模型簇不存在");
   const stage = String(body.stage || "pretrained").trim();
@@ -2280,18 +2298,35 @@ async function createModelVersion(body = {}) {
     [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
   )).rows[0];
   if (sourcePath) {
-    if (!fs.existsSync(sourcePath)) throw new Error("权重文件不存在");
+    if (!fs.existsSync(sourcePath)) throw new Error("Weight file does not exist.");
     const ext = path.extname(sourcePath).toLowerCase() || ".pt";
-    const target = path.join(artifactRoot, `weights${ext}`);
-    fs.copyFileSync(sourcePath, target);
     const objectKey = `ml/artifacts/models/${model.id}/${version.id}/weights${ext}`;
-    await store.putFile(objectKey, target);
-    const stat = fs.statSync(target);
-    const sha = await hashFile(target).catch(() => null);
+    await store.putFile(objectKey, sourcePath);
+    const stat = fs.statSync(sourcePath);
+    const sha = await hashFile(sourcePath).catch(() => null);
+    const manifestKey = modelWeightManifestKey(model.id, version.id);
+    const manifest = {
+      format: "det-dashboard.model-weight.v1",
+      assetType: "model_weight",
+      modelId: model.id,
+      modelName: model.name,
+      modelVersionId: version.id,
+      versionName,
+      framework: model.framework,
+      taskType: model.task_type,
+      weightKey: objectKey,
+      weightName: path.basename(objectKey),
+      size: stat.size,
+      sha256: sha,
+      extension: ext,
+      importSourcePath: sourcePath,
+      createdAt: new Date().toISOString(),
+    };
+    await store.putJson(manifestKey, manifest);
     await query(
       `INSERT INTO model_files (model_version_id, artifact_type, path, size, sha256, metadata_json)
        VALUES ($1,'weights',$2,$3,$4,$5)`,
-      [version.id, objectKey, stat.size, sha, JSON.stringify({ localPath: target, sourcePath })],
+      [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath })],
     );
   }
   return version;
@@ -2299,10 +2334,70 @@ async function createModelVersion(body = {}) {
 
 async function renameModelVersion(versionId, body = {}) {
   const name = String(body.versionName || body.version_name || "").trim();
-  if (!name) throw new Error("版本名不能为空");
+  if (!name) throw new Error("Version name cannot be empty.");
   const rows = await query("UPDATE model_revisions SET version_name=$1 WHERE id=$2 RETURNING *", [name, versionId]);
   if (!rows.rows[0]) throw new Error("模型版本不存在");
   return rows.rows[0];
+}
+
+async function clearModelAssets(body = {}) {
+  const confirm = String(body.confirm || "");
+  const execute = confirm === "CLEAR_MODEL_ASSETS";
+  const modelFiles = (await query("SELECT id, path, metadata_json FROM model_files ORDER BY created_at DESC")).rows;
+  const modelVersions = (await query("SELECT id, artifact_root FROM model_revisions ORDER BY created_at DESC")).rows;
+  const modelClusters = (await query("SELECT id FROM model_clusters WHERE deleted_at IS NULL")).rows;
+  const objectKeys = new Set();
+  for (const row of modelFiles) {
+    if (row.path && String(row.path).startsWith("ml/artifacts/models/")) objectKeys.add(row.path);
+    const meta = row.metadata_json || {};
+    if (meta.manifestKey && String(meta.manifestKey).startsWith("ml/artifacts/models/")) objectKeys.add(meta.manifestKey);
+    if (meta.weightKey && String(meta.weightKey).startsWith("ml/artifacts/models/")) objectKeys.add(meta.weightKey);
+  }
+  for (const key of await store.listObjectKeys("ml/artifacts/models/")) objectKeys.add(key);
+
+  const localRoots = [
+    path.join(storageRoot, "runtime", "models"),
+    path.join(storageRoot, "runtime", "model-cache"),
+  ];
+
+  if (!execute) {
+    return {
+      dryRun: true,
+      requiresConfirm: "CLEAR_MODEL_ASSETS",
+      counts: {
+        modelClusters: modelClusters.length,
+        modelVersions: modelVersions.length,
+        modelFiles: modelFiles.length,
+        minioObjects: objectKeys.size,
+        localRoots: localRoots.filter((root) => fs.existsSync(root)).length,
+      },
+      scope: {
+        tables: ["model_files", "model_revisions", "model_clusters"],
+        minioPrefix: "ml/artifacts/models/",
+        localRoots,
+        excludes: ["projects", "project_images", "project_videos", "image_assets", "image_annotations", "dataset_snapshots"],
+      },
+    };
+  }
+
+  for (const key of objectKeys) await store.removeObject(key);
+  for (const root of localRoots) {
+    const resolved = path.resolve(root);
+    if (isInsideRoot(storageRoot, resolved) && fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true });
+  }
+  await query("DELETE FROM model_files");
+  await query("DELETE FROM model_revisions");
+  await query("UPDATE model_clusters SET deleted_at=now(), updated_at=now() WHERE deleted_at IS NULL");
+  return {
+    dryRun: false,
+    deleted: {
+      modelClusters: modelClusters.length,
+      modelVersions: modelVersions.length,
+      modelFiles: modelFiles.length,
+      minioObjects: objectKeys.size,
+      localRoots: localRoots.filter((root) => !fs.existsSync(root)).length,
+    },
+  };
 }
 
 async function listDatasetSnapshots() {
@@ -2548,29 +2643,64 @@ function defaultPythonEnvName(info = {}, accelerator = "cpu", fallback = "python
 }
 
 async function createPythonEnv(body = {}) {
-  const sourceType = body.sourceType || body.source_type || "server_python";
+  const rawSourceType = body.sourceType || body.source_type || "server_managed";
+  const sourceType = rawSourceType === "server_python" ? "server_managed" : rawSourceType;
   if (sourceType === "conda_pack") {
     const sourcePath = path.resolve(String(body.condaPackPath || body.conda_pack_path || body.sourcePath || body.source_path || "").trim());
     if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("conda-pack 环境包路径不存在");
-    if (!isInsideRoot(dataRoot, sourcePath) && !isInsideRoot(storageRoot, sourcePath)) throw new Error(`conda-pack 环境包必须位于 ${dataRoot} 或 ${storageRoot} 内`);
+    const minioBucketRoot = path.join(minio.dataDir, minio.bucket);
+    const allowedRoots = [dataRoot, storageRoot, minio.dataDir, minioBucketRoot];
+    if (!allowedRoots.some((root) => isInsideRoot(root, sourcePath))) throw new Error(`conda-pack 环境包必须位于服务器资产目录内：${allowedRoots.join("、")}`);
     const stat = fs.statSync(sourcePath);
     const sha = await hashFile(sourcePath);
     const artifactKey = pythonEnvObjectKey(sha, path.basename(sourcePath));
+    const manifestKey = pythonEnvManifestKey(sha);
     await store.putFile(artifactKey, sourcePath, { "x-amz-meta-source": "conda-pack" });
     const unpackPath = String(body.unpackPath || body.unpack_path || path.join(storageRoot, "runtime", "python-envs", sha.slice(0, 12))).trim();
     const defaultPython = process.platform === "win32" ? path.join(unpackPath, "python.exe") : path.join(unpackPath, "bin", "python");
     const requestedPythonPath = String(body.pythonPath || body.python_path || defaultPython).trim();
-    const info = inspectCondaPackArchive(sourcePath, unpackPath, requestedPythonPath);
-    const pythonPath = info.pythonPath || requestedPythonPath;
+    const extractedPythonPath = ensureCondaPackUnpacked(sourcePath, unpackPath, requestedPythonPath);
+    const info = inspectCondaPackArchive(sourcePath, unpackPath, extractedPythonPath);
+    const pythonPath = info.pythonPath || extractedPythonPath;
     const platform = info.platform;
     const accelerator = info.accelerator;
     const capabilities = {
       source_type: "conda_pack",
+      asset_policy: "platform_minio_asset",
       artifact_key: artifactKey,
+      manifest_key: manifestKey,
       tasks: body.tasks || ["detect", "segment", "classify"],
       detected_from: info.detectedFrom,
       auto_detected: true,
+      ultralytics_detect: Boolean(info.packages.ultralytics),
+      mmdetection_detect: Boolean(info.packages.mmdet && info.packages.mmcv),
+      detectron2_detect: Boolean(info.packages.detectron2),
+      torch: Boolean(info.packages.torch),
     };
+    const manifest = {
+      format: "det-dashboard.python-env.v1",
+      assetType: "python_env",
+      sourceType: "conda_pack",
+      artifactKey,
+      manifestKey,
+      artifactName: path.basename(sourcePath),
+      artifactSize: stat.size,
+      artifactSha256: sha,
+      unpackPath,
+      pythonPath,
+      osType: platform.osType,
+      arch: platform.arch,
+      accelerator,
+      pythonVersion: info.version,
+      torchVersion: info.packages.torch_version || "",
+      cudaAvailable: Boolean(info.packages.cuda_available),
+      cudaVersion: info.packages.cuda_version || "",
+      packages: info.packages,
+      tasks: body.tasks || ["detect", "segment", "classify"],
+      importSourcePath: sourcePath,
+      createdAt: new Date().toISOString(),
+    };
+    await store.putJson(manifestKey, manifest);
     const rows = await query(
       `INSERT INTO runtime_envs
        (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version,
@@ -2588,7 +2718,7 @@ async function createPythonEnv(body = {}) {
         info.packages.torch_version || "",
         Boolean(info.packages.cuda_available),
         info.packages.cuda_version || "",
-        JSON.stringify({ sourcePath, packages: info.packages }),
+        JSON.stringify({ assetPolicy: "platform_minio_asset", artifactKey, manifestKey, importSourcePath: sourcePath, packages: info.packages }),
         JSON.stringify(capabilities),
         "conda_pack",
         artifactKey,
@@ -2609,9 +2739,10 @@ async function createPythonEnv(body = {}) {
   const arch = info.platform.arch;
   const accelerator = info.accelerator;
   const metadata = {
-    sourceType: "server_python",
-    recommendedSourceType: body.preferCondaPack ? "conda_pack" : "server_python",
-    assetPolicy: body.preferCondaPack ? "建议使用 conda-pack 环境包统一入 MinIO；服务器 Python 路径用于快速检测和临时登记。" : "服务器 Python 路径登记",
+    sourceType: "server_managed",
+    legacySourceType: "server_python",
+    recommendedSourceType: body.preferCondaPack ? "conda_pack" : "server_managed",
+    assetPolicy: body.preferCondaPack ? "建议使用 conda-pack 环境包统一存入 MinIO；服务器 Python 路径用于快速检测和临时登记。" : "服务器 Python 路径登记",
     pythonPath,
     envType,
     osType,
@@ -2655,7 +2786,7 @@ async function createPythonEnv(body = {}) {
         detectron2_detect: Boolean(info.packages.detectron2),
         torch: Boolean(info.packages.torch),
       }),
-      "server_python",
+      "server_managed",
       artifactKey,
       "metadata.json",
       artifactSize,
@@ -2693,20 +2824,19 @@ async function findWeightArtifact(modelVersionId) {
      FROM model_files ma
      WHERE ma.model_version_id=$1 AND ma.artifact_type='weights'
      ORDER BY
-       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
+       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\weights\\best.pt' THEN 0 ELSE 1 END,
        ma.created_at DESC
      LIMIT 1`,
     [modelVersionId],
   );
   const artifact = rows.rows[0];
   if (!artifact) return null;
-  const meta = artifact.metadata_json || {};
-  if (meta.localPath && fs.existsSync(meta.localPath)) return meta.localPath;
-  const fallback = store.localFallbackPath(artifact.path);
-  if (fs.existsSync(fallback)) return fallback;
-  return null;
+  const ext = path.extname(artifact.path || "") || ".pt";
+  const cached = path.join(storageRoot, "runtime", "model-cache", modelVersionId, `weights${ext}`);
+  if (fs.existsSync(cached) && fs.statSync(cached).isFile()) return cached;
+  await writeObjectToFile(artifact.path, cached);
+  return cached;
 }
-
 async function streamModelArtifact(res, modelVersionId, artifactId) {
   const params = [modelVersionId];
   let where = "ma.model_version_id=$1";
@@ -2830,6 +2960,64 @@ async function requeueTrainingJob(jobId, body = {}) {
   );
   await appendTrainingLog(jobId, "system", "job requeued");
   return updated.rows[0];
+}
+
+function stopProcess(pid) {
+  const numericPid = Number(pid);
+  if (!numericPid || numericPid === process.pid) return false;
+  try {
+    process.kill(numericPid);
+    return true;
+  } catch (error) {
+    if (process.platform === "win32") {
+      try {
+        spawn("taskkill", ["/PID", String(numericPid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+}
+
+async function pauseTrainingJob(jobId) {
+  const job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw new Error("训练任务不存在");
+  if (["done", "failed", "cancelled"].includes(job.status)) throw new Error("已结束的训练任务不能暂停");
+  if (job.status === "paused") return job;
+  const stopped = stopProcess(job.process_pid);
+  const updated = (await query(
+    `UPDATE runtime_training_jobs
+     SET status='paused', process_pid=NULL, worker_id='', heartbeat_at=now(), message=$1
+     WHERE id=$2 RETURNING *`,
+    [stopped ? "训练任务已暂停，运行进程已停止" : "训练任务已暂停", jobId],
+  )).rows[0];
+  await appendTrainingLog(jobId, "system", stopped ? "job paused; process stopped" : "job paused");
+  return updated;
+}
+
+async function resumeTrainingJob(jobId) {
+  const job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw new Error("训练任务不存在");
+  if (job.status !== "paused") throw new Error("只有已暂停的训练任务可以继续");
+  const updated = (await query(
+    `UPDATE runtime_training_jobs
+     SET status='pending', process_pid=NULL, worker_id='', heartbeat_at=NULL, message=$1
+     WHERE id=$2 RETURNING *`,
+    ["训练任务已继续，等待 worker 接管", jobId],
+  )).rows[0];
+  await appendTrainingLog(jobId, "system", "job resumed");
+  return updated;
+}
+
+async function deleteTrainingJob(jobId) {
+  const job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [jobId])).rows[0];
+  if (!job) throw new Error("训练任务不存在");
+  const stopped = stopProcess(job.process_pid);
+  await appendTrainingLog(jobId, "system", stopped ? "job deleted; process stopped" : "job deleted");
+  const deleted = await query("DELETE FROM runtime_training_jobs WHERE id=$1 RETURNING id", [jobId]);
+  return { deleted: true, id: deleted.rows[0].id };
 }
 
 async function listInferenceJobs() {
@@ -3073,7 +3261,7 @@ async function createInferenceJob(body = {}) {
     : algorithms.find((item) => modelFramework && String(item.framework || "").toLowerCase() === modelFramework)
       || algorithms.find((item) => item.algorithm_key === "dummy_empty_detector")
       || algorithms[0];
-  if (!algorithm) throw new Error(requestedAlgorithmAssetId ? "算法方法资产不存在" : "请选择算法名称：推理任务必须绑定一个算法资产");
+  if (!algorithm) throw new Error(requestedAlgorithmAssetId ? "算法资产不存在" : "请选择算法名称：推理任务必须绑定一个算法资产");
   params.algorithmAssetId = algorithm.id;
   params.templateId = algorithm.id;
   params.algorithmKey = algorithm.algorithm_key || algorithm.template_key;
@@ -3177,7 +3365,7 @@ async function prepareInferenceInputCache(job) {
   const input = paramsJson.input || {};
   const filters = input.filters || {};
   const sqlParams = [job.dataset_project_id];
-  const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
+  const where = ["pi.project_id=$1", "pi.deleted_at IS NULL", "p.deleted_at IS NULL"];
 
   const sceneValues = inferenceListParam(filters, "scenes", "scene");
   const viewValues = inferenceListParam(filters, "views", "view");
@@ -3857,6 +4045,21 @@ async function computeDetectionMetrics(job, predictionRows) {
   };
 }
 
+async function resolveRuntimePythonEnv(env = {}) {
+  if (!env?.id) throw new Error("Python 环境不存在");
+  if (env.python_path && fs.existsSync(env.python_path) && fs.statSync(env.python_path).isFile()) return env;
+  if (env.source_type !== "conda_pack" || !env.artifact_key || !env.unpack_path) return env;
+  const archiveName = env.artifact_name || path.basename(env.artifact_key) || `${env.id}.tar.gz`;
+  const archivePath = path.join(storageRoot, "runtime", "python-env-cache", env.id, archiveName);
+  if (!fs.existsSync(archivePath)) await writeObjectToFile(env.artifact_key, archivePath);
+  const defaultPython = process.platform === "win32" ? path.join(env.unpack_path, "python.exe") : path.join(env.unpack_path, "bin", "python");
+  const pythonPath = ensureCondaPackUnpacked(archivePath, env.unpack_path, env.python_path || defaultPython);
+  if (pythonPath !== env.python_path) {
+    await query("UPDATE runtime_envs SET python_path=$1 WHERE id=$2", [pythonPath, env.id]);
+    env.python_path = pythonPath;
+  }
+  return env;
+}
 function runChildProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { windowsHide: true, ...options });
@@ -3882,10 +4085,10 @@ async function runUltralyticsInferenceJob(job) {
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
   const envId = params.pythonEnvId || params.python_env_id;
   if (!envId) throw new Error("YOLO 推理缺少运行环境资产");
-  const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+  let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
   if (!env) throw new Error("YOLO 推理运行环境不存在");
-  if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);
-  const capabilities = env.capabilities_json || {};
+  env = await resolveRuntimePythonEnv(env);
+  if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);  const capabilities = env.capabilities_json || {};
   if (!capabilities.ultralytics_detect) throw new Error("所选运行环境未检测到 ultralytics，不能执行 YOLO 推理");
   const weightPath = await findWeightArtifact(job.model_version_id);
   if (!weightPath) throw new Error("YOLO 推理缺少可用模型权重文件");
@@ -3899,7 +4102,8 @@ async function runUltralyticsInferenceJob(job) {
   fs.mkdirSync(outputDir, { recursive: true });
   const predictionsPath = path.join(outputDir, "predictions.json");
   const runnerPath = path.join(outputRoot, "run_ultralytics_inference.py");
-  const device = env.cuda_available ? String(params.device ?? "0") : "cpu";
+  const requestedDevice = String(params.device ?? "").trim();
+  const device = requestedDevice || (env.cuda_available ? "0" : "cpu");
   const runnerConfig = {
     jobId: job.id,
     weights: weightPath,
@@ -4013,7 +4217,7 @@ async function runInferenceJob(job, workerId) {
       if (!params.pythonEnvId) missing.push("运行环境资产");
       if (!job.model_version_id) missing.push("模型权重版本");
       const message = missing.length
-        ? `推理任务无法执行：缺少${missing.join("、")}。请在推理平台选择算法、运行环境和权重后重新提交。`
+        ? `推理任务无法执行：缺少 ${missing.join("、")}。请在推理平台选择算法、运行环境和权重后重新提交。`
         : `算法 ${params.templateName || algorithmKey} 已登记，但当前内置 worker 尚未接入该算法的执行器。请先使用“空检测模型推理”验证流程，或接入对应 Python 适配器。`;
       await query(
         "UPDATE runtime_inference_jobs SET status='failed', progress=100, message=$1, finished_at=now() WHERE id=$2",
@@ -4272,6 +4476,7 @@ async function runTrainingJob(job, workerId) {
     child.stderr.on("data", onData("stderr"));
     const exitCode = await new Promise((resolve) => child.on("close", resolve));
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
+    if (!job || job.status === "paused") return;
     if (exitCode !== 0) throw new Error(`训练命令退出码 ${exitCode}`);
     await finishTrainingJob(job);
   } catch (error) {
@@ -4409,7 +4614,7 @@ async function listProjectImages(projectId, queryParams) {
     where.push(`EXISTS (
       SELECT 1 FROM image_annotations a
       JOIN projects p ON p.active_label_version_id = a.label_version_id
-      WHERE p.id = pi.project_id AND a.project_image_id = pi.id AND a.label = ANY($${params.length})
+      WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id AND a.label = ANY($${params.length})
     )`);
   }
   params.push(pageSize, offset);
@@ -4420,8 +4625,9 @@ async function listProjectImages(projectId, queryParams) {
       ) AS absolute_path,
       (SELECT count(*)::int FROM image_annotations a
        JOIN projects p ON p.active_label_version_id = a.label_version_id
-       WHERE p.id = pi.project_id AND a.project_image_id = pi.id) AS annotation_count
+       WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id) AS annotation_count
      FROM project_images pi
+     JOIN projects p ON p.id = pi.project_id
      JOIN image_assets ia ON ia.id = pi.image_asset_id
      LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
      WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
@@ -4432,6 +4638,7 @@ async function listProjectImages(projectId, queryParams) {
   const count = await query(
     `SELECT count(*)::int AS count
      FROM project_images pi
+     JOIN projects p ON p.id = pi.project_id
      LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
      WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)`,
     params.slice(0, -2),
@@ -4441,7 +4648,7 @@ async function listProjectImages(projectId, queryParams) {
   if (!items.length) return { page, pageSize, total: count.rows[0].count, items };
 
   const annParams = [projectId, items.map((item) => item.id)];
-  const annWhere = ["p.id=$1", "a.project_image_id = ANY($2::uuid[])"];
+  const annWhere = ["p.id=$1", "p.deleted_at IS NULL", "a.project_image_id = ANY($2::uuid[])"];
   if (labelValues.length) {
     annParams.push(labelValues);
     annWhere.push(`a.label = ANY($${annParams.length})`);
@@ -4493,25 +4700,26 @@ async function projectSummary(projectId) {
        WHERE p.deleted_at IS NULL
      )
      SELECT
-      (SELECT count(*)::int FROM project_images WHERE project_id=$1 AND deleted_at IS NULL) AS direct_image_count,
-      (SELECT count(*)::int FROM project_videos WHERE project_id=$1 AND deleted_at IS NULL) AS direct_video_count,
-      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.id=$1 AND s.effective_label_version_id=a.label_version_id) AS direct_annotation_count,
+      (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE s.id=$1 AND pi.deleted_at IS NULL) AS direct_image_count,
+      (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE s.id=$1 AND pv.deleted_at IS NULL) AS direct_video_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id WHERE s.id=$1 AND s.effective_label_version_id=a.label_version_id AND pi.deleted_at IS NULL) AS direct_annotation_count,
       (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS image_count,
       (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE pv.deleted_at IS NULL) AS video_count,
-      (SELECT count(DISTINCT a.project_image_id)::int FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id) AS labeled_image_count,
-      (SELECT count(*)::int FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id) AS annotation_count,
+      (SELECT count(DISTINCT a.project_image_id)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL) AS labeled_image_count,
+      (SELECT count(*)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL) AS annotation_count,
       (SELECT COALESCE(json_agg(json_build_object('label', label, 'count', count) ORDER BY count DESC, label), '[]'::json)
        FROM (
          SELECT a.label, count(*)::int AS count
          FROM image_annotations a
-         JOIN subtree s ON s.effective_label_version_id=a.label_version_id
-         WHERE lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', '无', '无目标', '无标注')
+         JOIN project_images pi ON pi.id=a.project_image_id
+         JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id
+         WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative')
          GROUP BY a.label
        ) label_stats) AS label_counts,
       (SELECT json_agg(DISTINCT scene) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS scenes,
       (SELECT json_agg(DISTINCT view) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS views,
       (SELECT json_agg(DISTINCT modality) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS modalities,
-      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN subtree s ON s.effective_label_version_id=a.label_version_id WHERE lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', '无', '无目标', '无标注')) AS labels`,
+      (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative')) AS labels`,
     [projectId],
   );
   return rows.rows[0];
@@ -4694,6 +4902,7 @@ async function route(req, res) {
       dataRootDisplay,
       browseRoot,
       browseRootDisplay,
+      browseAllDrives,
       hostPathMode,
       hostDialogUrl,
       nativeDialogMode,
@@ -4745,6 +4954,7 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") return sendJson(res, await clearModelAssets(await readBody(req)));
   if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets() });
   if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await listRuntimeAssetLinks() });
   if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates() });
@@ -4762,6 +4972,12 @@ async function route(req, res) {
   if (method === "PATCH" && trainingPriorityMatch) return sendJson(res, { job: await moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction) });
   const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
   if (method === "POST" && requeueTrainingMatch) return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) });
+  const pauseTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/pause$/);
+  if (method === "POST" && pauseTrainingMatch) return sendJson(res, { job: await pauseTrainingJob(pauseTrainingMatch[1]) });
+  const resumeTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/resume$/);
+  if (method === "POST" && resumeTrainingMatch) return sendJson(res, { job: await resumeTrainingJob(resumeTrainingMatch[1]) });
+  const deleteTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)$/);
+  if (method === "DELETE" && deleteTrainingMatch) return sendJson(res, await deleteTrainingJob(deleteTrainingMatch[1]));
   const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
   if (method === "GET" && trainingLogsMatch) {
     const rows = await query("SELECT * FROM runtime_training_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
@@ -4974,13 +5190,6 @@ main()
     console.error(error);
     process.exit(1);
   });
-
-
-
-
-
-
-
 
 
 
