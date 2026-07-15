@@ -5719,13 +5719,25 @@ return [
 
 function versionTooltip(version = {}) {
 
+const params = parseMaybeJson(version.params_json);
+const inferredEpoch = String(version.version_name || "").match(/epoch[_-]?(\d+)/i)?.[1];
+const epochText = version.training_current_epoch != null
+  ? `${version.training_current_epoch}/${version.training_total_epochs || "--"}`
+  : (params.epoch ?? inferredEpoch ?? "未记录");
+
 return [
 
 `模型：${version.model_name || "未命名模型"}`,
 
 `版本：${version.version_name || "未命名版本"}`,
 
+`来源任务：${version.training_job_name || (version.training_job_id ? version.training_job_id : "手动登记/预训练")}`,
+
 `训练数据集：${version.dataset_project_name || "未绑"}`,
+
+`训练轮次：${epochText}`,
+
+`模型阶段：${version.stage || "未记录"}`,
 
 `生成时间：${formatDateTime(version.created_at)}`,
 
@@ -6392,9 +6404,9 @@ return (
               {familyRows.map((family) => <option key={family.family} value={family.family}>{family.family}</option>)}
             </select>
             <span className="row-label">模型版本</span>
-            <select value={inferenceForm.modelVersionId} onChange={(e) => setField("modelVersionId", e.target.value)}>
+            <select value={inferenceForm.modelVersionId} onChange={(e) => setField("modelVersionId", e.target.value)} title={versionTooltip(selectedVersion)}>
               <option value="">请选择模型版本</option>
-              {inferenceVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}
+              {inferenceVersions.map((version) => <option key={version.id} value={version.id} title={versionTooltip(version)}>{version.model_name} / {version.version_name}</option>)}
             </select>
             <span className="row-label">Python 环境</span>
             <select value={inferenceForm.pythonEnvId} onChange={(e) => setField("pythonEnvId", e.target.value)}>
@@ -6449,7 +6461,7 @@ return (
               <div className="inference-table-row" key={job.id}>
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
-                <span>{job.model_name || selectedVersion?.model_name || "YOLOv8n"}</span>
+                <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
                 <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
                 <progress value={job.progress || (done ? 100 : 0)} max="100" />
                 <span>{metrics.images || job.image_count || 0}</span>

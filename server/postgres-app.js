@@ -2577,6 +2577,16 @@ function dateCode() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
+function minuteCode(date = new Date()) {
+  const parts = [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes()];
+  return parts.map((value, index) => String(value).padStart(index === 0 ? 4 : 2, "0")).join("");
+}
+
+function inferenceJobName(taskName, datasetName, fallbackName = "inference") {
+  const normalize = (value) => String(value || "").trim().replace(/[\\/:*?"<>|\s]+/g, "_").replace(/^_+|_+$/g, "");
+  return [normalize(taskName) || normalize(fallbackName), normalize(datasetName) || "dataset", minuteCode()].join("_");
+}
+
 async function nextModelVersionName(prefix, modelId) {
   const base = cleanName(prefix, "version");
   const like = `${base}_%`;
@@ -3175,6 +3185,8 @@ async function listModelVersions(modelId) {
   }
   const rows = await query(
     `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name,
+       tj.name AS training_job_name, tj.current_epoch AS training_current_epoch,
+       tj.total_epochs AS training_total_epochs, tj.finished_at AS training_finished_at,
        COALESCE((
          SELECT jsonb_agg(
            jsonb_build_object(
@@ -3193,6 +3205,7 @@ async function listModelVersions(modelId) {
      FROM model_revisions mv
      JOIN model_clusters m ON m.id=mv.model_id
      LEFT JOIN projects p ON p.id=mv.dataset_project_id
+     LEFT JOIN runtime_training_jobs tj ON tj.id=mv.training_job_id
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
      ORDER BY mv.created_at DESC
      LIMIT 200`,
@@ -3595,13 +3608,21 @@ async function getInferenceEvaluation(jobId) {
       [project.active_label_version_id, imageIds],
     )).rows;
   }
-  const evaluation = evaluateDetections({ predictionRows, groundTruthRows, iouThreshold: 0.5 });
+  const labeledImageIds = new Set(groundTruthRows.map((row) => String(row.project_image_id)));
+  const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(String(row.projectImageId)));
+  const evaluation = evaluateDetections({ predictionRows: evaluationRows, groundTruthRows, iouThreshold: 0.5 });
+  evaluation.summary = {
+    ...(evaluation.summary || {}),
+    inferenceImages: predictionRows.length,
+    evaluatedImages: evaluationRows.length,
+    skippedUnlabeledImages: predictionRows.length - evaluationRows.length,
+  };
   const resultByImage = new Map(resultRows.map((row) => [row.project_image_id, row]));
   return {
     ...evaluation,
     jobId,
     labelVersionId: project?.active_label_version_id || null,
-    reason: groundTruthRows.length ? "" : "当前数据集没有可用于评估的活动标签版本或标注",
+    reason: groundTruthRows.length ? "仅对存在真值标注的图片进行评估；未标注图片的推理结果仍已保存" : "推理结果已保存，但当前数据集没有可用于评估的活动标签版本或标注",
     errors: evaluation.errors.map((row) => {
       const source = resultByImage.get(row.projectImageId) || {};
       return {
@@ -3720,7 +3741,7 @@ async function requeueInferenceJob(jobId) {
      `UPDATE runtime_inference_jobs
      SET status='pending', progress=0, metrics_json='{}'::jsonb, message=$1,
           started_at=NULL, finished_at=NULL,
-          created_at=now(), priority=COALESCE(priority, 0)
+          created_at=now(), priority=(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)
      WHERE id=$2 RETURNING *`,
     ["推理任务已重新排队，等待 worker 接管", jobId],
   )).rows[0];
@@ -3762,10 +3783,10 @@ async function createInferenceJob(body = {}) {
   params.manifestKey = algorithm.manifest_key;
   params.adapterKey = algorithm.adapter_key;
   params.algorithmMinioPrefix = algorithm.minio_prefix;
-  const name = String(body.name || `${project.name}_infer_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
+  const name = inferenceJobName(body.name, project.name, algorithm.name || algorithm.algorithm_key);
   const inserted = await query(
-    `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message)
-     VALUES ($1,$2,$3,'preparing',$4,$5) RETURNING *`,
+    `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message, priority)
+     VALUES ($1,$2,$3,'preparing',$4,$5,(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)) RETURNING *`,
     [name, modelVersionId, datasetProjectId, JSON.stringify(params), "正在准备推理输入缓存"],
   );
   const job = inserted.rows[0];
@@ -4454,14 +4475,27 @@ async function computeDetectionMetrics(job, predictionRows) {
     ...row,
     metricLabel: metricLabel(row),
   }));
+  if (!gtRows.length) {
+    return {
+      images: 0,
+      inferenceImages: predictionRows.length,
+      skippedUnlabeledImages: predictionRows.length,
+      predictions: 0,
+      groundTruth: 0,
+      evaluated: false,
+      reason: "推理结果已保存，但所选数据集没有可用于评估的标注图片",
+    };
+  }
   const gtByImage = new Map();
   for (const gt of gtRows) {
     const list = gtByImage.get(gt.project_image_id) || [];
     list.push(gt);
     gtByImage.set(gt.project_image_id, list);
   }
+  const labeledImageIds = new Set(gtByImage.keys());
+  const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(row.projectImageId));
   const detections = [];
-  for (const row of predictionRows) {
+  for (const row of evaluationRows) {
     for (const prediction of row.predictions || []) {
       detections.push({
         ...prediction,
@@ -4525,7 +4559,9 @@ async function computeDetectionMetrics(job, predictionRows) {
   const map50 = apByThreshold.find((item) => item.threshold === 0.5)?.map ?? null;
   const map5095 = validMaps.length ? validMaps.reduce((sum, value) => sum + value, 0) / validMaps.length : null;
   return {
-    images: predictionRows.length,
+    images: evaluationRows.length,
+    inferenceImages: predictionRows.length,
+    skippedUnlabeledImages: predictionRows.length - evaluationRows.length,
     predictions: detections.length,
     groundTruth: gtRows.length,
     labels: labels.length,
@@ -4691,6 +4727,15 @@ async function runUltralyticsInferenceJob(job) {
   await recordRuntimeAssetLink(job, metrics);
 }
 
+function normalizeTorchDevice(value, cudaAvailable = false) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return cudaAvailable ? "cuda:0" : "cpu";
+  if (/^\d+$/.test(raw)) return `cuda:${raw}`;
+  if (raw === "-1") return cudaAvailable ? "cuda:0" : "cpu";
+  if (/^cuda:\d+$/.test(raw) || ["cpu", "mps"].includes(raw)) return raw;
+  return raw;
+}
+
 async function runDinoInferenceJob(job) {
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
   const envId = params.pythonEnvId || params.python_env_id;
@@ -4724,7 +4769,7 @@ async function runDinoInferenceJob(job) {
   const config = {
     jobId: job.id, configPath, weightPath, manifestPath, predictionsPath, visualizationDir,
     scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
-    device: String(params.device ?? (env.cuda_available ? "cuda:0" : "cpu")),
+    device: normalizeTorchDevice(params.device, env.cuda_available),
     classNames,
   };
   const runner = [
