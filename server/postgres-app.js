@@ -32,6 +32,7 @@ const { createResourceAccess } = require("./resource-access");
 const { createCollaborationService } = require("./collaboration-service");
 const { createMultiUserRouter } = require("./api-router");
 const { createAuthService } = require("./auth-service");
+const { createSettingsService } = require("./settings-service");
 const { createPathService } = require("./platform/path-service");
 const {
   imageObjectKey,
@@ -64,6 +65,18 @@ let resourceAccess;
 let collaborationService;
 let multiUserRouter;
 const authService = createAuthService({ query, httpError });
+const settingsService = createSettingsService({
+  query,
+  path,
+  databaseUrl,
+  dataRoot,
+  dataRootDisplay,
+  browseRoot,
+  browseRootDisplay,
+  exportRootDisplay,
+  minio,
+});
+const { getAppSettings, saveAppSettings } = settingsService;
 const pathService = createPathService({
   config: runtime.config,
   fs,
@@ -360,39 +373,6 @@ function validateWindowsCondaPackRoot(sourcePath) {
     throw new Error(`环境包根目录结构不正确，缺少：${missing.join("、")}。归档必须直接包含 python.exe、Lib、Scripts、conda-meta，不能包含额外顶层目录${wrapper ? `（检测到 ${wrapper}/）` : ""}`);
   }
   return entries;
-}
-
-function defaultSettings() {
-  return {
-    postgres: databaseUrl.replace(/:[^:@/]+@/, ":****@"),
-    dataStorage: dataRootDisplay || dataRoot,
-    browseRoot: browseRootDisplay || browseRoot,
-    minioStorage: `${minio.endPoint}:${minio.port} / ${minio.bucket}`,
-    minioDataDir: minio.dataDir,
-    pythonAssets: "D:\\Program Files\\miniforge3",
-    algorithmAssets: path.join(minio.dataDir, minio.bucket, "code-assets", "algorithms"),
-    exportRoot: exportRootDisplay,
-  };
-}
-
-async function getAppSettings() {
-  const rows = (await query("SELECT key, value_json FROM app_settings")).rows;
-  const settings = defaultSettings();
-  for (const row of rows) settings[row.key] = row.value_json?.value ?? row.value_json;
-  return settings;
-}
-
-async function saveAppSettings(body = {}) {
-  const allowed = new Set(["postgres", "dataStorage", "browseRoot", "minioStorage", "minioDataDir", "pythonAssets", "algorithmAssets", "exportRoot"]);
-  const entries = Object.entries(body.settings || body).filter(([key]) => allowed.has(key));
-  for (const [key, value] of entries) {
-    await query(
-      `INSERT INTO app_settings (key, value_json, updated_at) VALUES ($1,$2,now())
-       ON CONFLICT (key) DO UPDATE SET value_json=EXCLUDED.value_json, updated_at=now()`,
-      [key, JSON.stringify({ value: String(value || "") })],
-    );
-  }
-  return getAppSettings();
 }
 
 async function seedMlRuntimeConfig() {
