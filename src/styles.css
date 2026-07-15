@@ -12124,3 +12124,139 @@ button:disabled:hover {
   .parameter-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .model-init-row { grid-template-columns: auto minmax(130px, 1fr) auto minmax(120px, .8fr) !important; }
 }
+
+/* Resizable ML workspaces and schema-driven training controls. */
+.training-workspace.resizable-workspace,
+.inference-workspace.resizable-workspace {
+  grid-template-columns: var(--workspace-left) 7px minmax(520px, 1fr) 7px var(--workspace-right) !important;
+}
+
+.workspace-resize-handle {
+  position: relative;
+  z-index: 8;
+  width: 7px;
+  min-width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  background: color-mix(in srgb, var(--line, #536474) 28%, transparent);
+}
+
+.workspace-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: transparent;
+  transition: background .15s ease;
+}
+
+.workspace-resize-handle:hover::after,
+.resizing-workspace .workspace-resize-handle::after {
+  background: var(--accent, #14b8a6);
+}
+
+.resizing-workspace {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.training-main {
+  display: block !important;
+  overflow: auto !important;
+}
+
+.training-builder {
+  overflow: visible !important;
+  margin-bottom: 0 !important;
+}
+
+.training-queue {
+  margin-top: 0 !important;
+  max-height: 260px !important;
+}
+
+.training-multiselect select[multiple] {
+  min-height: 86px;
+  padding: 3px;
+}
+
+.training-multiselect option {
+  padding: 5px 7px;
+  border-radius: 3px;
+}
+
+.selection-summary,
+.initialization-note {
+  color: var(--training-muted, var(--muted)) !important;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.initialization-note {
+  grid-column: span 2;
+  align-self: center;
+}
+
+.schema-parameter-groups {
+  display: grid;
+  grid-template-columns: 1fr !important;
+  gap: 8px;
+}
+
+.parameter-group {
+  min-width: 0;
+  border: 1px solid var(--training-border, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--training-control, var(--panel)) 86%, transparent);
+}
+
+.parameter-group summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  cursor: pointer;
+  color: var(--training-strong, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.parameter-group summary small { color: var(--training-accent, var(--accent)); font-weight: 500; }
+.parameter-group fieldset { margin: 0; padding: 8px 10px 10px; border: 0; border-top: 1px solid var(--training-border-soft, var(--line)); display: grid; grid-template-columns: repeat(4, minmax(135px, 1fr)); gap: 9px; }
+.parameter-group fieldset > label { display: grid; grid-template-columns: minmax(70px, .75fr) minmax(76px, 1fr); align-items: center; gap: 7px; }
+.parameter-group fieldset input,
+.parameter-group fieldset select { min-width: 0; width: 100%; }
+.required-mark { margin-left: 2px; color: #dc2626; }
+
+.verified-panel { display: none !important; }
+
+.training-table-head,
+.training-table-row {
+  grid-template-columns: minmax(140px,1.25fr) minmax(92px,.85fr) minmax(92px,.85fr) 66px minmax(72px,.65fr) 58px 62px 58px 48px 220px !important;
+  column-gap: 6px !important;
+}
+
+.training-table-row > .training-row-actions {
+  width: 220px !important;
+  min-width: 220px !important;
+  max-width: 220px !important;
+  gap: 4px !important;
+}
+
+.inference-workspace .reference-queue .inference-table-head,
+.inference-workspace .reference-queue .inference-table-row {
+  grid-template-columns: minmax(150px,1.35fr) minmax(78px,.72fr) minmax(86px,.78fr) 70px 72px 54px 54px 58px 58px 58px 166px !important;
+  column-gap: 5px !important;
+}
+
+.inference-workspace .reference-queue .inference-table-head > span:last-child,
+.inference-workspace .reference-queue .inference-table-row > .queue-actions {
+  width: 166px !important;
+  min-width: 166px !important;
+  max-width: 166px !important;
+}
+
+@media (max-width: 1500px) {
+  .parameter-group fieldset { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+}

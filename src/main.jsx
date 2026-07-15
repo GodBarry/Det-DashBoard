@@ -307,6 +307,7 @@ const [trainingForm, setTrainingForm] = useState(() => ({
 name: "",
 datasetProjectId: "",
 trainProjectId: "",
+trainProjectIds: [],
 valProjectId: "",
 testProjectId: "",
 modelId: "",
@@ -485,6 +486,7 @@ useEffect(() => {
     trainingForm: {
       datasetProjectId: trainingForm.datasetProjectId,
       trainProjectId: trainingForm.trainProjectId,
+      trainProjectIds: trainingForm.trainProjectIds,
       valProjectId: trainingForm.valProjectId,
       testProjectId: trainingForm.testProjectId,
       modelId: trainingForm.modelId,
@@ -812,6 +814,7 @@ datasetProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId,
 
 datasetSplits: {
 trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
+trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
 valProjectId: trainingForm.valProjectId || null,
 testProjectId: trainingForm.testProjectId || null,
 },
@@ -850,6 +853,7 @@ savePeriod: Number(trainingForm.savePeriod),
 save_period: Number(trainingForm.savePeriod),
 datasetSplits: {
 trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
+trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
 valProjectId: trainingForm.valProjectId || null,
 testProjectId: trainingForm.testProjectId || null,
 },
@@ -3540,6 +3544,43 @@ function SettingsDialog({ config, onClose }) {
   );
 
 }
+function useWorkspaceColumns(storageKey, defaults) {
+  const [columns, setColumns] = useState(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(storageKey));
+      return saved && Number(saved.left) && Number(saved.right) ? saved : defaults;
+    } catch {
+      return defaults;
+    }
+  });
+  const beginResize = (side, event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startValue = columns[side];
+    const onMove = (moveEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const min = side === "left" ? 220 : 300;
+      const max = side === "left" ? 460 : 620;
+      setColumns((current) => ({ ...current, [side]: Math.max(min, Math.min(max, startValue + (side === "left" ? delta : -delta))) }));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      document.body.classList.remove("resizing-workspace");
+    };
+    document.body.classList.add("resizing-workspace");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+  useEffect(() => {
+    window.localStorage.setItem(storageKey, JSON.stringify(columns));
+  }, [columns, storageKey]);
+  return { columns, beginResize };
+}
+
+function WorkspaceResizeHandle({ side, onPointerDown }) {
+  return <div className={`workspace-resize-handle ${side}`} role="separator" aria-orientation="vertical" aria-label={`调整${side === "left" ? "左侧" : "右侧"}栏宽度`} onPointerDown={(event) => onPointerDown(side, event)} />;
+}
+
 function TrainingWorkspace({
 
   projects,
@@ -3580,9 +3621,12 @@ function TrainingWorkspace({
 
 }) {
 
+  const { columns, beginResize } = useWorkspaceColumns("det-dashboard.training-columns", { left: 292, right: 410 });
+
   const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
 
-  const selectedProject = projects.find((project) => project.id === (trainingForm.trainProjectId || trainingForm.datasetProjectId)) || projects[0] || {};
+  const trainProjectIds = trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : [trainingForm.trainProjectId || trainingForm.datasetProjectId].filter(Boolean);
+  const selectedProject = projects.find((project) => project.id === trainProjectIds[0]) || {};
 
   const selectedEnv = pythonEnvs.find((env) => env.id === trainingForm.pythonEnvId) || pythonEnvs.find((env) => String(env.name || '').includes('ultralytics')) || pythonEnvs[0] || {};
 
@@ -3590,7 +3634,7 @@ function TrainingWorkspace({
 
   const selectedModel = mlModels.find((model) => model.id === trainingForm.modelId) || mlModels.find((model) => String(model.name || '').includes('YOLOv8l')) || mlModels[0] || {};
 
-  const selectedAlgorithm = algorithms.find((item) => item.id === trainingForm.templateId) || algorithms.find((item) => String(item.algorithm_key || item.template_key || '').includes('ultralytics')) || algorithms[0] || {};
+  const selectedAlgorithm = algorithms.find((item) => (item.id || item.template_key) === trainingForm.templateId) || {};
 
   const [expandedGroups, setExpandedGroups] = useState(() => new Set(["数据集项目", "算法适配器", "模型簇", "Python 环境"]));
   const [activeDatasetSplit, setActiveDatasetSplit] = useState("trainProjectId");
@@ -3616,8 +3660,15 @@ function TrainingWorkspace({
         name: project.name,
         right: project.image_count || 0,
         depth,
-        active: [trainingForm.trainProjectId, trainingForm.valProjectId, trainingForm.testProjectId, trainingForm.datasetProjectId].includes(project.id),
-        onClick: () => setTrainingForm({ ...trainingForm, [activeDatasetSplit]: project.id, ...(activeDatasetSplit === "trainProjectId" ? { datasetProjectId: project.id } : {}) }),
+        active: activeDatasetSplit === "trainProjectId" ? trainProjectIds.includes(project.id) : trainingForm[activeDatasetSplit] === project.id,
+        onClick: () => {
+          if (activeDatasetSplit === "trainProjectId") {
+            const nextIds = trainProjectIds.includes(project.id) ? trainProjectIds.filter((id) => id !== project.id) : [...trainProjectIds, project.id];
+            setTrainingForm({ ...trainingForm, trainProjectIds: nextIds, trainProjectId: nextIds[0] || "", datasetProjectId: nextIds[0] || "" });
+          } else {
+            setTrainingForm({ ...trainingForm, [activeDatasetSplit]: trainingForm[activeDatasetSplit] === project.id ? "" : project.id });
+          }
+        },
       });
       appendDatasetRows(project.id, depth + 1);
     }
@@ -3626,45 +3677,24 @@ function TrainingWorkspace({
 
   const activeJob = trainingJobs.find((job) => job.id === activeTrainingJobId) || trainingJobs[0];
 
-  const runningJob = activeJob || {
-
-    id: 'mock-training',
-
-    name: 'coco128_train_yolov8l',
-
-    status: 'running',
-
-    progress: 42,
-
-    total_epochs: Number(trainingForm.epochs || 100),
-
-    current_epoch: 42,
-
-    dataset_project_name: selectedProject.name || 'coco128_e2e_20260705020039',
-
-    model_name: selectedModel.name || 'YOLOv8l_COCO',
-
-  };
-
-  const progress = Math.max(0, Math.min(100, Number(runningJob.progress ?? 42)));
-
-  const epoch = Number(runningJob.current_epoch || Math.round(progress));
-
-  const totalEpochs = Number(runningJob.total_epochs || trainingForm.epochs || 100);
+  const runningJob = activeJob || null;
+  const progress = runningJob ? Math.max(0, Math.min(100, Number(runningJob.progress || 0))) : 0;
+  const epoch = runningJob ? Number(runningJob.current_epoch || Math.round(progress)) : 0;
+  const totalEpochs = runningJob ? Number(runningJob.total_epochs || trainingForm.epochs || 0) : 0;
 
   const trainMetrics = [
 
-    ['当前Epoch', totalEpochs ? epoch + ' / ' + totalEpochs : '--'],
+    ['当前 Epoch', runningJob && totalEpochs ? epoch + ' / ' + totalEpochs : '--'],
 
-    ['mAP50', '71.10%'],
+    ['mAP50', runningJob?.map50 != null ? `${(Number(runningJob.map50) * 100).toFixed(2)}%` : '--'],
 
-    ['box_loss', '0.482'],
+    ['box_loss', runningJob?.box_loss != null ? Number(runningJob.box_loss).toFixed(3) : '--'],
 
-    ['cls_loss', '0.319'],
+    ['cls_loss', runningJob?.cls_loss != null ? Number(runningJob.cls_loss).toFixed(3) : '--'],
 
-    ['学习率', '0.0032'],
+    ['学习率', runningJob?.learning_rate != null ? String(runningJob.learning_rate) : '--'],
 
-    ['ETA', '18分40秒'],
+    ['ETA', runningJob?.eta || '--'],
 
   ];
 
@@ -3677,22 +3707,22 @@ function TrainingWorkspace({
 
   const queueRows = trainingJobs;
 
-  const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [
-
-    '14:32:18 [INFO] 训练任务已创建，准备数据集快照',
-
-    '14:32:21 [INFO] 加载 Ultralytics YOLO 适配器成功',
-
-    '14:32:24 [INFO] 使用权重 yolov8l_pt_20260705020039',
-
-    '14:33:02 [TRAIN] epoch 42/100 box_loss=0.482 cls_loss=0.319',
-
-    '14:33:05 [VAL] Precision=0.803 Recall=0.697 mAP50=0.711',
-
-  ];
+  const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [];
 
   const setField = (key, value) => setTrainingForm({ ...trainingForm, [key]: value });
-  const parameterGroups = selectedAlgorithm.capabilities_json?.parameterSchema?.groups || [];
+  const normalizeParameterSchema = (schema) => {
+    const conflictingKeys = new Set(["model", "model_id", "model_path", "data", "dataset", "dataset_id", "dataset_project_id", "project", "project_id", "name", "task_name"]);
+    const cleanFields = (fields = []) => fields.filter((field) => field?.key && !conflictingKeys.has(String(field.key).toLowerCase()));
+    if (!schema) return [];
+    if (Array.isArray(schema)) return [{ key: "parameters", label: "参数", fields: cleanFields(schema) }];
+    if (Array.isArray(schema.groups)) return schema.groups.map((group, index) => ({ ...group, key: group.key || `group-${index}`, label: group.label || group.title || "参数", fields: cleanFields(group.fields) }));
+    if (Array.isArray(schema.fields)) return [{ key: "parameters", label: schema.label || schema.title || "参数", fields: cleanFields(schema.fields) }];
+    if (schema.properties && typeof schema.properties === "object") {
+      return [{ key: "parameters", label: schema.title || "参数", fields: cleanFields(Object.entries(schema.properties).map(([key, value]) => ({ key, label: value.title || value.label || key, type: value.enum ? "select" : value.type, options: value.enum, default: value.default, min: value.minimum, max: value.maximum, step: value.multipleOf, description: value.description, required: schema.required?.includes(key) }))) }];
+    }
+    return [];
+  };
+  const parameterGroups = trainingForm.templateId ? normalizeParameterSchema(selectedAlgorithm.capabilities_json?.parameterSchema) : [];
   const parameterAliases = {
     yolo_version: "yoloVersion",
     taskType: "taskType",
@@ -3726,7 +3756,7 @@ function TrainingWorkspace({
   const selectTrainingAlgorithm = (algorithmId) => {
     const algorithm = algorithms.find((item) => (item.id || item.template_key) === algorithmId);
     const defaults = { ...(algorithm?.default_params_json || {}) };
-    for (const group of algorithm?.capabilities_json?.parameterSchema?.groups || []) {
+    for (const group of normalizeParameterSchema(algorithm?.capabilities_json?.parameterSchema)) {
       for (const field of group.fields || []) if (defaults[field.key] === undefined && field.default !== undefined) defaults[field.key] = field.default;
     }
     const linked = bestAssetLink(assetLinks, algorithmId);
@@ -3748,7 +3778,7 @@ function TrainingWorkspace({
 
   return (
 
-    <div className="training-workspace">
+    <div className="training-workspace resizable-workspace" style={{ "--workspace-left": `${columns.left}px`, "--workspace-right": `${columns.right}px` }}>
 
       <aside className="training-sidebar reference-sidebar">
 
@@ -3802,6 +3832,8 @@ function TrainingWorkspace({
 
       </aside>
 
+      <WorkspaceResizeHandle side="left" onPointerDown={beginResize} />
+
       <main className="training-main">
 
         <div className="training-toolbar inference-toolbar">
@@ -3827,8 +3859,9 @@ function TrainingWorkspace({
           <section className="reference-section dataset-split-section">
             <h2>数据与标签</h2>
             <div className="dataset-split-grid">
-              {[['trainProjectId', '训练集', 'train'], ['valProjectId', '验证集', 'val'], ['testProjectId', '测试集', 'test']].map(([key, label, hint]) => (
-                <label key={key}><span>{label}<small>{hint}</small></span><select value={trainingForm[key] || ''} onChange={(e) => setTrainingForm({ ...trainingForm, [key]: e.target.value, ...(key === 'trainProjectId' ? { datasetProjectId: e.target.value } : {}) })}><option value="">选择{label}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select></label>
+              <label className="training-multiselect"><span>训练集<small>train · 可多选</small></span><select multiple value={trainProjectIds} size={Math.min(5, Math.max(3, projects.length))} onChange={(event) => { const nextIds = Array.from(event.target.selectedOptions, (option) => option.value); setTrainingForm({ ...trainingForm, trainProjectIds: nextIds, trainProjectId: nextIds[0] || "", datasetProjectId: nextIds[0] || "" }); }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {trainProjectIds.length} 个训练集</small></label>
+              {[['valProjectId', '验证集', 'val'], ['testProjectId', '测试集', 'test']].map(([key, label, hint]) => (
+                <label key={key}><span>{label}<small>{hint} · 单选</small></span><select value={trainingForm[key] || ''} onChange={(e) => setTrainingForm({ ...trainingForm, [key]: e.target.value })}><option value="">选择{label}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select></label>
               ))}
             </div>
             <div className="dataset-meta-row"><span>活动标签：{String(selectedProject.active_label_version_id || 'active').slice(0, 8)}</span><span>训练图像：{formatCount(selectedProject.image_count || 0)}</span><span>划分由导入结果确定，不再使用固定比例</span></div>
@@ -3836,11 +3869,11 @@ function TrainingWorkspace({
 
           <section className="reference-section model-init-section">
             <h2>算法与初始化</h2>
-            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化</option><option value="zero">零初始化</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) && <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : !version.training_job_id || version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</>}</div>
+            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : !version.training_job_id || version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
             <div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">选择 Python 环境</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '--'} · {selectedEnv.torch_version || '--'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div>
           </section>
 
-          <section className="reference-section algorithm-params-section"><h2>训练参数{selectedAlgorithm.name ? ` · ${selectedAlgorithm.name}` : ''}</h2>{parameterGroups.length ? <div className="parameter-groups schema-parameter-groups">{parameterGroups.map((group) => <fieldset key={group.key || group.label}><legend>{group.label}</legend>{(group.fields || []).map((field) => <label key={field.key}>{field.label}{field.type === 'boolean' ? <span className="switch-control"><input type="checkbox" checked={Boolean(algorithmFieldValue(field))} onChange={() => setAlgorithmField(field, !Boolean(algorithmFieldValue(field)))} /><i /></span> : field.type === 'select' ? <select value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)}>{(field.options || []).map((option) => <option key={String(option)} value={option}>{option}</option>)}</select> : <input type={field.type === 'number' ? 'number' : 'text'} min={field.min} max={field.max} step={field.step} value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)} />}</label>)}</fieldset>)}</div> : <div className="parameter-placeholder">选择算法适配器后显示该算法训练脚本支持的参数。</div>}</section>
+          <section className="reference-section algorithm-params-section"><h2>训练参数{selectedAlgorithm.name ? ` · ${selectedAlgorithm.name}` : ''}</h2>{!trainingForm.templateId ? <div className="parameter-placeholder">尚未选择算法，训练参数为空。</div> : parameterGroups.length ? <div className="parameter-groups schema-parameter-groups">{parameterGroups.map((group) => { const advanced = /advanced|高级/i.test(`${group.key || ''} ${group.label || ''}`); return <details className="parameter-group" key={group.key || group.label} open={!advanced}><summary>{group.label}{advanced ? <small>展开</small> : null}</summary><fieldset>{(group.fields || []).map((field) => <label key={field.key} title={field.description || ''}><span>{field.label || field.key}{field.required ? <b className="required-mark">*</b> : null}</span>{field.type === 'boolean' ? <span className="switch-control"><input type="checkbox" checked={Boolean(algorithmFieldValue(field))} onChange={() => setAlgorithmField(field, !Boolean(algorithmFieldValue(field)))} /><i /></span> : (field.type === 'select' || field.options) ? <select value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)}>{(field.options || []).map((option) => { const value = typeof option === 'object' ? option.value : option; const label = typeof option === 'object' ? option.label : option; return <option key={String(value)} value={value}>{label}</option>; })}</select> : <input type={['number', 'integer'].includes(field.type) ? 'number' : 'text'} min={field.min} max={field.max} step={field.step || (field.type === 'integer' ? 1 : undefined)} value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)} />}</label>)}</fieldset></details>; })}</div> : <div className="parameter-placeholder">该算法未在 capabilities_json.parameterSchema 中声明训练参数。</div>}</section>
 
           <section className="reference-section"><h2>输出与版本</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
 
@@ -3883,17 +3916,19 @@ function TrainingWorkspace({
 
       </main>
 
+      <WorkspaceResizeHandle side="right" onPointerDown={beginResize} />
+
       <aside className="training-inspector reference-inspector">
 
         <div className="inspector-title"><h2>训练监控</h2><button><RefreshCw size={14} /></button></div>
 
         <div className="training-kpis">{trainMetrics.map(([label, value]) => <div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
 
-        <section className="training-chart-panel"><h3>实时曲线</h3><svg viewBox="0 0 360 190" preserveAspectRatio="none"><path className="loss-line" d="M0 35 C55 58 86 72 130 92 S220 124 360 148"/><path className="val-line" d="M0 52 C70 74 120 88 178 108 S270 138 360 156"/><path className="map-line" d="M0 166 C60 144 98 134 145 108 S250 70 360 42"/><path className="precision-line" d="M0 150 C66 126 120 112 180 86 S280 55 360 34"/></svg><div className="training-chart-legend"><span><i />train loss</span><span><i />val loss</span><span><i />mAP50</span><span><i />precision</span></div></section>
+        <section className="training-chart-panel"><h3>实时曲线</h3>{runningJob ? <><svg viewBox="0 0 360 190" preserveAspectRatio="none"><path className="loss-line" d="M0 35 C55 58 86 72 130 92 S220 124 360 148"/><path className="val-line" d="M0 52 C70 74 120 88 178 108 S270 138 360 156"/><path className="map-line" d="M0 166 C60 144 98 134 145 108 S250 70 360 42"/><path className="precision-line" d="M0 150 C66 126 120 112 180 86 S280 55 360 34"/></svg><div className="training-chart-legend"><span><i />train loss</span><span><i />val loss</span><span><i />mAP50</span><span><i />precision</span></div></> : <div className="parameter-placeholder">暂无训练曲线</div>}</section>
 
-        <section className="training-log-panel"><h3>运行日志</h3>{logRows.map((line, index) => <p key={index}>{line}</p>)}</section>
+        <section className="training-log-panel"><h3>运行日志</h3>{logRows.length ? logRows.map((line, index) => <p key={index}>{line}</p>) : <p>暂无运行日志</p>}</section>
 
-        <section className="artifact-preview"><h3>产物预览</h3>{['best.pt', 'last.pt', 'results.csv', 'confusion_matrix.png'].map((name) => <p key={name}><Database size={14} /><span>{name}</span><em>已写入 MinIO</em></p>)}</section>
+        <section className="artifact-preview"><h3>产物预览</h3>{runningJob ? ['best.pt', 'last.pt', 'results.csv', 'confusion_matrix.png'].map((name) => <p key={name}><Database size={14} /><span>{name}</span><em>已写入 MinIO</em></p>) : <p><span>暂无训练产物</span></p>}</section>
 
       </aside>
 
@@ -4287,6 +4322,8 @@ createPythonEnv={createPythonEnv}
 
 function AssetModelFamilyTree({ families, onSelect }) {
 
+const [modelGroupOpen, setModelGroupOpen] = useState(true);
+
 const [expandedFamilies, setExpandedFamilies] = useState(() => new Set(families.map((family) => family.family)));
 
 const [expandedVersions, setExpandedVersions] = useState(() => new Set());
@@ -4389,9 +4426,9 @@ return (
 
 <section className="asset-tree-group asset-model-tree">
 
-<div className="asset-tree-head asset-tree-static">
+<button className="asset-tree-head" type="button" onClick={() => setModelGroupOpen((open) => !open)}>
 
-<span className="tree-spacer" />
+{modelGroupOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 
 <Database size={15} />
 
@@ -4399,9 +4436,9 @@ return (
 
 <em>{families.length}</em>
 
-</div>
+</button>
 
-<div className="asset-tree-children">
+{modelGroupOpen && <div className="asset-tree-children">
 
 {families.map((family) => {
 
@@ -4463,7 +4500,7 @@ return (
 
 {!families.length && <p className="resource-empty">暂无模型</p>}
 
-</div>
+</div>}
 
 </section>
 
@@ -5818,6 +5855,8 @@ moveRuntimeQueueJob,
 
 }) {
 
+const { columns, beginResize } = useWorkspaceColumns("det-dashboard.inference-columns", { left: 292, right: 418 });
+
 const selectedProject = projects.find((project) => project.id === inferenceForm.datasetProjectId);
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
@@ -6225,7 +6264,7 @@ const logLines = latestJob ? [
 ];
 
 return (
-  <div className="inference-workspace">
+  <div className="inference-workspace resizable-workspace" style={{ "--workspace-left": `${columns.left}px`, "--workspace-right": `${columns.right}px` }}>
     <aside className="inference-sidebar reference-sidebar">
       <h2>推理资源</h2>
       <div className="resource-tree">
@@ -6269,6 +6308,8 @@ return (
         <em>20 / 29</em>
       </div>
     </aside>
+
+    <WorkspaceResizeHandle side="left" onPointerDown={beginResize} />
 
     <main className="inference-main">
       <div className="inference-toolbar">
@@ -6434,6 +6475,8 @@ return (
         </div>
       </section>
     </main>
+
+    <WorkspaceResizeHandle side="right" onPointerDown={beginResize} />
 
     <aside className="inference-inspector reference-inspector">
       <div className="inspector-title">

@@ -327,7 +327,7 @@ const builtinAlgorithmAssets = [
     version: "builtin",
     tasks: ["detect", "segment", "classify"],
     description: "Ultralytics YOLO training and inference adapter.",
-    params: { epochs: 100, imgsz: 640, batch: 16, device: "0", optimizer: "auto", lr0: 0.01, save_period: -1 },
+    params: { epochs: 100, batch: 16, imgsz: 640, device: "0", workers: 8, optimizer: "auto", lr0: 0.01, lrf: 0.01, momentum: 0.937, weight_decay: 0.0005, patience: 100, amp: true, cos_lr: false, seed: 0, deterministic: true, val: true, save_period: -1 },
     parameterSchema: { groups: [
       { key: "model", label: "模型参数", fields: [
         { key: "yolo_version", type: "select", label: "YOLO 版本", options: ["yolov8", "yolov9", "yolov10", "yolo11"], default: "yolov8" },
@@ -343,6 +343,21 @@ const builtinAlgorithmAssets = [
         { key: "lr0", type: "number", label: "初始学习率", min: 0, step: 0.0001, default: 0.01 },
         { key: "save_period", type: "number", label: "间隔保存 Epoch", min: -1, default: -1 },
         { key: "device", type: "text", label: "设备", default: "0" },
+        { key: "workers", type: "number", label: "Workers", min: 0, default: 8 },
+        { key: "lrf", type: "number", label: "Final LR fraction", min: 0, step: 0.001, default: 0.01 },
+        { key: "momentum", type: "number", label: "Momentum", min: 0, max: 1, step: 0.001, default: 0.937 },
+        { key: "weight_decay", type: "number", label: "Weight decay", min: 0, step: 0.0001, default: 0.0005 },
+        { key: "patience", type: "number", label: "Patience", min: 0, default: 100 },
+        { key: "amp", type: "boolean", label: "AMP", default: true },
+        { key: "cos_lr", type: "boolean", label: "Cosine LR", default: false },
+        { key: "seed", type: "number", label: "Seed", min: 0, default: 0 },
+        { key: "deterministic", type: "boolean", label: "Deterministic", default: true },
+        { key: "val", type: "boolean", label: "Validation", default: true },
+      ] },
+      { key: "advanced", label: "Advanced", fields: [
+        ...["warmup_epochs", "warmup_momentum", "warmup_bias_lr", "close_mosaic", "mosaic", "mixup", "cutmix", "degrees", "translate", "scale", "shear", "flipud", "fliplr"].map((key) => ({ key, type: "number", label: key })),
+        ...["multi_scale", "cache", "rect", "single_cls"].map((key) => ({ key, type: "boolean", label: key })),
+        { key: "freeze", type: "text", label: "freeze", default: "" },
       ] },
     ] },
     adapter: [
@@ -361,18 +376,23 @@ const builtinAlgorithmAssets = [
     version: "builtin",
     tasks: ["detect"],
     description: "DINOv3 + Faster R-CNN inference adapter.",
-    params: { epochs: 12, batch_size: 2, learning_rate: 0.0001, num_workers: 4, save_period: 1, amp: true },
+    params: { max_epochs: 200, freeze_epochs: 10, unfreeze_last_n: 2, batch_size: 2, num_workers: 4, image_width: 1920, image_height: 1080, val_interval: 1, base_lr: 0.0001, amp: true, auto_scale_lr: false, config_path: "configs/alashan_full_multiclass_200e.py" },
     parameterSchema: { groups: [
       { key: "dataset", label: "数据集参数", fields: [
         { key: "batch_size", type: "number", label: "Batch", min: 1, default: 2 },
         { key: "num_workers", type: "number", label: "数据线程", min: 0, default: 4 },
+        { key: "image_width", type: "number", label: "Image width", min: 32, default: 1920 },
+        { key: "image_height", type: "number", label: "Image height", min: 32, default: 1080 },
       ] },
       { key: "training", label: "训练参数", fields: [
-        { key: "epochs", type: "number", label: "Epochs", min: 1, default: 12 },
-        { key: "learning_rate", type: "number", label: "学习率", min: 0, step: 0.000001, default: 0.0001 },
-        { key: "save_period", type: "number", label: "间隔保存 Epoch", min: 1, default: 1 },
+        { key: "max_epochs", type: "number", label: "Max epochs", min: 1, default: 200 },
+        { key: "freeze_epochs", type: "number", label: "Freeze epochs", min: 0, default: 10 },
+        { key: "unfreeze_last_n", type: "number", label: "Unfreeze last stages", min: 0, default: 2 },
+        { key: "val_interval", type: "number", label: "Validation interval", min: 1, default: 1 },
+        { key: "base_lr", type: "number", label: "Base LR", min: 0, step: 0.000001, default: 0.0001 },
         { key: "amp", type: "boolean", label: "混合精度", default: true },
-        { key: "config_path", type: "text", label: "训练配置", default: "" },
+        { key: "auto_scale_lr", type: "boolean", label: "Auto scale LR", default: false },
+        { key: "config_path", type: "text", label: "训练配置", default: "configs/alashan_full_multiclass_200e.py" },
       ] },
     ] },
     adapter: "# Platform adapter placeholder for DINOv3 Faster R-CNN.\n",
@@ -3244,6 +3264,45 @@ async function streamModelArtifact(res, modelVersionId, artifactId) {
   stream.pipe(res);
 }
 
+function normalizeProjectIdList(value) {
+  const values = Array.isArray(value) ? value : (value ? [value] : []);
+  return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function normalizeTrainingDatasetSplits(body = {}, params = {}, fallbackTrainProjectId = null) {
+  const requested = body.datasetSplits || body.dataset_splits || params.datasetSplits || {};
+  const read = (name) => normalizeProjectIdList(
+    body[`${name}ProjectIds`] || body[`${name}_project_ids`]
+      || requested[`${name}ProjectIds`] || requested[`${name}_project_ids`]
+      || body[`${name}ProjectId`] || body[`${name}_project_id`]
+      || requested[`${name}ProjectId`] || requested[`${name}_project_id`]
+      || (name === "train" ? fallbackTrainProjectId : null),
+  );
+  return { trainProjectIds: read("train"), valProjectIds: read("val"), testProjectIds: read("test") };
+}
+
+async function presentTrainingJobs(jobs) {
+  const selections = jobs.map((job) => normalizeTrainingDatasetSplits({}, job.params_json || {}, job.dataset_project_id));
+  const ids = [...new Set(selections.flatMap((item) => [...item.trainProjectIds, ...item.valProjectIds, ...item.testProjectIds]))];
+  const projects = ids.length ? (await query("SELECT id, name FROM projects WHERE id=ANY($1::uuid[])", [ids])).rows : [];
+  const names = new Map(projects.map((project) => [String(project.id), project.name]));
+  return jobs.map((job, index) => {
+    const splits = selections[index];
+    const params = job.params_json || {};
+    const projectNames = (projectIds) => projectIds.map((id) => names.get(String(id)) || id);
+    return {
+      ...job, ...splits,
+      trainProjectNames: projectNames(splits.trainProjectIds),
+      valProjectNames: projectNames(splits.valProjectIds),
+      testProjectNames: projectNames(splits.testProjectIds),
+      dataset_project_name: projectNames(splits.trainProjectIds).join(", ") || job.dataset_project_name,
+      initializationStrategy: params.initializationStrategy || job.initialization_strategy || "random",
+      initialModelVersionId: params.initialModelVersionId || job.initial_model_version_id || null,
+      resume: Boolean(params.resume ?? job.resume_from_checkpoint),
+    };
+  });
+}
+
 async function listTrainingJobs() {
   try {
     const rows = await query(
@@ -3255,7 +3314,7 @@ async function listTrainingJobs() {
        ORDER BY tj.priority DESC, tj.created_at DESC, tj.id DESC
        LIMIT 200`,
     );
-    return rows.rows;
+    return presentTrainingJobs(rows.rows);
   } catch (error) {
     if (!["42P01", "XX002"].includes(error.code)) throw error;
     return [];
@@ -3276,9 +3335,10 @@ async function normalizeTrainingInitialization(body, params) {
       `SELECT mv.*, mc.name AS model_name, mc.framework,
          (SELECT jsonb_build_object('id', mf.id, 'path', mf.path, 'sha256', mf.sha256, 'size', mf.size, 'metadata', mf.metadata_json)
           FROM model_files mf WHERE mf.model_version_id=mv.id
-          ORDER BY CASE WHEN mf.metadata_json->>'weightRole'='last' THEN 0 WHEN mf.metadata_json->>'weightRole'='best' THEN 1 ELSE 2 END, mf.created_at DESC LIMIT 1) AS checkpoint
-       FROM model_revisions mv JOIN model_clusters mc ON mc.id=mv.model_id WHERE mv.id=$1`,
-      [versionId],
+          ORDER BY CASE WHEN $2::text='training' AND mf.metadata_json->>'weightRole'='last' THEN 0 WHEN mf.metadata_json->>'weightRole'='best' THEN 1 WHEN mf.metadata_json->>'weightRole'='pretrained' THEN 2 ELSE 3 END, mf.created_at DESC LIMIT 1) AS checkpoint
+       FROM model_revisions mv JOIN model_clusters mc ON mc.id=mv.model_id
+       WHERE mv.id=$1 AND mc.deleted_at IS NULL`,
+      [versionId, strategy],
     )).rows[0];
     if (!row || !row.checkpoint) throw new Error("Selected initialization model has no available checkpoint");
     checkpoint = { ...row.checkpoint, versionId: row.id, versionName: row.version_name, modelName: row.model_name, stage: row.stage, framework: row.framework };
@@ -3287,16 +3347,23 @@ async function normalizeTrainingInitialization(body, params) {
 }
 
 async function createTrainingJob(body = {}) {
-  const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
+  const params = { ...(body.params || {}) };
+  const datasetSplits = normalizeTrainingDatasetSplits(body, params, body.datasetProjectId || body.dataset_project_id || null);
+  const datasetProjectId = datasetSplits.trainProjectIds[0] || null;
   if (!datasetProjectId) throw new Error("请选择训练数据集项目");
-  const project = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
+  const selectedProjectIds = [...new Set([...datasetSplits.trainProjectIds, ...datasetSplits.valProjectIds, ...datasetSplits.testProjectIds])];
+  const selectedProjectCount = datasetSplits.trainProjectIds.length + datasetSplits.valProjectIds.length + datasetSplits.testProjectIds.length;
+  if (selectedProjectIds.length !== selectedProjectCount) throw new Error("A dataset project cannot be assigned to more than one split");
+  const projects = (await query("SELECT id, name FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedProjectIds])).rows;
+  if (projects.length !== selectedProjectIds.length) throw new Error("One or more selected dataset projects do not exist");
+  const projectById = new Map(projects.map((item) => [String(item.id), item]));
+  const project = projectById.get(String(datasetProjectId));
   if (!project) throw new Error("训练数据集项目不存在");
   const modelId = body.modelId || body.model_id || null;
   if (modelId) {
     const model = (await query("SELECT id FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
     if (!model) throw new Error("模型不存在");
   }
-  const params = { ...(body.params || {}) };
   if (body.templateId || body.template_id) {
     const templateId = body.templateId || body.template_id;
     const template = (await query("SELECT * FROM training_templates WHERE id=$1", [templateId])).rows[0];
@@ -3325,9 +3392,12 @@ async function createTrainingJob(body = {}) {
   params.initialModelVersionId = initialization.versionId;
   params.resume = initialization.resume;
   params.checkpointMetadata = initialization.checkpoint;
-  params.datasetSplits = body.datasetSplits || body.dataset_splits || params.datasetSplits || {};
+  params.datasetSplits = datasetSplits;
+  params.trainProjectIds = datasetSplits.trainProjectIds;
+  params.valProjectIds = datasetSplits.valProjectIds;
+  params.testProjectIds = datasetSplits.testProjectIds;
   params.save_period = Number(body.savePeriod ?? body.save_period ?? params.save_period ?? -1);
-  const totalEpochs = Number(params.epochs || body.totalEpochs || 0) || 0;
+  const totalEpochs = Number(params.max_epochs || params.epochs || body.totalEpochs || 0) || 0;
   const name = String(body.name || `${project.name}_train_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const template = String(body.template || "ultralytics_yolo_detect");
   const inserted = await query(
@@ -3345,8 +3415,9 @@ async function createTrainingJob(body = {}) {
   const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
   const updated = await query("UPDATE runtime_training_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
-  await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [job.id, "system", `queued: ${template}; dataset=${project.name}`]);
-  return updated.rows[0];
+  const datasetNames = datasetSplits.trainProjectIds.map((id) => projectById.get(String(id))?.name || id);
+  await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [job.id, "system", `queued: ${template}; datasets=${datasetNames.join(", ")}`]);
+  return (await presentTrainingJobs(updated.rows))[0];
 }
 
 async function requeueTrainingJob(jobId, body = {}) {
@@ -3833,6 +3904,7 @@ async function prepareInferenceInputCache(job) {
             ia.object_key, ia.original_ext, ia.width, ia.height, ia.file_size
      FROM project_images pi
      JOIN image_assets ia ON ia.id=pi.image_asset_id
+     JOIN projects p ON p.id=pi.project_id
      LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
      WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
      ORDER BY pi.created_at, pi.id
@@ -4619,12 +4691,121 @@ async function runUltralyticsInferenceJob(job) {
   await recordRuntimeAssetLink(job, metrics);
 }
 
+async function runDinoInferenceJob(job) {
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const envId = params.pythonEnvId || params.python_env_id;
+  if (!envId) throw new Error("DINO inference requires a registered Python environment");
+  let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+  if (!env) throw new Error(`DINO inference environment does not exist: ${envId}`);
+  env = await resolveRuntimePythonEnv(env);
+  if (!env.python_path || !fs.existsSync(env.python_path)) throw new Error(`DINO inference Python does not exist: ${env.python_path || "(empty)"}`);
+
+  const resolved = await resolveTrainingAlgorithmSource(params);
+  if (!resolved) throw new Error(`DINO algorithm asset is not registered: ${params.algorithmAssetId || "(missing id)"}`);
+  const { algorithm, cacheRoot } = resolved;
+  const weightPath = await findWeightArtifact(job.model_version_id);
+  if (!weightPath) throw new Error(`DINO inference has no real weight artifact for model version ${job.model_version_id || "(missing)"}`);
+
+  const input = params.input || {};
+  const manifestPath = input.manifestPath || path.join(job.output_root, "input-cache", "manifest.json");
+  if (!fs.existsSync(manifestPath)) throw new Error(`DINO inference input manifest does not exist: ${manifestPath}`);
+  const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+  const outputDir = path.join(outputRoot, "output");
+  const predictionsPath = path.join(outputDir, "predictions.json");
+  const visualizationDir = path.join(outputDir, "visualizations");
+  fs.mkdirSync(visualizationDir, { recursive: true });
+  const { configPath, sourceRoot } = await resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot });
+  const classNames = (await query(
+    `SELECT DISTINCT a.label FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id
+     WHERE p.id=$1 ORDER BY a.label`,
+    [job.dataset_project_id],
+  )).rows.map((row) => String(row.label));
+  const runnerPath = path.join(outputRoot, "run_dino_inference.py");
+  const config = {
+    jobId: job.id, configPath, weightPath, manifestPath, predictionsPath, visualizationDir,
+    scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
+    device: String(params.device ?? (env.cuda_available ? "cuda:0" : "cpu")),
+    classNames,
+  };
+  const runner = [
+    "import json, os, sys, traceback",
+    "import cv2",
+    "import dino_detector",
+    "from mmdet.apis import init_detector, inference_detector",
+    `cfg = json.loads(${JSON.stringify(JSON.stringify(config))})`,
+    "with open(cfg['manifestPath'], 'r', encoding='utf-8') as f: manifest = json.load(f)",
+    "items = manifest.get('images') or []",
+    "root = manifest.get('cacheRoot') or os.path.dirname(cfg['manifestPath'])",
+    "model = init_detector(cfg['configPath'], cfg['weightPath'], device=cfg['device'])",
+    "classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('classNames') or [])",
+    "rows = []",
+    "for item in items:",
+    "    local_path = item.get('localPath') or item.get('cachedFileName')",
+    "    image_path = local_path if os.path.isabs(str(local_path)) else os.path.join(root, str(local_path))",
+    "    image_path = os.path.normpath(image_path)",
+    "    result = inference_detector(model, image_path)",
+    "    instances = result.pred_instances.to('cpu')",
+    "    boxes = instances.bboxes.numpy().tolist() if hasattr(instances, 'bboxes') else []",
+    "    scores = instances.scores.numpy().tolist() if hasattr(instances, 'scores') else [1.0] * len(boxes)",
+    "    labels = instances.labels.numpy().tolist() if hasattr(instances, 'labels') else [-1] * len(boxes)",
+    "    preds = []",
+    "    canvas = cv2.imread(image_path)",
+    "    for box, score, class_id in zip(boxes, scores, labels):",
+    "        if float(score) < cfg['scoreThreshold']: continue",
+    "        x1, y1, x2, y2 = [float(v) for v in box]",
+    "        label = str(classes[int(class_id)]) if 0 <= int(class_id) < len(classes) else str(int(class_id))",
+    "        preds.append({'label': label, 'score': float(score), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2-x1), 'bbox_h': max(0.0, y2-y1), 'class_id': int(class_id)})",
+    "        if canvas is not None:",
+    "            cv2.rectangle(canvas, (int(x1), int(y1)), (int(x2), int(y2)), (0, 220, 0), 2)",
+    "            cv2.putText(canvas, '%s %.3f' % (label, score), (int(x1), max(14, int(y1)-4)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1, cv2.LINE_AA)",
+    "    visual_name = '%06d_%s' % (int(item.get('index') or len(rows)+1), os.path.basename(image_path))",
+    "    visual_path = os.path.join(cfg['visualizationDir'], visual_name)",
+    "    if canvas is not None: cv2.imwrite(visual_path, canvas)",
+    "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(image_path), 'width': item.get('width'), 'height': item.get('height'), 'visualizationPath': visual_path if canvas is not None and os.path.isfile(visual_path) else None, 'predictions': preds})",
+    "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'dinov3_faster_rcnn', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
+    "os.makedirs(os.path.dirname(cfg['predictionsPath']), exist_ok=True)",
+    "with open(cfg['predictionsPath'], 'w', encoding='utf-8') as f: json.dump(payload, f, ensure_ascii=False, indent=2)",
+    "print(json.dumps({'imageCount': payload['imageCount'], 'predictionCount': payload['predictionCount'], 'predictionsPath': cfg['predictionsPath']}))",
+  ].join("\n");
+  fs.writeFileSync(runnerPath, runner, "utf8");
+  const commandArgs = [runnerPath];
+  await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`Running DINO inference: ${env.python_path} ${commandArgs.join(" ")}`, job.id]);
+  let result;
+  try {
+    result = await runChildProcess(env.python_path, commandArgs, { cwd: sourceRoot, env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONPATH: [sourceRoot, cacheRoot, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } });
+  } catch (error) {
+    throw new Error(`DINO inference command failed: ${env.python_path} ${commandArgs.join(" ")} (cwd=${sourceRoot})\n${error.stderr || error.message}`);
+  }
+  if (!fs.existsSync(predictionsPath)) throw new Error(`DINO inference command completed without predictions.json: ${env.python_path} ${commandArgs.join(" ")}`);
+  const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
+  const rows = Array.isArray(predictions.images) ? predictions.images : [];
+  const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
+  const metrics = await computeDetectionMetrics(job, rows);
+  await transaction(async (client) => {
+    await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
+    for (const row of rows) await client.query(
+      "INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path) VALUES ($1,$2,$3,$4)",
+      [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), row.visualizationPath || predictionsPath],
+    );
+    const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: new Date().toISOString(), metrics, command: [env.python_path, ...commandArgs], stdout: String(result.stdout || "").slice(-4000) } };
+    await client.query(
+      "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+      [JSON.stringify(nextParams), JSON.stringify(metrics), `DINO inference completed: ${rows.length} images, ${predictionCount} boxes`, job.id],
+    );
+  });
+  await recordRuntimeAssetLink(job, metrics);
+}
+
 async function runInferenceJob(job, workerId) {
   try {
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
     const algorithmKey = params.algorithmKey || params.templateKey || "";
     if (algorithmKey === "ultralytics_yolo") {
       await runUltralyticsInferenceJob(job);
+      return;
+    }
+    if (algorithmKey === "dinov3_faster_rcnn") {
+      await runDinoInferenceJob(job);
       return;
     }
     if (isFakeReferenceInferenceJob(job)) {
@@ -4772,22 +4953,22 @@ async function createDatasetSnapshotForTraining(job) {
     if (existing) return existing;
   }
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
-  const requested = params.datasetSplits || {};
+  const requested = normalizeTrainingDatasetSplits({}, params, job.dataset_project_id);
   const splitProjectIds = {
-    train: requested.trainProjectId || requested.train_project_id || job.dataset_project_id,
-    val: requested.valProjectId || requested.val_project_id || null,
-    test: requested.testProjectId || requested.test_project_id || null,
+    train: requested.trainProjectIds,
+    val: requested.valProjectIds,
+    test: requested.testProjectIds,
   };
-  if (!splitProjectIds.train) throw new Error("Training split project is required");
-  const selectedIds = [...new Set(Object.values(splitProjectIds).filter(Boolean))];
-  if (selectedIds.length !== Object.values(splitProjectIds).filter(Boolean).length) throw new Error("train, val and test must reference independent projects");
+  if (!splitProjectIds.train.length) throw new Error("Training split project is required");
+  const selectedIds = [...new Set(Object.values(splitProjectIds).flat())];
   const projects = (await query("SELECT * FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedIds])).rows;
   const projectById = new Map(projects.map((row) => [String(row.id), row]));
-  for (const [splitName, projectId] of Object.entries(splitProjectIds)) {
-    if (!projectId) continue;
-    const selectedProject = projectById.get(String(projectId));
-    if (!selectedProject) throw new Error(`${splitName} split project does not exist`);
-    if (!selectedProject.active_label_version_id) throw new Error(`${splitName} split project has no active label version`);
+  for (const [splitName, projectIds] of Object.entries(splitProjectIds)) {
+    for (const projectId of projectIds) {
+      const selectedProject = projectById.get(String(projectId));
+      if (!selectedProject) throw new Error(`${splitName} split project does not exist`);
+      if (!selectedProject.active_label_version_id) throw new Error(`${splitName} split project has no active label version`);
+    }
   }
   const rows = (await query(
     `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
@@ -4797,7 +4978,7 @@ async function createDatasetSnapshotForTraining(job) {
      ORDER BY pi.project_id, pi.created_at, pi.id`,
     [selectedIds],
   )).rows;
-  if (!rows.some((row) => String(row.project_id) === String(splitProjectIds.train))) throw new Error("Training split has no trainable images");
+  if (!rows.some((row) => splitProjectIds.train.includes(String(row.project_id)))) throw new Error("Training split has no trainable images");
   const annRows = (await query(
     `SELECT a.* FROM image_annotations a
      JOIN project_images pi ON pi.id=a.project_image_id JOIN projects p ON p.id=pi.project_id
@@ -4813,7 +4994,7 @@ async function createDatasetSnapshotForTraining(job) {
     if (!annsByImage.has(key)) annsByImage.set(key, []);
     annsByImage.get(key).push(ann);
   }
-  const trainProject = projectById.get(String(splitProjectIds.train));
+  const trainProject = projectById.get(String(splitProjectIds.train[0]));
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
   const snapshotName = `${cleanName(trainProject.name, "dataset")}_${stamp}`;
   const snapshotRoot = path.join(storageRoot, "runtime", "snapshots", snapshotName);
@@ -4825,10 +5006,17 @@ async function createDatasetSnapshotForTraining(job) {
   }
   const cocoBySplit = Object.fromEntries(["train", "val", "test"].map((name) => [name, { images: [], annotations: [], categories: labels.map((label, index) => ({ id: index + 1, name: label })) }]));
   let annotationId = 1;
-  for (let index = 0; index < rows.length; index += 1) {
-    const item = rows[index];
-    const part = Object.entries(splitProjectIds).find(([, projectId]) => projectId && String(projectId) === String(item.project_id))?.[0];
+  const splitRank = new Map(Object.entries(splitProjectIds).flatMap(([part, ids], partIndex) => ids.map((id, projectIndex) => [String(id), { part, rank: partIndex * 100000 + projectIndex }])));
+  const deduplicatedRows = [...rows].sort((a, b) => (splitRank.get(String(a.project_id))?.rank ?? 999999) - (splitRank.get(String(b.project_id))?.rank ?? 999999));
+  const seenAssets = new Set();
+  let duplicateImageCount = 0;
+  for (let index = 0; index < deduplicatedRows.length; index += 1) {
+    const item = deduplicatedRows[index];
+    const part = splitRank.get(String(item.project_id))?.part;
     if (!part) continue;
+    const assetKey = String(item.image_asset_id || item.object_key || item.id);
+    if (seenAssets.has(assetKey)) { duplicateImageCount += 1; continue; }
+    seenAssets.add(assetKey);
     split[part] += 1;
     const ext = item.original_ext || ".jpg";
     const base = `${exportBaseName(item, index + 1)}_${String(item.id).slice(0, 8)}`;
@@ -4850,15 +5038,18 @@ async function createDatasetSnapshotForTraining(job) {
     `nc: ${labels.length}`, "names:", ...labels.map((label, index) => `  ${index}: ${yamlScalar(label)}`), "",
   ].join("\n");
   fs.writeFileSync(path.join(snapshotRoot, "data.yaml"), dataYaml, "utf8");
-  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, labels, split, imageCount: rows.length, annotationCount: annRows.length }, null, 2), "utf8");
+  const imageCount = split.train + split.val + split.test;
+  const includedImageIds = new Set(Object.values(cocoBySplit).flatMap((coco) => coco.images.map((image) => String(image.id))));
+  const annotationCount = annRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
+  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
   const snapshot = (await query(
     `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
      VALUES ($1,$2,$3,'yolo+coco',$4,$5,$6,$7,$8) RETURNING *`,
-    [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, rows.length, annRows.length,
-      JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds })],
+    [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, imageCount, annotationCount,
+      JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, duplicateImageCount })],
   )).rows[0];
   await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
-  await appendTrainingLog(job.id, "system", `dataset snapshot created from independent splits: train=${split.train}, val=${split.val}, test=${split.test}`);
+  await appendTrainingLog(job.id, "system", `dataset snapshot created: train=${split.train}, val=${split.val}, test=${split.test}, duplicates=${duplicateImageCount}`);
   return snapshot;
 }
 
@@ -4872,8 +5063,12 @@ async function resolveTrainingAlgorithmSource(params = {}) {
   )).rows[0];
   if (!algorithm) return null;
   const cacheRoot = path.join(storageRoot, "runtime", "algorithm-cache", algorithm.id, assetPathSegmentForCache(algorithm.version || "current"));
-  const sourcePrefix = String(algorithm.source_prefix || `${algorithm.minio_prefix || ""}/source/`).replace(/\\/g, "/");
-  if (sourcePrefix) {
+  const sourcePrefixes = [...new Set([
+    algorithm.source_prefix,
+    `${algorithm.minio_prefix || ""}/source/`,
+    `code-assets/algorithms/${algorithm.algorithm_key}/source/`,
+  ].map((value) => String(value || "").replace(/\\/g, "/").replace(/\/*$/, "/")).filter(Boolean))];
+  for (const sourcePrefix of sourcePrefixes) {
     const keys = await store.listObjectKeys(sourcePrefix);
     for (const objectKey of keys) {
       const relative = objectKey.slice(sourcePrefix.length).replace(/^\/+/, "");
@@ -4894,27 +5089,97 @@ function findFileUnder(root, predicate) {
   return walk(root).find((file) => fs.statSync(file).isFile() && predicate(file)) || "";
 }
 
+function ensureAlgorithmSourceArchiveExtracted(cacheRoot) {
+  const archive = findFileUnder(cacheRoot, (file) => /[\\/]ZBH2FWQ[\\/]archives[\\/]dinov3-faster-rcnn-code\.tar\.zst$/i.test(file));
+  if (!archive) return cacheRoot;
+  const extractRoot = path.join(path.dirname(archive), "dinov3-faster-rcnn-code");
+  const marker = path.join(extractRoot, ".det-dashboard-extracted");
+  if (!fs.existsSync(marker)) {
+    fs.mkdirSync(extractRoot, { recursive: true });
+    const listing = spawnSync("tar", ["-tf", archive], { encoding: "utf8", timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+    if (listing.status !== 0) throw new Error(`Cannot inspect DINO source archive ${archive}: ${listing.stderr || listing.error?.message || "tar failed"}`);
+    const unsafe = String(listing.stdout || "").split(/\r?\n/).filter(Boolean).find((entry) => path.isAbsolute(entry) || entry.split(/[\\/]/).includes(".."));
+    if (unsafe) throw new Error(`DINO source archive contains an unsafe path: ${unsafe}`);
+    const extracted = spawnSync("tar", [
+      "-xf", archive, "-C", extractRoot,
+      "dinov3-faster-rcnn/configs",
+      "dinov3-faster-rcnn/dino_detector",
+      "dinov3-faster-rcnn/tools",
+    ], { encoding: "utf8", timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+    if (extracted.status !== 0) throw new Error(`Cannot extract DINO source archive ${archive}: ${extracted.stderr || extracted.error?.message || "tar failed"}`);
+    fs.writeFileSync(marker, new Date().toISOString(), "utf8");
+  }
+  const packagedRoot = path.join(extractRoot, "dinov3-faster-rcnn");
+  return fs.existsSync(packagedRoot) ? packagedRoot : extractRoot;
+}
+
+async function resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot }) {
+  const sourceRoot = ensureAlgorithmSourceArchiveExtracted(cacheRoot);
+  const generatedPath = path.join(outputRoot, "checkpoint_config.py");
+  const extractorPath = path.join(outputRoot, "extract_checkpoint_config.py");
+  const extractor = [
+    "import os, sys, torch",
+    "from mmengine.config import Config",
+    "checkpoint, output = sys.argv[1:3]",
+    "payload = torch.load(checkpoint, map_location='cpu')",
+    "meta = payload.get('meta') or {} if isinstance(payload, dict) else {}",
+    "cfg = meta.get('cfg') or meta.get('config')",
+    "if cfg is None: raise RuntimeError('checkpoint meta.cfg is missing')",
+    "if isinstance(cfg, Config): cfg.dump(output)",
+    "elif isinstance(cfg, dict): Config(cfg).dump(output)",
+    "elif isinstance(cfg, str) and os.path.isfile(cfg): open(output, 'w', encoding='utf-8').write(open(cfg, 'r', encoding='utf-8').read())",
+    "elif isinstance(cfg, str): open(output, 'w', encoding='utf-8').write(cfg)",
+    "else: raise TypeError('unsupported checkpoint meta.cfg type: %s' % type(cfg).__name__)",
+  ].join("\n");
+  fs.writeFileSync(extractorPath, extractor, "utf8");
+  try {
+    await runChildProcess(env.python_path, [extractorPath, weightPath, generatedPath], { cwd: sourceRoot, env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONPATH: [sourceRoot, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } });
+    if (fs.existsSync(generatedPath)) {
+      const checkpointConfig = fs.readFileSync(generatedPath, "utf8")
+        .replace(/pretrained\s*=\s*checkpoint_file/g, "pretrained=None")
+        .replace(/pretrained\s*=\s*['\"][^'\"]+['\"]/g, "pretrained=None");
+      fs.writeFileSync(generatedPath, checkpointConfig, "utf8");
+      return { configPath: generatedPath, sourceRoot };
+    }
+  } catch (error) {
+    console.warn(`Checkpoint config extraction failed for ${weightPath}: ${error.message}`);
+  }
+
+  const requested = String(params.config_path || params.configPath || algorithm.default_params_json?.config_path || "configs/alashan_full_multiclass_200e.py").trim();
+  const candidates = [
+    requested && path.isAbsolute(requested) ? requested : "",
+    requested ? path.join(sourceRoot, requested) : "",
+    requested ? findFileUnder(sourceRoot, (file) => file.replace(/\\/g, "/").endsWith(`/${requested.replace(/\\/g, "/")}`)) : "",
+    findFileUnder(sourceRoot, (file) => path.basename(file).toLowerCase() === "alashan_full_multiclass_200e.py"),
+  ].filter(Boolean);
+  const existing = candidates.find((file) => fs.existsSync(file));
+  if (existing) return { configPath: existing, sourceRoot };
+  throw new Error(`DINO config is unavailable in source and checkpoint meta.cfg: ${weightPath}`);
+}
+
 async function buildDinoTrainingCommand(job, snapshot, params) {
   const resolved = await resolveTrainingAlgorithmSource(params);
   if (!resolved) throw new Error("DINOv3 algorithm asset is not registered");
   const { algorithm, cacheRoot } = resolved;
+  const sourceRoot = ensureAlgorithmSourceArchiveExtracted(cacheRoot);
   const trainScript = [
-    path.join(cacheRoot, "tools", "train.py"),
-    findFileUnder(cacheRoot, (file) => /[\\/]tools[\\/]train\.py$/i.test(file)),
+    path.join(sourceRoot, "tools", "train.py"),
+    findFileUnder(sourceRoot, (file) => /[\\/]tools[\\/]train\.py$/i.test(file)),
   ].find((file) => file && fs.existsSync(file));
   if (!trainScript) throw new Error(`DINOv3 algorithm source cache has no tools/train.py: ${cacheRoot}`);
-  const requestedConfig = String(params.config_path || params.configPath || algorithm.default_params_json?.config_path || "").trim();
+  const requestedConfig = String(params.config_path || params.configPath || algorithm.default_params_json?.config_path || "configs/alashan_full_multiclass_200e.py").trim();
   const configCandidates = [
     requestedConfig && path.isAbsolute(requestedConfig) ? requestedConfig : "",
-    requestedConfig ? path.join(cacheRoot, requestedConfig) : "",
-    findFileUnder(cacheRoot, (file) => /[\\/]configs[\\/].*\.py$/i.test(file) && /(dino|faster|rcnn)/i.test(file)),
+    requestedConfig ? path.join(sourceRoot, requestedConfig) : "",
+    findFileUnder(sourceRoot, (file) => path.basename(file).toLowerCase() === "alashan_full_multiclass_200e.py"),
   ].filter(Boolean);
   const configPath = configCandidates.find((file) => fs.existsSync(file));
   if (!configPath) throw new Error("DINOv3 training config was not found; set config_path in the algorithm parameters");
   const python = params.python || process.env.PYTHON || "python";
   const workDir = path.join(job.output_root, "run");
   const cfgOptions = [
-    `train_cfg.max_epochs=${Number(params.epochs || job.total_epochs || 12)}`,
+    `train_cfg.max_epochs=${Number(params.max_epochs || params.epochs || job.total_epochs || 200)}`,
+    `train_cfg.val_interval=${Math.max(1, Number(params.val_interval || 1))}`,
     `train_dataloader.batch_size=${Number(params.batch_size || params.batch || 2)}`,
     `train_dataloader.num_workers=${Number(params.num_workers ?? 4)}`,
     `train_dataloader.dataset.data_root=${snapshot.path.replace(/\\/g, "/")}/`,
@@ -4926,14 +5191,15 @@ async function buildDinoTrainingCommand(job, snapshot, params) {
     `test_dataloader.dataset.data_root=${snapshot.path.replace(/\\/g, "/")}/`,
     "test_dataloader.dataset.ann_file=annotations/test.json",
     "test_dataloader.dataset.data_prefix.img=images/test/",
-    `optim_wrapper.optimizer.lr=${Number(params.learning_rate || params.lr0 || 0.0001)}`,
+    `optim_wrapper.optimizer.lr=${Number(params.base_lr || params.learning_rate || params.lr0 || 0.0001)}`,
     `default_hooks.checkpoint.interval=${Math.max(1, Number(params.save_period || 1))}`,
   ];
   if (params.amp === true) cfgOptions.push("optim_wrapper.type=AmpOptimWrapper");
+  if (params.auto_scale_lr != null) cfgOptions.push(`auto_scale_lr.enable=${Boolean(params.auto_scale_lr)}`);
   if (params.resolvedWeights) cfgOptions.push(`load_from=${String(params.resolvedWeights).replace(/\\/g, "/")}`);
   const args = [trainScript, configPath, "--work-dir", workDir, "--cfg-options", ...cfgOptions];
   if (params.resume) args.push("--resume");
-  return { command: python, args, cwd: cacheRoot };
+  return { command: python, args, cwd: sourceRoot };
 }
 
 async function buildTrainingCommand(job, snapshot) {
@@ -4964,6 +5230,10 @@ async function buildTrainingCommand(job, snapshot) {
   if (params.lr0 != null) args.push(`lr0=${Number(params.lr0)}`);
   if (params.resume && params.resolvedWeights) args.push("resume=True");
   if (params.device !== "" && params.device != null) args.push(`device=${params.device}`);
+  const yoloForwardParams = ["workers", "lrf", "momentum", "weight_decay", "patience", "amp", "cos_lr", "seed", "deterministic", "val", "warmup_epochs", "warmup_momentum", "warmup_bias_lr", "close_mosaic", "multi_scale", "freeze", "cache", "rect", "single_cls", "mosaic", "mixup", "cutmix", "degrees", "translate", "scale", "shear", "flipud", "fliplr"];
+  for (const key of yoloForwardParams) {
+    if (params[key] !== undefined && params[key] !== null && params[key] !== "") args.push(`${key}=${params[key]}`);
+  }
   if (initializationStrategy === "zero") {
     const trainOptions = {
       data: path.join(snapshot.path, "data.yaml"), epochs: Number(params.epochs || job.total_epochs || 100),
