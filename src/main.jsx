@@ -191,7 +191,7 @@ const restoredUiState = restoredUiStateRef.current;
 
 const [view, setView] = useState(() => restorableViews.has(restoredUiState.view) ? restoredUiState.view : "home");
 
-const [theme, setTheme] = useState("light");
+const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dark" : "light");
 
 const [currentUser, setCurrentUser] = useState(() => {
   try {
@@ -450,6 +450,7 @@ useEffect(() => {
   const persistedSelectedImageId = selected?.id || (view === "workspace" ? restoredSelectedImageIdRef.current : null);
   updateUiState({
     view,
+    theme,
     currentFolderId,
     activeProjectId: persistedActiveProjectId,
     selectedImageId: persistedSelectedImageId,
@@ -471,7 +472,7 @@ useEffect(() => {
       pythonEnvId: inferenceForm.pythonEnvId,
     },
   });
-}, [view, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
+}, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
 useEffect(() => {
 
