@@ -365,8 +365,9 @@ useEffect(() => {
 }, [datasetScope, currentUser?.id]);
 
 useEffect(() => {
+  if (!currentUser) return;
   fetch("/api/config").then((r) => r.json()).then((d) => setAppConfig(d)).catch(() => {});
-}, []);
+}, [currentUser?.id]);
 
 useEffect(() => {
   window.localStorage.setItem("det-dashboard-dataset-scope", datasetScope);
@@ -383,6 +384,8 @@ loadWorkspace(activeProject.id);
 }, [activeProject, page, filters]);
 
 useEffect(() => {
+
+if (!currentUser) return;
 
 const timer = window.setInterval(() => {
 
@@ -404,7 +407,7 @@ setLatestImport(null);
 
 return () => window.clearInterval(timer);
 
-}, [activeProject]);
+}, [activeProject, currentUser?.id]);
 
 useEffect(() => {
 
@@ -424,6 +427,8 @@ loadWorkspace(activeProject.id);
 
 useEffect(() => {
 
+if (!currentUser) return;
+
 if (!["training", "inference", "models", "evaluation"].includes(view)) return;
 
 loadMlPlatform();
@@ -432,7 +437,7 @@ const timer = window.setInterval(() => loadMlPlatform(), 2500);
 
 return () => window.clearInterval(timer);
 
-}, [view, assetScope]);
+}, [view, assetScope, currentUser?.id]);
 
 useEffect(() => {
   const persistedActiveProjectId = activeProject?.id || (view === "workspace" ? restoredActiveProjectIdRef.current : null);
@@ -486,7 +491,7 @@ useEffect(() => {
 
 useEffect(() => {
 
-if (!activeTrainingJobId || String(activeTrainingJobId).startsWith("mock-")) {
+if (!currentUser || !activeTrainingJobId || String(activeTrainingJobId).startsWith("mock-")) {
 
 setTrainingLogs([]);
 
@@ -502,7 +507,7 @@ fetch(`/api/ml/training-jobs/${activeTrainingJobId}/logs`)
 
 .catch(() => {});
 
-}, [activeTrainingJobId, trainingJobs]);
+}, [activeTrainingJobId, trainingJobs, currentUser?.id]);
 
 const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
