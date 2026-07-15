@@ -303,7 +303,34 @@ const [assetLinks, setAssetLinks] = useState([]);
 
 const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
 
-const [trainingForm, setTrainingForm] = useState(() => ({ name: "", datasetProjectId: "", modelId: "", initialModelVersionId: "", templateId: "", taskType: "detect", pythonEnvId: "", python: "D:\\ProgramData\\miniforge3\\python.exe", epochs: 100, imgsz: 640, batch: 16, device: "0", ...(restoredUiState.trainingForm || {}) }));
+const [trainingForm, setTrainingForm] = useState(() => ({
+name: "",
+datasetProjectId: "",
+trainProjectId: "",
+valProjectId: "",
+testProjectId: "",
+modelId: "",
+initializationMode: "random",
+initialModelVersionId: "",
+resume: false,
+templateId: "",
+taskType: "detect",
+pythonEnvId: "",
+python: "D:\\ProgramData\\miniforge3\\python.exe",
+yoloVersion: "v8",
+epochs: 100,
+imgsz: 640,
+batch: 16,
+learningRate: 0.0032,
+optimizer: "SGD",
+savePeriod: 10,
+earlyStop: true,
+amp: true,
+freezeBackbone: false,
+device: "0",
+algorithmParams: {},
+...(restoredUiState.trainingForm || {}),
+}));
 
 const [inferenceForm, setInferenceForm] = useState(() => ({
 
@@ -457,11 +484,28 @@ useEffect(() => {
     activeTrainingJobId,
     trainingForm: {
       datasetProjectId: trainingForm.datasetProjectId,
+      trainProjectId: trainingForm.trainProjectId,
+      valProjectId: trainingForm.valProjectId,
+      testProjectId: trainingForm.testProjectId,
       modelId: trainingForm.modelId,
+      initializationMode: trainingForm.initializationMode,
       initialModelVersionId: trainingForm.initialModelVersionId,
+      resume: trainingForm.resume,
       templateId: trainingForm.templateId,
       taskType: trainingForm.taskType,
       pythonEnvId: trainingForm.pythonEnvId,
+      yoloVersion: trainingForm.yoloVersion,
+      epochs: trainingForm.epochs,
+      imgsz: trainingForm.imgsz,
+      batch: trainingForm.batch,
+      learningRate: trainingForm.learningRate,
+      optimizer: trainingForm.optimizer,
+      savePeriod: trainingForm.savePeriod,
+      earlyStop: trainingForm.earlyStop,
+      amp: trainingForm.amp,
+      freezeBackbone: trainingForm.freezeBackbone,
+      device: trainingForm.device,
+      algorithmParams: trainingForm.algorithmParams,
     },
     inferenceForm: {
       datasetProjectId: inferenceForm.datasetProjectId,
@@ -610,7 +654,7 @@ const hasCurrentImages = Boolean((summary?.direct_image_count || 0) > 0 || items
 
 const homeStats = useMemo(() => ({
 
-title: currentFolder?.name || "历史项目",
+title: currentFolder?.name || "全部项目",
 
 projects: currentFolder ? 1 : projects.filter((project) => !project.parent_id).length,
 
@@ -764,19 +808,56 @@ body: JSON.stringify({
 
 name: trainingForm.name,
 
-datasetProjectId: trainingForm.datasetProjectId,
+datasetProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId,
+
+datasetSplits: {
+trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
+valProjectId: trainingForm.valProjectId || null,
+testProjectId: trainingForm.testProjectId || null,
+},
 
 modelId: trainingForm.modelId || null,
 
-templateId: null,
+templateId: trainingForm.templateId || null,
+
+initializationStrategy: trainingForm.initializationMode,
+
+resume: Boolean(trainingForm.resume),
+
+savePeriod: Number(trainingForm.savePeriod),
 
 taskType: trainingForm.taskType,
 
 pythonEnvId: trainingForm.pythonEnvId || null,
 
-initialModelVersionId: trainingForm.initialModelVersionId || null,
+initialModelVersionId: ["pretrained", "training"].includes(trainingForm.initializationMode) ? (trainingForm.initialModelVersionId || null) : null,
 
-params: { python: trainingForm.python, epochs: Number(trainingForm.epochs), imgsz: Number(trainingForm.imgsz), batch: Number(trainingForm.batch), device: trainingForm.device },
+params: {
+...(trainingForm.algorithmParams || {}),
+python: trainingForm.python,
+initializationMode: trainingForm.initializationMode,
+initializationStrategy: trainingForm.initializationMode,
+resume: Boolean(trainingForm.resume),
+yoloVersion: trainingForm.yoloVersion,
+yolo_version: trainingForm.yoloVersion === "v11" ? "yolo11" : `yolov${String(trainingForm.yoloVersion || "v8").replace(/^v/i, "")}`,
+epochs: Number(trainingForm.epochs),
+imgsz: Number(trainingForm.imgsz),
+batch: Number(trainingForm.batch),
+learningRate: Number(trainingForm.learningRate),
+lr0: Number(trainingForm.learningRate),
+optimizer: trainingForm.optimizer,
+savePeriod: Number(trainingForm.savePeriod),
+save_period: Number(trainingForm.savePeriod),
+datasetSplits: {
+trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
+valProjectId: trainingForm.valProjectId || null,
+testProjectId: trainingForm.testProjectId || null,
+},
+earlyStop: Boolean(trainingForm.earlyStop),
+amp: Boolean(trainingForm.amp),
+freezeBackbone: Boolean(trainingForm.freezeBackbone),
+device: trainingForm.device,
+},
 
 }),
 
@@ -2087,7 +2168,7 @@ stats={homeStats}
 
 <ChevronRight size={14} />
 
-<button onClick={() => setCurrentFolderId(null)}>历史项目</button>
+<button onClick={() => setCurrentFolderId(null)}>全部项目</button>
 
 </>
 
@@ -3501,7 +3582,7 @@ function TrainingWorkspace({
 
   const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
 
-  const selectedProject = projects.find((project) => project.id === trainingForm.datasetProjectId) || projects.find((project) => String(project.name || '').includes('coco128')) || projects[0] || {};
+  const selectedProject = projects.find((project) => project.id === (trainingForm.trainProjectId || trainingForm.datasetProjectId)) || projects[0] || {};
 
   const selectedEnv = pythonEnvs.find((env) => env.id === trainingForm.pythonEnvId) || pythonEnvs.find((env) => String(env.name || '').includes('ultralytics')) || pythonEnvs[0] || {};
 
@@ -3510,6 +3591,38 @@ function TrainingWorkspace({
   const selectedModel = mlModels.find((model) => model.id === trainingForm.modelId) || mlModels.find((model) => String(model.name || '').includes('YOLOv8l')) || mlModels[0] || {};
 
   const selectedAlgorithm = algorithms.find((item) => item.id === trainingForm.templateId) || algorithms.find((item) => String(item.algorithm_key || item.template_key || '').includes('ultralytics')) || algorithms[0] || {};
+
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set(["数据集项目", "算法适配器", "模型簇", "Python 环境"]));
+  const [activeDatasetSplit, setActiveDatasetSplit] = useState("trainProjectId");
+  const toggleGroup = (title) => setExpandedGroups((current) => {
+    const next = new Set(current);
+    if (next.has(title)) next.delete(title); else next.add(title);
+    return next;
+  });
+  const childrenByParent = useMemo(() => {
+    const map = new Map();
+    for (const project of projects) {
+      const key = project.parent_id || "root";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(project);
+    }
+    return map;
+  }, [projects]);
+  const datasetRows = [];
+  const appendDatasetRows = (parentId = "root", depth = 0) => {
+    for (const project of childrenByParent.get(parentId) || []) {
+      datasetRows.push({
+        id: project.id,
+        name: project.name,
+        right: project.image_count || 0,
+        depth,
+        active: [trainingForm.trainProjectId, trainingForm.valProjectId, trainingForm.testProjectId, trainingForm.datasetProjectId].includes(project.id),
+        onClick: () => setTrainingForm({ ...trainingForm, [activeDatasetSplit]: project.id, ...(activeDatasetSplit === "trainProjectId" ? { datasetProjectId: project.id } : {}) }),
+      });
+      appendDatasetRows(project.id, depth + 1);
+    }
+  };
+  appendDatasetRows();
 
   const activeJob = trainingJobs.find((job) => job.id === activeTrainingJobId) || trainingJobs[0];
 
@@ -3556,24 +3669,13 @@ function TrainingWorkspace({
   ];
 
   const resourceGroups = [
+    { title: '数据集项目', icon: FolderOpen, rows: datasetRows },
+    { title: '算法适配器', icon: Boxes, rows: algorithms.map((algorithm) => ({ id: algorithm.id || algorithm.template_key, name: algorithm.name, right: algorithm.version || algorithm.algorithm_key || '', active: (algorithm.id || algorithm.template_key) === trainingForm.templateId, onClick: () => selectTrainingAlgorithm(algorithm.id || algorithm.template_key) })) },
+    { title: '模型簇', icon: Database, rows: mlModels.map((model) => ({ id: model.id, name: model.name, right: modelVersions.filter((version) => version.model_id === model.id).length, active: model.id === selectedModel.id, onClick: () => setTrainingForm({ ...trainingForm, modelId: model.id }) })) },
+    { title: 'Python 环境', icon: Cpu, rows: pythonEnvs.map((env) => ({ id: env.id, name: env.name, right: env.status, active: env.id === selectedEnv.id, onClick: () => setTrainingForm({ ...trainingForm, pythonEnvId: env.id, python: env.python_path || trainingForm.python }) })) },
+  ].filter((group) => group.rows.length).map((group) => ({ ...group, count: group.rows.length }));
 
-    { title: '数据集项目', icon: FolderOpen, count: projects.length, rows: projects.slice(0, 6).map((project) => ({ id: project.id, name: project.name, right: project.image_count || 0, active: project.id === selectedProject.id })) },
-
-    { title: '算法适配器', icon: Boxes, count: algorithms.length, rows: algorithms.slice(0, 5).map((algorithm) => ({ id: algorithm.id || algorithm.template_key, name: algorithm.name, right: algorithm.version || algorithm.algorithm_key || '', active: algorithm.id === selectedAlgorithm.id })) },
-
-    { title: '模型簇', icon: Database, count: mlModels.length, rows: mlModels.slice(0, 5).map((model) => ({ id: model.id, name: model.name, right: model.version_count || 0, active: model.id === selectedModel.id })) },
-
-    { title: 'Python 环境', icon: Cpu, count: pythonEnvs.length, rows: pythonEnvs.slice(0, 5).map((env) => ({ id: env.id, name: env.name, right: env.status, active: env.id === selectedEnv.id, badge: String(env.name || '').includes('ultralytics') ? '推荐' : '' })) },
-
-  ];
-
-  const queueRows = trainingJobs.length ? trainingJobs : [
-
-    { id: 'mock-train-1', name: 'coco128_train_yolov8l', dataset_project_name: selectedProject.name || 'coco128_e2e_20260705020039', model_name: selectedModel.name || 'YOLOv8l_COCO', status: 'running', progress: 42, current_epoch: 42, total_epochs: 100 },
-
-    { id: 'mock-train-2', name: 'yolov8n_warmup_20260703', dataset_project_name: '示例数据集', model_name: 'YOLOv8n', status: 'done', progress: 100, current_epoch: 100, total_epochs: 100 },
-
-  ];
+  const queueRows = trainingJobs;
 
   const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [
 
@@ -3590,6 +3692,59 @@ function TrainingWorkspace({
   ];
 
   const setField = (key, value) => setTrainingForm({ ...trainingForm, [key]: value });
+  const parameterGroups = selectedAlgorithm.capabilities_json?.parameterSchema?.groups || [];
+  const parameterAliases = {
+    yolo_version: "yoloVersion",
+    taskType: "taskType",
+    imgsz: "imgsz",
+    batch: "batch",
+    batch_size: "batch",
+    epochs: "epochs",
+    optimizer: "optimizer",
+    lr0: "learningRate",
+    learning_rate: "learningRate",
+    save_period: "savePeriod",
+    device: "device",
+    amp: "amp",
+  };
+  const algorithmFieldValue = (field) => {
+    if (Object.prototype.hasOwnProperty.call(trainingForm.algorithmParams || {}, field.key)) return trainingForm.algorithmParams[field.key];
+    const alias = parameterAliases[field.key];
+    if (alias && trainingForm[alias] !== undefined) {
+      if (field.key === "yolo_version") return trainingForm.yoloVersion === "v11" ? "yolo11" : `yolov${String(trainingForm.yoloVersion || "v8").replace(/^v/i, "")}`;
+      return trainingForm[alias];
+    }
+    return field.default ?? "";
+  };
+  const setAlgorithmField = (field, value) => {
+    const alias = parameterAliases[field.key];
+    const normalizedValue = field.type === "number" ? Number(value) : value;
+    const next = { ...trainingForm, algorithmParams: { ...(trainingForm.algorithmParams || {}), [field.key]: normalizedValue } };
+    if (alias) next[alias] = field.key === "yolo_version" ? (value === "yolo11" ? "v11" : String(value).replace(/^yolov/i, "v")) : normalizedValue;
+    setTrainingForm(next);
+  };
+  const selectTrainingAlgorithm = (algorithmId) => {
+    const algorithm = algorithms.find((item) => (item.id || item.template_key) === algorithmId);
+    const defaults = { ...(algorithm?.default_params_json || {}) };
+    for (const group of algorithm?.capabilities_json?.parameterSchema?.groups || []) {
+      for (const field of group.fields || []) if (defaults[field.key] === undefined && field.default !== undefined) defaults[field.key] = field.default;
+    }
+    const linked = bestAssetLink(assetLinks, algorithmId);
+    const nextForm = {
+      ...trainingForm,
+      templateId: algorithmId,
+      taskType: algorithm?.capabilities_json?.tasks?.[0] || algorithm?.task_type || trainingForm.taskType,
+      pythonEnvId: linked?.python_env_id || trainingForm.pythonEnvId,
+      modelId: linked?.model_id || trainingForm.modelId,
+      algorithmParams: defaults,
+    };
+    for (const [key, value] of Object.entries(defaults)) {
+      const alias = parameterAliases[key];
+      if (!alias) continue;
+      nextForm[alias] = key === "yolo_version" ? (value === "yolo11" ? "v11" : String(value).replace(/^yolov/i, "v")) : value;
+    }
+    setTrainingForm(nextForm);
+  };
 
   return (
 
@@ -3599,15 +3754,19 @@ function TrainingWorkspace({
 
         <h2>训练资源</h2>
 
+        <div className="split-target-control" aria-label="选择左侧数据集要写入的划分">
+          {[['trainProjectId', '训练'], ['valProjectId', '验证'], ['testProjectId', '测试']].map(([key, label]) => <button type="button" className={activeDatasetSplit === key ? 'active' : ''} key={key} onClick={() => setActiveDatasetSplit(key)}>{label}</button>)}
+        </div>
+
         <div className="resource-tree">
 
           {resourceGroups.map((group) => (
 
             <section className="resource-group" key={group.title}>
 
-              <button className="resource-group-head" type="button">
+              <button className="resource-group-head" type="button" onClick={() => toggleGroup(group.title)}>
 
-                <ChevronDown size={14} />
+                {expandedGroups.has(group.title) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 
                 <group.icon size={14} />
 
@@ -3617,9 +3776,9 @@ function TrainingWorkspace({
 
               </button>
 
-              {group.rows.map((row) => (
+              {expandedGroups.has(group.title) && group.rows.map((row) => (
 
-                <button className={row.active ? 'active' : ''} key={group.title + '-' + row.id} type="button">
+                <button className={`${row.active ? 'active' : ''} depth-${row.depth || 0}`} style={{ "--depth": row.depth || 0 }} onClick={row.onClick} key={group.title + '-' + row.id} type="button">
 
                   <group.icon size={14} />
 
@@ -3665,13 +3824,25 @@ function TrainingWorkspace({
 
         <div className="training-builder reference-builder">
 
-          <section className="reference-section"><h2>数据与标签</h2><div className="config-row"><span className="row-label">数据</span><select value={trainingForm.datasetProjectId} onChange={(e) => setField('datasetProjectId', e.target.value)}><option value="">选择数据集项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><span>标签版本：{String(selectedProject.active_label_version_id || 'active').slice(0, 8)}</span><span>图像：{formatCount(selectedProject.image_count || 128)}</span><span>类别：1</span></div><div className="split-row"><span>train 80%</span><i><b style={{ width: '80%' }} /></i><span>val 15%</span><i><b style={{ width: '15%' }} /></i><span>test 5%</span><i><b style={{ width: '5%' }} /></i></div></section>
+          <section className="reference-section dataset-split-section">
+            <h2>数据与标签</h2>
+            <div className="dataset-split-grid">
+              {[['trainProjectId', '训练集', 'train'], ['valProjectId', '验证集', 'val'], ['testProjectId', '测试集', 'test']].map(([key, label, hint]) => (
+                <label key={key}><span>{label}<small>{hint}</small></span><select value={trainingForm[key] || ''} onChange={(e) => setTrainingForm({ ...trainingForm, [key]: e.target.value, ...(key === 'trainProjectId' ? { datasetProjectId: e.target.value } : {}) })}><option value="">选择{label}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select></label>
+              ))}
+            </div>
+            <div className="dataset-meta-row"><span>活动标签：{String(selectedProject.active_label_version_id || 'active').slice(0, 8)}</span><span>训练图像：{formatCount(selectedProject.image_count || 0)}</span><span>划分由导入结果确定，不再使用固定比例</span></div>
+          </section>
 
-          <section className="reference-section"><h2>模型与算法</h2><div className="config-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => setField('templateId', e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">模型</span><select value={trainingForm.modelId} onChange={(e) => setField('modelId', e.target.value)}><option value="">选择模型</option>{mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">YOLO 默认权重</option>{modelVersions.map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select></div><div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">手动指定 Python</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '3.13.13'} · {selectedEnv.torch_version || '2.12.1+cpu'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div></section>
+          <section className="reference-section model-init-section">
+            <h2>算法与初始化</h2>
+            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化</option><option value="zero">零初始化</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) && <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : !version.training_job_id || version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</>}</div>
+            <div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">选择 Python 环境</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '--'} · {selectedEnv.torch_version || '--'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div>
+          </section>
 
-          <section className="reference-section"><h2>训练参数</h2><div className="config-row param-row"><label>Epochs<input type="number" value={trainingForm.epochs} onChange={(e) => setField('epochs', e.target.value)} /></label><label>ImgSz<input type="number" value={trainingForm.imgsz} onChange={(e) => setField('imgsz', e.target.value)} /></label><label>Batch<input type="number" value={trainingForm.batch} onChange={(e) => setField('batch', e.target.value)} /></label><label>LR<input value="0.0032" readOnly /></label><label>Optimizer<select defaultValue="SGD"><option>SGD</option><option>AdamW</option></select></label><label>Device<input value={trainingForm.device} onChange={(e) => setField('device', e.target.value)} /></label></div><div className="config-row output-row"><label className="switch-option">Early stop<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label className="switch-option">AMP<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label className="switch-option">冻结骨干<span className="switch-control"><input type="checkbox" /><i /></span></label></div></section>
+          <section className="reference-section algorithm-params-section"><h2>训练参数{selectedAlgorithm.name ? ` · ${selectedAlgorithm.name}` : ''}</h2>{parameterGroups.length ? <div className="parameter-groups schema-parameter-groups">{parameterGroups.map((group) => <fieldset key={group.key || group.label}><legend>{group.label}</legend>{(group.fields || []).map((field) => <label key={field.key}>{field.label}{field.type === 'boolean' ? <span className="switch-control"><input type="checkbox" checked={Boolean(algorithmFieldValue(field))} onChange={() => setAlgorithmField(field, !Boolean(algorithmFieldValue(field)))} /><i /></span> : field.type === 'select' ? <select value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)}>{(field.options || []).map((option) => <option key={String(option)} value={option}>{option}</option>)}</select> : <input type={field.type === 'number' ? 'number' : 'text'} min={field.min} max={field.max} step={field.step} value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)} />}</label>)}</fieldset>)}</div> : <div className="parameter-placeholder">选择算法适配器后显示该算法训练脚本支持的参数。</div>}</section>
 
-          <section className="reference-section"><h2>输出与版</h2><div className="config-row output-row"><label className="switch-option">保存 best.pt<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label className="switch-option">导出指标<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs/coco128_yolov8l" readOnly /><Download size={14} /></div></div></section>
+          <section className="reference-section"><h2>输出与版本</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
 
         </div>
 
@@ -3692,9 +3863,9 @@ function TrainingWorkspace({
                 <em className={"status-badge " + (String(job.status).includes("fail") ? "status-failed" : "")}>{runStatusLabel(job.status)}</em>
                 <i className="mini-progress"><b style={{ width: (job.progress ?? progress) + "%" }} /></i>
                 <span>{job.current_epoch || epoch}/{job.total_epochs || totalEpochs}</span>
-                <span>0.{482 + index * 13}</span>
-                <span>{index ? "71.11%" : "71.10%"}</span>
-                <span>{index ? "--" : "18m"}</span>
+                <span>{job.box_loss ?? parseMaybeJson(job.metrics_json)?.box_loss ?? "--"}</span>
+                <span>{formatMetric(job.map50 ?? parseMaybeJson(job.metrics_json)?.map50)}</span>
+                <span>{job.eta || job.eta_text || "--"}</span>
                 <div className="training-row-actions">
                   <button title="查看任务" onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>
                   <button title="上移" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>
@@ -3707,6 +3878,7 @@ function TrainingWorkspace({
               </div>
             );
           })}
+          {!queueRows.length && <div className="queue-empty">暂无训练任务，配置完成后点击“新建训练任务”。</div>}
         </section>
 
       </main>
@@ -3774,6 +3946,16 @@ setDrawerMode,
 }) {
 
 const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
+const [selectedExportAsset, setSelectedExportAsset] = useState(null);
+const exportSelectedAsset = () => {
+  if (!selectedExportAsset?.href) return;
+  const anchor = document.createElement("a");
+  anchor.href = selectedExportAsset.href;
+  anchor.download = "";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
 
 const familyRows = Array.from(new Set(mlModels.map((model) => modelFamilyLabel(model.name)))).map((family) => {
 
@@ -3827,27 +4009,29 @@ return (
 
 </AssetTreeGroup>
 
-<AssetModelFamilyTree families={familyRows} />
+<AssetModelFamilyTree families={familyRows} onSelect={setSelectedExportAsset} />
+
+<AssetTreeGroup title="预训练模型" icon={Download} count={modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").length} defaultOpen={false}>
+
+{modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").map((version) => (
+
+<button className={selectedExportAsset?.key === `model-${version.id}` ? "active" : ""} key={version.id} onClick={() => setSelectedExportAsset({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` })} onContextMenu={(event) => { event.preventDefault(); const anchor = document.createElement("a"); anchor.href = `/api/ml/model-versions/${encodeURIComponent(version.id)}/download`; anchor.click(); }}><Brain size={14} /><span>{version.model_name} / {version.version_name}</span><Download size={13} /></button>
+
+))}
+
+</AssetTreeGroup>
 
 <AssetTreeGroup title="Python 环境" icon={Cpu} count={pythonEnvs.length} defaultOpen>
 
 {pythonEnvs.map((env) => (
 
-<button key={env.id}><Cpu size={14} /><span>{env.name}</span><em>{env.status}</em></button>
+<button className={selectedExportAsset?.key === `env-${env.id}` ? "active" : ""} key={env.id} onClick={() => setSelectedExportAsset({ key: `env-${env.id}`, type: "Python 环境", name: env.name, href: env.source_type === "conda_pack" && env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : "" })} onContextMenu={(event) => { event.preventDefault(); if (!env.artifact_key) return; const anchor = document.createElement("a"); anchor.href = `/api/ml/python-envs/${encodeURIComponent(env.id)}/download`; anchor.click(); }} title={env.artifact_key ? "左键选择，右键快捷导出 tar" : "此环境没有可导出的 conda-pack 资产"}><Cpu size={14} /><span>{env.name}</span><em>{env.artifact_key ? env.status : "不可导出"}</em></button>
 
 ))}
 
 </AssetTreeGroup>
 
-<AssetTreeGroup title="已验证组" icon={CheckCircle2} count={assetLinks.length} defaultOpen={false}>
-
-{assetLinks.map((link) => (
-
-<button key={link.id}><CheckCircle2 size={14} /><span>{link.algorithm_name || "验证组合"}</span><em>{link.success_count}</em></button>
-
-))}
-
-</AssetTreeGroup>
+{selectedExportAsset && <div className="asset-export-selection"><div><span>{selectedExportAsset.type}</span><b title={selectedExportAsset.name}>{selectedExportAsset.name}</b></div><button type="button" disabled={!selectedExportAsset.href} onClick={exportSelectedAsset} title={selectedExportAsset.href ? `导出${selectedExportAsset.name}` : "该资产没有可下载归档"}><Download size={15} />{selectedExportAsset.href ? "导出" : "无归档"}</button></div>}
 
 <div className="resource-usage asset-usage">
 
@@ -3884,6 +4068,8 @@ return (
 <div className="workspace-commandbar asset-commandbar">
 
 <button onClick={() => setDrawerMode("cluster")}><span>+</span>登记模型</button>
+
+<button onClick={() => setDrawerMode("version")}><Download size={15} />导入预训练权重</button>
 
 <button onClick={() => setDrawerMode("version")}><span>+</span>登记模型版本</button>
 
@@ -4031,33 +4217,11 @@ return (
 
 <div><span>MinIO对象</span><b>{Math.max(42, modelVersions.length + pythonEnvs.length + algorithms.length)}</b><Database size={24} /></div>
 
-<div><span>已验证组</span><b>{assetLinks.length}</b><CheckCircle2 size={24} /></div>
+<div><span>预训练权重</span><b>{modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").length}</b><Brain size={24} /></div>
 
 <div><span>可运行环境</span><b>{pythonEnvs.filter((env) => env.status === "ready").length || pythonEnvs.length}</b><Cpu size={24} /></div>
 
 </div>
-
-<section className="verified-panel">
-
-<div className="panel-title"><h3>已验证关</h3><button>查看全部</button></div>
-
-{(assetLinks.length ? assetLinks : [{ id: "sample", algorithm_name: "Ultralytics YOLO", version_name: "YOLOv8n_ultralytics_8.4.80_cpu", python_env_name: "py3.12-torch2.12-cpu", dataset_project_name: "示例数据集", success_count: 128, last_metrics_json: { precision: .7533, recall: .3714, map50: .3857 } }]).slice(0, 3).map((link) => (
-
-<article className="verified-row" key={link.id}>
-
-<b>{link.algorithm_name || "算法"} <ChevronRight size={12} /> {link.version_name || "模型版本"}</b>
-
-<span>{link.python_env_name || "Python 环境"} · {link.dataset_project_name || "数据集"}</span>
-
-<small>成功次数：{link.success_count || 0}</small>
-
-<div><em>Precision {formatMetric(link.last_metrics_json?.precision)}</em><em>Recall {formatMetric(link.last_metrics_json?.recall)}</em><em>mAP50 {formatMetric(link.last_metrics_json?.map50)}</em></div>
-
-</article>
-
-))}
-
-</section>
 
 <section className="activity-panel">
 
@@ -4121,7 +4285,7 @@ createPythonEnv={createPythonEnv}
 
 }
 
-function AssetModelFamilyTree({ families }) {
+function AssetModelFamilyTree({ families, onSelect }) {
 
 const [expandedFamilies, setExpandedFamilies] = useState(() => new Set(families.map((family) => family.family)));
 
@@ -4247,7 +4411,7 @@ return (
 
 <div className="asset-family-node" key={family.family}>
 
-<button className="asset-family-row" title="右键下载最新模型" onClick={() => toggleFamily(family.family)} onContextMenu={(event) => openContextMenu(event, { type: "family", family, version: family.versions[0] || null })}>
+<button className="asset-family-row" title="左键选择模型簇，右键下载最新模型" onClick={() => { toggleFamily(family.family); const latest = family.versions[0]; if (latest) onSelect?.({ key: `model-${latest.id}`, type: "模型簇最新权重", name: family.family, href: `/api/ml/model-versions/${encodeURIComponent(latest.id)}/download` }); }} onContextMenu={(event) => openContextMenu(event, { type: "family", family, version: family.versions[0] || null })}>
 
 <span className="tree-toggle">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
 
@@ -4269,15 +4433,15 @@ return (
 
 <React.Fragment key={version.id}>
 
-<button className="depth-1 asset-version-row" title="右键下载模型权重" onClick={() => artifacts.length && toggleVersion(version.id)} onContextMenu={(event) => openContextMenu(event, { type: "version", version })}>
+<button className="depth-1 asset-version-row" title={`${version.training_job_id ? "训练任务产物" : "预训练版本"} · 右键下载模型权重`} onClick={() => { onSelect?.({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name || "模型"} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` }); if (artifacts.length) toggleVersion(version.id); }} onContextMenu={(event) => openContextMenu(event, { type: "version", version })}>
 
-{artifacts.length ? (versionOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <Brain size={13} />}<span>{version.version_name}</span><em>{version.stage || ""}</em>
+{artifacts.length ? (versionOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <Brain size={13} />}<span>{version.version_name}<small>{version.training_job_id ? "训练任务" : "预训练"}</small></span><em>{artifacts.length} 文件</em>
 
 </button>
 
 {versionOpen && artifacts.map((artifact) => (
 
-<button className="depth-2 asset-artifact-row" key={artifact.id} title="右键下载此文件" onContextMenu={(event) => openContextMenu(event, { type: "artifact", version, artifact })}>
+<button className="depth-2 asset-artifact-row" key={artifact.id} title="右键下载此文件" onClick={() => onSelect?.({ key: `artifact-${artifact.id}`, type: "模型文件", name: artifact.metadata_json?.relativePath || artifact.name || artifact.path?.split("/").pop() || "模型权重", href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download?artifactId=${encodeURIComponent(artifact.id)}` })} onContextMenu={(event) => openContextMenu(event, { type: "artifact", version, artifact })}>
 
 <Download size={12} /><span>{artifact.metadata_json?.relativePath || artifact.name || artifact.path?.split("/").pop() || "模型权重"}</span><em>{Number(artifact.size || 0) >= 1048576 ? `${(Number(artifact.size) / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(Number(artifact.size || 0) / 1024))} KB`}</em>
 
@@ -5915,7 +6079,7 @@ icon: Boxes,
 
 active: algorithm.id === inferenceForm.templateId,
 
-badge: bestAssetLink(assetLinks, algorithm.id) ? "已验" : "",
+badge: bestAssetLink(assetLinks, algorithm.id) ? "兼容" : "",
 
 title: `${algorithm.name}\n${algorithm.framework || "custom"} · ${algorithm.task_type || "detect"}\n${algorithm.minio_prefix || ""}`,
 
@@ -5959,7 +6123,7 @@ icon: Cpu,
 
 active: env.id === inferenceForm.pythonEnvId,
 
-badge: env.id === bestAssetLink(assetLinks, inferenceForm.templateId)?.python_env_id ? "推荐" : "",
+badge: env.id === bestAssetLink(assetLinks, inferenceForm.templateId)?.python_env_id ? "兼容" : "",
 
 title: envTooltip(env),
 
@@ -5969,9 +6133,9 @@ onClick: () => setField("pythonEnvId", env.id),
 
 },
 
-];
+].filter((group) => group.rows.length);
 
-const displayJobs = sortedInferenceJobs.slice(0, 5);
+const displayJobs = sortedInferenceJobs;
 const [selectedInferenceJobIds, setSelectedInferenceJobIds] = useState(() => new Set());
 
 const selectedInferenceCount = selectedInferenceJobIds.size;
@@ -6815,7 +6979,7 @@ return (
 
 <span>项目目录</span>
 
-<b>{currentFolder?.name || "历史项目"}</b>
+<b>{currentFolder?.name || "全部项目"}</b>
 
 </div>
 
@@ -6824,18 +6988,6 @@ return (
 </div>
 
 <div className="tree-list">
-
-<button className={!currentFolderId ? "active home-root-node" : "home-root-node"} onClick={() => setCurrentFolderId(null)}>
-
-<span className="tree-spacer" />
-
-<FolderOpen size={16} />
-
-<span>历史项目</span>
-
-<em>{formatCount(stats.folders)}</em>
-
-</button>
 
 {rootRows.map((project) => (
 
@@ -6943,7 +7095,7 @@ onDoubleClick={() => openProject(project)}
 
 <span>{project.name}</span>
 
-<em>{formatCount(project.image_count || project.child_count || 0)}</em>
+<em title="该项目及子目录中的图像数量">{formatCount(project.image_count || 0)} 图像</em>
 
 </button>
 
@@ -6991,7 +7143,7 @@ return (
 
 <div className="inspector-title">
 
-<h2>{stats.title === "历史项目" ? "项目统计" : `${stats.title}统计`}</h2>
+<h2>{stats.title === "全部项目" ? "全部项目统计" : `${stats.title}统计`}</h2>
 
 <button title="刷新统计"><RefreshCw size={14} /></button>
 
@@ -6999,13 +7151,13 @@ return (
 
 <div className="inspector-stats">
 
-<div><FolderOpen size={18} /><span>项目</span><b>{formatCount(stats.projects)}</b></div>
+<div><FolderOpen size={18} /><span>顶层项目数</span><b>{formatCount(stats.projects)}</b></div>
 
-<div><ImageIcon size={18} /><span>图像数量</span><b>{formatCount(stats.images)}</b></div>
+<div><ImageIcon size={18} /><span>当前范围图像</span><b>{formatCount(stats.images)}</b></div>
 
-<div><Video size={18} /><span>视频数量</span><b>{formatCount(stats.videos)}</b></div>
+<div><Video size={18} /><span>当前范围视频</span><b>{formatCount(stats.videos)}</b></div>
 
-<div><Tags size={18} /><span>标注数量</span><b>{formatCount(stats.annotations)}</b></div>
+<div><Tags size={18} /><span>当前范围标注</span><b>{formatCount(stats.annotations)}</b></div>
 
 </div>
 
@@ -7080,17 +7232,11 @@ function WorkspaceSidebar({ root, activeProject, projects, openProject, createPr
       <div className="sidebar-head">
         <div>
           <span>项目目录</span>
-          <b>{activeProject?.name || root?.name || "历史项目"}</b>
+          <b>{activeProject?.name || root?.name || "全部项目"}</b>
         </div>
         <button title="新建文件" onClick={createProject}><FolderPlus size={15} /></button>
       </div>
       <div className="tree-list">
-        <button className={!activeProject ? "active home-root-node" : "home-root-node"} onClick={() => rootRows[0] && openProject(rootRows[0])}>
-          <span className="tree-spacer" />
-          <FolderOpen size={16} />
-          <span>历史项目</span>
-          <em>{formatCount(projects?.length || 0)}</em>
-        </button>
         {rootRows.map((project) => (
           <TreeNode
             key={project.id}

@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const url = require("url");
 const crypto = require("crypto");
+const YAML = require("yaml");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
 const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = require("./config");
@@ -326,7 +327,24 @@ const builtinAlgorithmAssets = [
     version: "builtin",
     tasks: ["detect", "segment", "classify"],
     description: "Ultralytics YOLO training and inference adapter.",
-    params: { conf: 0.25, iou: 0.7, imgsz: 640, batch: 16, device: "0", max_det: 300 },
+    params: { epochs: 100, imgsz: 640, batch: 16, device: "0", optimizer: "auto", lr0: 0.01, save_period: -1 },
+    parameterSchema: { groups: [
+      { key: "model", label: "模型参数", fields: [
+        { key: "yolo_version", type: "select", label: "YOLO 版本", options: ["yolov8", "yolov9", "yolov10", "yolo11"], default: "yolov8" },
+        { key: "taskType", type: "select", label: "任务类型", options: ["detect", "segment", "classify"], default: "detect" },
+      ] },
+      { key: "dataset", label: "数据集参数", fields: [
+        { key: "imgsz", type: "number", label: "图像尺寸", min: 32, step: 32, default: 640 },
+        { key: "batch", type: "number", label: "Batch", min: -1, default: 16 },
+      ] },
+      { key: "training", label: "训练参数", fields: [
+        { key: "epochs", type: "number", label: "Epochs", min: 1, default: 100 },
+        { key: "optimizer", type: "select", label: "优化器", options: ["auto", "SGD", "Adam", "AdamW"], default: "auto" },
+        { key: "lr0", type: "number", label: "初始学习率", min: 0, step: 0.0001, default: 0.01 },
+        { key: "save_period", type: "number", label: "间隔保存 Epoch", min: -1, default: -1 },
+        { key: "device", type: "text", label: "设备", default: "0" },
+      ] },
+    ] },
     adapter: [
       "# Platform adapter placeholder for Ultralytics YOLO.",
       "# The dashboard stores this file as a code asset and uses the manifest to resolve runtime behavior.",
@@ -343,7 +361,20 @@ const builtinAlgorithmAssets = [
     version: "builtin",
     tasks: ["detect"],
     description: "DINOv3 + Faster R-CNN inference adapter.",
-    params: { scoreThr: 0.25, width: 1920, height: 1080, nmsAgnostic: false },
+    params: { epochs: 12, batch_size: 2, learning_rate: 0.0001, num_workers: 4, save_period: 1, amp: true },
+    parameterSchema: { groups: [
+      { key: "dataset", label: "数据集参数", fields: [
+        { key: "batch_size", type: "number", label: "Batch", min: 1, default: 2 },
+        { key: "num_workers", type: "number", label: "数据线程", min: 0, default: 4 },
+      ] },
+      { key: "training", label: "训练参数", fields: [
+        { key: "epochs", type: "number", label: "Epochs", min: 1, default: 12 },
+        { key: "learning_rate", type: "number", label: "学习率", min: 0, step: 0.000001, default: 0.0001 },
+        { key: "save_period", type: "number", label: "间隔保存 Epoch", min: 1, default: 1 },
+        { key: "amp", type: "boolean", label: "混合精度", default: true },
+        { key: "config_path", type: "text", label: "训练配置", default: "" },
+      ] },
+    ] },
     adapter: "# Platform adapter placeholder for DINOv3 Faster R-CNN.\n",
   },
   {
@@ -484,6 +515,24 @@ function inspectCondaPackArchive(sourcePath, unpackPath, pythonPath) {
     pythonPath,
     detectedFrom: listing ? "archive" : "filename",
   };
+}
+
+function validateWindowsCondaPackRoot(sourcePath) {
+  const result = spawnSync("tar", ["-tf", sourcePath], { encoding: "utf8", timeout: 60000, maxBuffer: 16 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`无法读取 Python 环境归档：${String(result.stderr || result.stdout || "tar 执行失败").trim()}`);
+  const entries = String(result.stdout || "").split(/\r?\n/)
+    .map((entry) => entry.trim().replace(/^\.\//, "").replace(/\\/g, "/"))
+    .filter(Boolean);
+  const hasRootFile = (name) => entries.some((entry) => entry.toLowerCase() === name.toLowerCase());
+  const hasRootDir = (name) => entries.some((entry) => entry.toLowerCase() === name.toLowerCase() || entry.toLowerCase().startsWith(`${name.toLowerCase()}/`));
+  const missing = [];
+  if (!hasRootFile("python.exe")) missing.push("python.exe");
+  for (const directory of ["Lib", "Scripts", "conda-meta"]) if (!hasRootDir(directory)) missing.push(directory);
+  if (missing.length) {
+    const wrapper = entries.find((entry) => entry.includes("/"))?.split("/")[0] || "";
+    throw new Error(`环境包根目录结构不正确，缺少：${missing.join("、")}。归档必须直接包含 python.exe、Lib、Scripts、conda-meta，不能包含额外顶层目录${wrapper ? `（检测到 ${wrapper}/）` : ""}`);
+  }
+  return entries;
 }
 
 async function seedDefaultAdmin() {
@@ -786,6 +835,10 @@ async function ensureRuntimeSchema() {
       dataset_snapshot_id UUID REFERENCES dataset_snapshots(id) ON DELETE SET NULL,
       model_id UUID REFERENCES model_clusters(id) ON DELETE SET NULL,
       generated_model_version_id UUID,
+      initial_model_version_id UUID,
+      initialization_strategy TEXT NOT NULL DEFAULT 'random',
+      resume_from_checkpoint BOOLEAN NOT NULL DEFAULT false,
+      save_period INT NOT NULL DEFAULT -1,
       status TEXT NOT NULL DEFAULT 'pending',
       priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1328,6 +1381,10 @@ async function ensureRuntimeSchema() {
   const modelArtifactMigrationStatements = [
     `ALTER TABLE IF EXISTS runtime_training_jobs
        ADD COLUMN IF NOT EXISTS generated_model_version_id UUID`,
+    `ALTER TABLE IF EXISTS runtime_training_jobs ADD COLUMN IF NOT EXISTS initial_model_version_id UUID`,
+    `ALTER TABLE IF EXISTS runtime_training_jobs ADD COLUMN IF NOT EXISTS initialization_strategy TEXT NOT NULL DEFAULT 'random'`,
+    `ALTER TABLE IF EXISTS runtime_training_jobs ADD COLUMN IF NOT EXISTS resume_from_checkpoint BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE IF EXISTS runtime_training_jobs ADD COLUMN IF NOT EXISTS save_period INT NOT NULL DEFAULT -1`,
     `DO $$
      BEGIN
        IF to_regclass('runtime_training_jobs') IS NOT NULL
@@ -1339,6 +1396,15 @@ async function ensureRuntimeSchema() {
          ALTER TABLE runtime_training_jobs
            ADD CONSTRAINT runtime_training_jobs_generated_model_version_fk
            FOREIGN KEY (generated_model_version_id) REFERENCES model_revisions(id) ON DELETE SET NULL;
+       END IF;
+     END $$`,
+    `DO $$
+     BEGIN
+       IF to_regclass('runtime_training_jobs') IS NOT NULL
+          AND to_regclass('model_revisions') IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='runtime_training_jobs_initial_model_version_fk') THEN
+         ALTER TABLE runtime_training_jobs ADD CONSTRAINT runtime_training_jobs_initial_model_version_fk
+           FOREIGN KEY (initial_model_version_id) REFERENCES model_revisions(id) ON DELETE SET NULL;
        END IF;
      END $$`,
     `DELETE FROM model_files newer
@@ -1371,6 +1437,151 @@ async function backfillUnknownScenes() {
       [scene, batch.id],
     );
   }
+}
+
+async function cleanupLegacyHistoryProjects() {
+  const legacy = (await query(
+    `SELECT p.id,
+       EXISTS (SELECT 1 FROM project_images pi WHERE pi.project_id=p.id) AS has_images,
+       EXISTS (SELECT 1 FROM project_videos pv WHERE pv.project_id=p.id) AS has_videos,
+       EXISTS (SELECT 1 FROM import_batches ib WHERE ib.project_id=p.id) AS has_imports,
+       EXISTS (SELECT 1 FROM label_versions lv WHERE lv.project_id=p.id) AS has_labels
+     FROM projects p
+     WHERE p.name='历史项目'
+       AND p.parent_id IS NULL`,
+  )).rows;
+  for (const row of legacy) {
+    if (row.has_images || row.has_videos || row.has_imports || row.has_labels) {
+      await query("UPDATE projects SET name='迁移项目', updated_at=now() WHERE id=$1", [row.id]);
+    } else {
+      await query("UPDATE projects SET parent_id=NULL WHERE parent_id=$1", [row.id]);
+      await query("DELETE FROM projects WHERE id=$1", [row.id]);
+    }
+  }
+}
+
+function splitName(value) {
+  const match = String(value || "").toLowerCase().match(/(?:^|[\\/_\-.])(train(?:ing)?|val(?:id|idation)?|test)\d*(?:[\\/_\-.]|$)/);
+  if (!match) return "";
+  if (match[1] === "training") return "train";
+  if (match[1] === "valid" || match[1] === "validation") return "val";
+  return match[1];
+}
+
+function addSplitReference(plan, split, reference, baseDir, sourceRoot) {
+  if (!plan[split] || !reference) return;
+  const raw = String(reference).trim().replace(/^['"]|['"]$/g, "");
+  if (!raw || /^https?:\/\//i.test(raw)) return;
+  const candidates = [path.resolve(baseDir, raw), path.resolve(sourceRoot, raw)];
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const stat = fs.statSync(candidate);
+    if (stat.isDirectory()) plan[split].directories.add(path.resolve(candidate));
+    else if (IMAGE_EXTS.has(path.extname(candidate).toLowerCase())) plan[split].files.add(imageKey(candidate));
+    else if (/\.txt$/i.test(candidate)) {
+      const lines = fs.readFileSync(candidate, "utf8").split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+      for (const line of lines) addSplitReference(plan, split, line, path.dirname(candidate), sourceRoot);
+      plan[split].manifests.add(candidate);
+    }
+    break;
+  }
+}
+
+function discoverDatasetSplitPlan(sourceGroups) {
+  const plan = Object.fromEntries(["train", "val", "test"].map((name) => [name, { files: new Set(), directories: new Set(), manifests: new Set() }]));
+  for (const group of sourceGroups) {
+    const yamlFiles = group.files.filter((file) => /(^|[\\/])(data|dataset)\.ya?ml$/i.test(file));
+    for (const yamlFile of yamlFiles) {
+      try {
+        const document = YAML.parse(fs.readFileSync(yamlFile, "utf8")) || {};
+        const datasetRoot = document.path ? path.resolve(path.dirname(yamlFile), String(document.path)) : group.sourceRoot;
+        for (const split of ["train", "val", "test"]) {
+          const references = Array.isArray(document[split]) ? document[split] : [document[split]];
+          for (const reference of references) addSplitReference(plan, split, reference, datasetRoot, group.sourceRoot);
+          if (document[split]) plan[split].manifests.add(yamlFile);
+        }
+      } catch {}
+    }
+    for (const textFile of group.files.filter((file) => /(^|[\\/])(train|val|test)\.txt$/i.test(file))) {
+      const split = path.basename(textFile, path.extname(textFile)).toLowerCase();
+      addSplitReference(plan, split, textFile, path.dirname(textFile), group.sourceRoot);
+    }
+    for (const jsonFile of group.files.filter((file) => /\.json$/i.test(file))) {
+      const split = splitName(path.relative(group.sourceRoot, jsonFile));
+      if (!split) continue;
+      try {
+        const document = JSON.parse(fs.readFileSync(jsonFile, "utf8"));
+        if (!Array.isArray(document.images) || !Array.isArray(document.annotations)) continue;
+        const groupImages = group.images || group.files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase()));
+        for (const image of document.images) {
+          const reference = String(image.file_name || "").replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+          const matches = groupImages.filter((file) => {
+            const relative = path.relative(group.sourceRoot, file).replace(/\\/g, "/").toLowerCase();
+            return relative === reference || relative.endsWith(`/${reference}`) || path.basename(relative) === path.basename(reference);
+          });
+          if (matches.length === 1) plan[split].files.add(imageKey(matches[0]));
+          else addSplitReference(plan, split, image.file_name, path.dirname(jsonFile), group.sourceRoot);
+        }
+        plan[split].manifests.add(jsonFile);
+      } catch {}
+    }
+  }
+  const active = Object.entries(plan).filter(([, entry]) => entry.files.size || entry.directories.size);
+  return active.length ? plan : null;
+}
+
+function splitForImage(file, splitPlan) {
+  if (!splitPlan) return "";
+  const resolved = path.resolve(file);
+  const key = imageKey(resolved);
+  for (const split of ["train", "val", "test"]) {
+    const entry = splitPlan[split];
+    if (entry.files.has(key)) return split;
+    if ([...entry.directories].some((directory) => resolved === directory || resolved.startsWith(`${directory}${path.sep}`))) return split;
+  }
+  return "";
+}
+
+function serializeSplitPlan(splitPlan, projectIds = {}) {
+  if (!splitPlan) return { detected: false, splits: {} };
+  const splits = {};
+  for (const split of ["train", "val", "test"]) {
+    const entry = splitPlan[split];
+    if (!entry.files.size && !entry.directories.size) continue;
+    const listedImageKeys = new Set(entry.files);
+    for (const directory of entry.directories) {
+      if (!fs.existsSync(directory)) continue;
+      for (const file of walk(directory)) {
+        if (fs.statSync(file).isFile() && IMAGE_EXTS.has(path.extname(file).toLowerCase())) listedImageKeys.add(imageKey(file));
+      }
+    }
+    splits[split] = {
+      projectId: projectIds[split] || null,
+      listedImages: listedImageKeys.size,
+      sourceDirectories: entry.directories.size,
+      manifests: [...entry.manifests].map(toDisplayDataPath),
+    };
+  }
+  return { detected: Object.keys(splits).length > 0, splits };
+}
+
+async function ensureSplitProjects(parentProject, splitPlan) {
+  if (!splitPlan) return {};
+  const ids = {};
+  for (const split of ["train", "val", "test"]) {
+    const entry = splitPlan[split];
+    if (!entry.files.size && !entry.directories.size) continue;
+    let row = (await query(
+      "SELECT id FROM projects WHERE parent_id=$1 AND lower(name)=$2 AND deleted_at IS NULL ORDER BY created_at LIMIT 1",
+      [parentProject.id, split],
+    )).rows[0];
+    if (!row) row = (await query(
+      "INSERT INTO projects (name, description, project_type, parent_id) VALUES ($1,$2,'dataset_split',$3) RETURNING id",
+      [split, `${parentProject.name} ${split} split`, parentProject.id],
+    )).rows[0];
+    ids[split] = row.id;
+  }
+  return ids;
 }
 
 async function upsertImageAsset(client, filePath, meta = {}) {
@@ -1432,6 +1643,7 @@ async function createProject(body) {
   const segments = rawName.split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
   if (!segments.length) throw httpError(400, "项目名称不能为空");
   let parentId = body.parentId || body.parent_id || null;
+  if (!parentId && segments[0] === "历史项目") throw httpError(400, "历史项目是旧版虚拟目录名称，不能创建为项目");
   const parentDepth = parentId ? await projectDepth(parentId) : 0;
   if (parentDepth + segments.length > 3) throw httpError(400, "Project folder depth exceeds limit");
   let project = null;
@@ -1564,13 +1776,13 @@ async function listProjects(trash = false) {
        JOIN scoped_projects sp ON sp.id = c.id
      ),
      image_counts AS (
-       SELECT subtree.root_id, count(pi.id)::int AS image_count
+       SELECT subtree.root_id, count(DISTINCT pi.image_asset_id)::int AS image_count
        FROM subtree
        JOIN project_images pi ON pi.project_id = subtree.project_id AND pi.deleted_at IS NULL
        GROUP BY subtree.root_id
      ),
      video_counts AS (
-       SELECT subtree.root_id, count(pv.id)::int AS video_count
+       SELECT subtree.root_id, count(DISTINCT pv.video_asset_id)::int AS video_count
        FROM subtree
        JOIN project_videos pv ON pv.project_id = subtree.project_id AND pv.deleted_at IS NULL
        GROUP BY subtree.root_id
@@ -1591,6 +1803,18 @@ async function listProjects(trash = false) {
       COALESCE(ic.image_count, 0)::int AS image_count,
       COALESCE(vc.video_count, 0)::int AS video_count,
       COALESCE(ac.annotation_count, 0)::int AS annotation_count,
+      (SELECT count(DISTINCT pi.image_asset_id)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS direct_image_count,
+      (SELECT count(DISTINCT pv.video_asset_id)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS direct_video_count,
+      (SELECT count(a.id)::int FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.project_id=p.id AND pi.deleted_at IS NULL
+       WHERE a.label_version_id=COALESCE(p.active_label_version_id, (
+         SELECT lv.id FROM label_versions lv
+         WHERE lv.project_id=p.id AND lv.deleted_at IS NULL
+         ORDER BY lv.created_at DESC LIMIT 1
+       ))) AS direct_annotation_count,
+      COALESCE(ic.image_count, 0)::int AS subtree_image_count,
+      COALESCE(vc.video_count, 0)::int AS subtree_video_count,
+      COALESCE(ac.annotation_count, 0)::int AS subtree_annotation_count,
       (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND ${trash ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}) AS child_count,
       it.last_import_at
      FROM projects p
@@ -1599,6 +1823,7 @@ async function listProjects(trash = false) {
      LEFT JOIN annotation_counts ac ON ac.root_id = p.id
      LEFT JOIN import_times it ON it.root_id = p.id
      WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
+       AND NOT (p.parent_id IS NULL AND p.name='历史项目')
      ORDER BY p.created_at DESC`,
   );
   return result.rows;
@@ -1623,6 +1848,9 @@ async function importPath(body) {
   }
   body.sourcePath = sourcePaths[0];
   body.sourcePaths = sourcePaths;
+  const manifestGroups = sourcePaths.map((sourceRoot) => ({ sourceRoot, files: walk(sourceRoot) }));
+  const splitPlan = discoverDatasetSplitPlan(manifestGroups);
+  body.splitPlan = splitPlan;
 
   const { project, batch } = await transaction(async (client) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [String(projectId)]);
@@ -1644,6 +1872,8 @@ async function importPath(body) {
     )).rows[0];
     return { project: projectRow, batch: batchRow };
   });
+  const splitProjectIds = await ensureSplitProjects(project, splitPlan);
+  body.splitProjectIds = splitProjectIds;
 
   setImmediate(() => {
     const task = runImportBatch(batch.id, project, body).catch(async (error) => {
@@ -1656,7 +1886,7 @@ async function importPath(body) {
     activeImportTasks.add(task);
   });
 
-  return { project, batch };
+  return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds) };
 }
 
 async function importCancelled(batchId) {
@@ -1711,6 +1941,11 @@ async function runImportBatch(batchId, project, body) {
     acc.voc += group.formatCounts?.voc || 0;
     return acc;
   }, { labelme: 0, coco: 0, yolo: 0, voc: 0 });
+  const splitPlan = body.splitPlan || discoverDatasetSplitPlan(sourceGroups);
+  const splitProjectIds = Object.keys(body.splitProjectIds || {}).length
+    ? body.splitProjectIds
+    : await ensureSplitProjects(project, splitPlan);
+  const splitResult = serializeSplitPlan(splitPlan, splitProjectIds);
 
   await query(
     "UPDATE import_batches SET status='running', total_files=$1, processed_files=0, message=$2 WHERE id=$3",
@@ -1722,21 +1957,29 @@ async function runImportBatch(batchId, project, body) {
   }
 
   const client = { query };
-  const version = (await query(
-    `INSERT INTO label_versions (project_id, name, target_type, status, import_batch_id)
-     VALUES ($1,$2,'image','active',$3) RETURNING *`,
-    [projectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
-  )).rows[0];
-  await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
+  const targetProjectIds = Array.from(new Set([projectId, ...Object.values(splitProjectIds)]));
+  const versionsByProject = new Map();
+  for (const targetProjectId of targetProjectIds) {
+    const version = (await query(
+      `INSERT INTO label_versions (project_id, name, target_type, status, import_batch_id)
+       VALUES ($1,$2,'image','active',$3) RETURNING *`,
+      [targetProjectId, body.labelVersionName || `import_${new Date().toISOString()}`, batchId],
+    )).rows[0];
+    versionsByProject.set(String(targetProjectId), version);
+    await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, targetProjectId]);
+  }
 
   for (const item of usedLabelFiles) {
     const relative = path.relative(item.sourceRoot, item.file).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
-    await store.putFile(rawLabelObjectKey(projectId, version.id, relative || path.basename(item.file)), item.file);
+    for (const [targetProjectId, version] of versionsByProject) {
+      await store.putFile(rawLabelObjectKey(targetProjectId, version.id, relative || path.basename(item.file)), item.file);
+    }
   }
 
   let imageCount = 0;
   let annCount = 0;
   let unlabeledImageCount = 0;
+  const actualSplitCounts = { train: 0, val: 0, test: 0 };
   for (const imageEntry of images) {
     const imageFile = imageEntry.file;
     if (imageCount % 5 === 0 && await importCancelled(batchId)) {
@@ -1744,6 +1987,10 @@ async function runImportBatch(batchId, project, body) {
       return;
     }
     const matched = imageEntry.matches.get(imageKey(imageFile));
+    const split = splitForImage(imageFile, splitPlan);
+    if (split && Object.prototype.hasOwnProperty.call(actualSplitCounts, split)) actualSplitCounts[split] += 1;
+    const targetProjectId = splitProjectIds[split] || projectId;
+    const version = versionsByProject.get(String(targetProjectId));
     const meta = matched?.meta || {};
     const scene = inferSceneFromPath(meta, imageFile, imageEntry.sourceRoot);
     const asset = await upsertImageAsset(client, imageFile, meta);
@@ -1752,7 +1999,7 @@ async function runImportBatch(batchId, project, body) {
       ? `${cleanName(meta.view, "UnknownView")}_${cleanName(scene, "UnknownScene")}_${modality === "infrared" ? "IR" : "VIS"}_${String(imageCount + 1).padStart(6, "0")}${path.extname(imageFile).toLowerCase()}`
       : path.basename(imageFile);
     const projectImage = await upsertProjectImage(client, {
-      projectId,
+      projectId: targetProjectId,
       imageAssetId: asset.id,
       importBatchId: batchId,
       displayName,
@@ -1801,8 +2048,15 @@ async function runImportBatch(batchId, project, body) {
     await query("UPDATE import_batches SET processed_files=$1, message=$2 WHERE id=$3", [images.length + videoCount, `正在导入视频 ${videoCount} / ${videos.length}`, batchId]);
   }
 
-  await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, projectId]);
-  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}`;
+  for (const [splitName, value] of Object.entries(splitResult.splits || {})) {
+    value.plannedImages = value.listedImages;
+    value.listedImages = actualSplitCounts[splitName] || 0;
+    value.importedImages = actualSplitCounts[splitName] || 0;
+  }
+  const splitMessage = splitResult.detected
+    ? `；划分 ${Object.entries(splitResult.splits).map(([name, value]) => `${name}:${value.listedImages}`).join("，")}`
+    : "";
+  const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}${splitMessage}`;
   await query("UPDATE import_batches SET status='done', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videos.length, message, batchId]);
 }
 
@@ -2315,7 +2569,8 @@ async function createModelVersion(body = {}) {
   if (!modelId) throw new Error("Select a model cluster.");
   const model = (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
   if (!model) throw new Error("模型簇不存在");
-  const stage = String(body.stage || "pretrained").trim();
+  const requestedStage = String(body.stage || "pretrained").trim().toLowerCase();
+  const stage = ["pretrained", "training", "candidate", "production"].includes(requestedStage) ? requestedStage : "pretrained";
   const sourcePath = String(body.sourcePath || body.source_path || "").trim();
   const params = body.params || {};
   const defaultPrefix = `${stage === "pretrained" ? "pretrain" : stage}_${model.name}_${dateCode()}`;
@@ -2356,7 +2611,7 @@ async function createModelVersion(body = {}) {
     await query(
       `INSERT INTO model_files (model_version_id, artifact_type, path, size, sha256, metadata_json)
        VALUES ($1,'weights',$2,$3,$4,$5)`,
-      [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath })],
+      [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath, weightRole: stage === "pretrained" ? "pretrained" : "other" })],
     );
   }
   return version;
@@ -2446,13 +2701,13 @@ async function listTrainingTemplates() {
     return (await query("SELECT * FROM training_templates ORDER BY created_at DESC")).rows;
   } catch (error) {
     if (error.code !== "42P01") throw error;
-    return builtinAlgorithmAssets.map((asset) => ({
+    return builtinAlgorithmAssets.filter((asset) => ["ultralytics_yolo", "dinov3_faster_rcnn"].includes(asset.algorithmKey)).map((asset) => ({
       id: `builtin-${asset.algorithmKey}`,
       name: asset.name,
       template_key: asset.algorithmKey,
       framework: asset.framework,
       task_type: asset.taskType,
-      capabilities_json: { tasks: asset.tasks, builtin: true },
+      capabilities_json: { tasks: asset.tasks, builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
     }));
   }
 }
@@ -2468,12 +2723,14 @@ function algorithmManifest(asset) {
     inputs: { imageDir: true, manifest: true, modelWeights: true },
     outputs: { predictionsJson: true, visualizations: true, labelmeJson: true },
     params: asset.params || {},
+    parameterSchema: asset.parameterSchema || { groups: [] },
     description: asset.description || "",
   };
 }
 
 async function ensureBuiltinAlgorithmAssets() {
-  for (const asset of builtinAlgorithmAssets) {
+  const supportedKeys = ["ultralytics_yolo", "dinov3_faster_rcnn"];
+  for (const asset of builtinAlgorithmAssets.filter((item) => supportedKeys.includes(item.algorithmKey))) {
     const version = asset.version || "builtin";
     const minioPrefix = algorithmAssetPrefix(asset.algorithmKey, version);
     const manifestKey = algorithmManifestKey(asset.algorithmKey, version);
@@ -2509,12 +2766,36 @@ async function ensureBuiltinAlgorithmAssets() {
         manifestKey,
         adapterKey,
         `${minioPrefix}/source/`,
-        JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], builtin: true }),
+        JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } }),
         JSON.stringify(asset.params || {}),
         asset.description || "",
       ],
     );
+    await query(
+      `UPDATE training_templates
+       SET default_params_json=$1,
+           capabilities_json=COALESCE(capabilities_json, '{}'::jsonb) || $2::jsonb,
+           updated_at=now()
+       WHERE template_key=$3`,
+      [JSON.stringify(asset.params || {}), JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], parameterSchema: asset.parameterSchema || { groups: [] } }), asset.algorithmKey],
+    ).catch((error) => {
+      if (error.code !== "42P01") throw error;
+    });
   }
+  await query(
+    `UPDATE algorithm_assets
+     SET deleted_at=COALESCE(deleted_at, now()), status='retired', updated_at=now()
+     WHERE source_type='builtin' AND algorithm_key <> ALL($1::text[])`,
+    [supportedKeys],
+  ).catch((error) => {
+    if (error.code !== "42P01") throw error;
+  });
+  await query(
+    `DELETE FROM training_templates
+     WHERE template_key IN ('rtdetr', 'fake_reference_detector', 'dummy_empty_detector')`,
+  ).catch((error) => {
+    if (error.code !== "42P01") throw error;
+  });
 }
 
 async function objectText(objectKey) {
@@ -2551,9 +2832,22 @@ async function syncMinioAlgorithmAssets() {
     const fallback = algorithmKeyFromManifestKey(manifestKey);
     const algorithmKey = cleanName(manifest.algorithmKey || manifest.algorithm_key || fallback.algorithmKey, "algorithm").toLowerCase();
     const version = cleanName(manifest.version || fallback.version || "custom", "version").toLowerCase();
+    if (version === "builtin" && !["ultralytics_yolo", "dinov3_faster_rcnn"].includes(algorithmKey)) continue;
     const minioPrefix = manifestKey.replace(/\/manifest\.json$/, "");
     const adapterKey = manifest.adapterKey || manifest.adapter_key || manifest.entry?.adapterKey || `${minioPrefix}/${manifest.entry?.adapter || "adapter.py"}`;
     const taskType = manifest.task_type || manifest.taskType || manifest.tasks?.[0] || "detect";
+    const builtinDefinition = version === "builtin"
+      ? builtinAlgorithmAssets.find((item) => item.algorithmKey === algorithmKey)
+      : null;
+    const parameterSchema = builtinDefinition?.parameterSchema
+      || manifest.parameterSchema
+      || manifest.capabilities?.parameterSchema
+      || { groups: [] };
+    const defaultParams = builtinDefinition?.params
+      || manifest.params
+      || manifest.defaultParams
+      || manifest.default_params
+      || {};
     await query(
       `INSERT INTO algorithm_assets
        (name, algorithm_key, framework, task_type, version, source_type, minio_prefix, manifest_key, adapter_key, source_prefix, capabilities_json, default_params_json, description, status)
@@ -2583,8 +2877,13 @@ async function syncMinioAlgorithmAssets() {
         manifestKey,
         adapterKey,
         `${minioPrefix}/source/`,
-        JSON.stringify({ ...(manifest.capabilities || {}), tasks: manifest.tasks || manifest.capabilities?.tasks || [taskType], minioSynced: true }),
-        JSON.stringify(manifest.params || manifest.defaultParams || manifest.default_params || {}),
+        JSON.stringify({
+          ...(manifest.capabilities || {}),
+          tasks: manifest.tasks || manifest.capabilities?.tasks || [taskType],
+          parameterSchema,
+          minioSynced: true,
+        }),
+        JSON.stringify(defaultParams),
         manifest.description || "从 MinIO 算法资产 manifest 自动登记",
       ],
     );
@@ -2602,7 +2901,7 @@ async function listAlgorithmAssets() {
     return rows.rows;
   } catch (error) {
     if (!["42P01", "XX002", "57014"].includes(error.code)) throw error;
-    return builtinAlgorithmAssets.map((asset) => ({
+    return builtinAlgorithmAssets.filter((asset) => ["ultralytics_yolo", "dinov3_faster_rcnn"].includes(asset.algorithmKey)).map((asset) => ({
       id: `builtin-${asset.algorithmKey}`,
       name: asset.name,
       algorithm_key: asset.algorithmKey,
@@ -2613,7 +2912,7 @@ async function listAlgorithmAssets() {
       minio_prefix: algorithmAssetPrefix(asset.algorithmKey, asset.version),
       manifest_key: algorithmManifestKey(asset.algorithmKey, asset.version),
       adapter_key: algorithmAdapterKey(asset.algorithmKey, asset.version),
-      capabilities_json: { tasks: asset.tasks, builtin: true },
+      capabilities_json: { tasks: asset.tasks, builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
       default_params_json: asset.params || {},
       description: asset.description,
       status: "ready",
@@ -2660,6 +2959,24 @@ async function listPythonEnvs() {
   return (await query("SELECT * FROM runtime_envs ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC")).rows;
 }
 
+async function streamPythonEnvArtifact(res, envId) {
+  const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+  if (!env) return sendError(res, 404, "Python environment not found");
+  if (env.source_type !== "conda_pack" || !env.artifact_key) return sendError(res, 409, "This environment has no downloadable conda-pack archive");
+  const fileName = `${cleanName(env.name, "python-env")}.tar.gz`;
+  const headers = {
+    "content-type": "application/gzip",
+    "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+    "cache-control": "no-store",
+  };
+  if (env.artifact_size) headers["content-length"] = String(env.artifact_size);
+  const localFallback = store.localFallbackPath(env.artifact_key);
+  res.writeHead(200, headers);
+  if (fs.existsSync(localFallback)) return fs.createReadStream(localFallback).pipe(res);
+  const stream = await store.getStream(env.artifact_key);
+  stream.pipe(res);
+}
+
 function defaultPythonEnvName(info = {}, accelerator = "cpu", fallback = "python-env") {
   const versionText = String(info.version || "").match(/(\d+\.\d+)/)?.[1] || String(info.python_version || "").match(/(\d+\.\d+)/)?.[1] || "";
   const torchText = String(info.packages?.torch_version || info.torch_version || "").match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] || "";
@@ -2683,6 +3000,7 @@ async function createPythonEnv(body = {}) {
     if (!allowedRoots.some((root) => isInsideRoot(root, sourcePath))) throw new Error(`conda-pack 环境包必须位于服务器资产目录内：${allowedRoots.join("、")}`);
     const stat = fs.statSync(sourcePath);
     const sha = await hashFile(sourcePath);
+    validateWindowsCondaPackRoot(sourcePath);
     const artifactKey = pythonEnvObjectKey(sha, path.basename(sourcePath));
     const manifestKey = pythonEnvManifestKey(sha);
     await store.putFile(artifactKey, sourcePath, { "x-amz-meta-source": "conda-pack" });
@@ -2731,13 +3049,14 @@ async function createPythonEnv(body = {}) {
       createdAt: new Date().toISOString(),
     };
     await store.putJson(manifestKey, manifest);
+    const envName = body.name || defaultPythonEnvName(info, accelerator, path.basename(sourcePath).replace(/\.(tar\.gz|tgz)$/i, ""));
     const rows = await query(
       `INSERT INTO runtime_envs
        (name, python_path, env_type, os_type, arch, accelerator, status, python_version, torch_version, cuda_available, cuda_version,
         packages_json, capabilities_json, source_type, artifact_key, artifact_name, artifact_size, artifact_sha256, unpack_path)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
-        body.name || defaultPythonEnvName(info, accelerator, path.basename(sourcePath).replace(/\.(tar\.gz|tgz)$/i, "")),
+        envName,
         pythonPath,
         "conda-pack",
         platform.osType,
@@ -2943,6 +3262,30 @@ async function listTrainingJobs() {
   }
 }
 
+async function normalizeTrainingInitialization(body, params) {
+  const versionId = body.initialModelVersionId || body.initial_model_version_id || params.initialModelVersionId || null;
+  const strategy = String(body.initializationStrategy || body.initialization_strategy || params.initializationStrategy || (versionId ? "pretrained" : "random")).toLowerCase();
+  if (!["random", "zero", "pretrained", "training"].includes(strategy)) throw new Error(`Unsupported initialization strategy: ${strategy}`);
+  const resume = Boolean(body.resume ?? params.resume ?? false);
+  if (["pretrained", "training"].includes(strategy) && !versionId) throw new Error(`${strategy} initialization requires a model version`);
+  if (["random", "zero"].includes(strategy) && versionId) throw new Error(`${strategy} initialization cannot reference a model version`);
+  if (resume && strategy !== "training") throw new Error("Resume is only supported for a previous training checkpoint");
+  let checkpoint = null;
+  if (versionId) {
+    const row = (await query(
+      `SELECT mv.*, mc.name AS model_name, mc.framework,
+         (SELECT jsonb_build_object('id', mf.id, 'path', mf.path, 'sha256', mf.sha256, 'size', mf.size, 'metadata', mf.metadata_json)
+          FROM model_files mf WHERE mf.model_version_id=mv.id
+          ORDER BY CASE WHEN mf.metadata_json->>'weightRole'='last' THEN 0 WHEN mf.metadata_json->>'weightRole'='best' THEN 1 ELSE 2 END, mf.created_at DESC LIMIT 1) AS checkpoint
+       FROM model_revisions mv JOIN model_clusters mc ON mc.id=mv.model_id WHERE mv.id=$1`,
+      [versionId],
+    )).rows[0];
+    if (!row || !row.checkpoint) throw new Error("Selected initialization model has no available checkpoint");
+    checkpoint = { ...row.checkpoint, versionId: row.id, versionName: row.version_name, modelName: row.model_name, stage: row.stage, framework: row.framework };
+  }
+  return { strategy, versionId, resume, checkpoint };
+}
+
 async function createTrainingJob(body = {}) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
   if (!datasetProjectId) throw new Error("请选择训练数据集项目");
@@ -2955,23 +3298,35 @@ async function createTrainingJob(body = {}) {
   }
   const params = { ...(body.params || {}) };
   if (body.templateId || body.template_id) {
-    const template = (await query("SELECT * FROM training_templates WHERE id=$1", [body.templateId || body.template_id])).rows[0];
-    if (!template) throw new Error("训练模板不存在");
-    Object.assign(params, template.default_params_json || {}, params);
-    const requestedTask = String(body.taskType || body.task_type || params.taskType || template.task_type || "detect");
-    const supportedTasks = template.capabilities_json?.tasks || [template.task_type || "detect"];
-    if (!supportedTasks.includes(requestedTask)) throw new Error(`训练模板不支持 ${requestedTask} 任务`);
-    params.templateId = template.id;
-    params.templateKey = template.template_key;
+    const templateId = body.templateId || body.template_id;
+    const template = (await query("SELECT * FROM training_templates WHERE id=$1", [templateId])).rows[0];
+    const algorithm = template ? null : (await query("SELECT * FROM algorithm_assets WHERE id=$1 AND deleted_at IS NULL", [templateId])).rows[0];
+    const selected = template || algorithm;
+    if (!selected) throw new Error("训练算法适配器不存在");
+    Object.assign(params, selected.default_params_json || {}, params);
+    const requestedTask = String(body.taskType || body.task_type || params.taskType || selected.task_type || "detect");
+    const supportedTasks = selected.capabilities_json?.tasks || [selected.task_type || "detect"];
+    if (!supportedTasks.includes(requestedTask)) throw new Error(`训练算法适配器不支持 ${requestedTask} 任务`);
+    params.templateId = template?.id || null;
+    params.algorithmAssetId = algorithm?.id || null;
+    params.templateKey = template?.template_key || algorithm?.algorithm_key;
+    params.algorithmKey = template?.template_key || algorithm?.algorithm_key;
     params.taskType = requestedTask;
   }
   if (body.pythonEnvId || body.python_env_id) {
-    const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
+    let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [body.pythonEnvId || body.python_env_id])).rows[0];
     if (!env) throw new Error("Python 环境不存在");
+    env = await resolveRuntimePythonEnv(env);
     params.pythonEnvId = env.id;
     params.python = env.python_path;
   }
-  if (body.initialModelVersionId || body.initial_model_version_id) params.initialModelVersionId = body.initialModelVersionId || body.initial_model_version_id;
+  const initialization = await normalizeTrainingInitialization(body, params);
+  params.initializationStrategy = initialization.strategy;
+  params.initialModelVersionId = initialization.versionId;
+  params.resume = initialization.resume;
+  params.checkpointMetadata = initialization.checkpoint;
+  params.datasetSplits = body.datasetSplits || body.dataset_splits || params.datasetSplits || {};
+  params.save_period = Number(body.savePeriod ?? body.save_period ?? params.save_period ?? -1);
   const totalEpochs = Number(params.epochs || body.totalEpochs || 0) || 0;
   const name = String(body.name || `${project.name}_train_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
   const template = String(body.template || "ultralytics_yolo_detect");
@@ -2981,6 +3336,12 @@ async function createTrainingJob(body = {}) {
     [name, template, datasetProjectId, modelId, JSON.stringify(params), totalEpochs, "已进入训练队列，等待训练 worker 接管"],
   );
   const job = inserted.rows[0];
+  await query(
+    `UPDATE runtime_training_jobs
+     SET initial_model_version_id=$1, initialization_strategy=$2, resume_from_checkpoint=$3, save_period=$4
+     WHERE id=$5`,
+    [initialization.versionId, initialization.strategy, initialization.resume, params.save_period, job.id],
+  );
   const outputRoot = path.join(storageRoot, "runtime", "training", job.id);
   fs.mkdirSync(outputRoot, { recursive: true });
   const updated = await query("UPDATE runtime_training_jobs SET output_root=$1 WHERE id=$2 RETURNING *", [outputRoot, job.id]);
@@ -4321,7 +4682,7 @@ async function appendTrainingLog(jobId, stream, line) {
   await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [jobId, stream, text]).catch(() => {});
 }
 
-async function createDatasetSnapshotForTraining(job) {
+async function createLegacyDatasetSnapshotForTraining(job) {
   const existingId = job.dataset_snapshot_id;
   if (existingId) {
     const existing = (await query("SELECT * FROM dataset_snapshots WHERE id=$1", [existingId])).rows[0];
@@ -4405,13 +4766,186 @@ async function createDatasetSnapshotForTraining(job) {
   return snapshot;
 }
 
-function buildTrainingCommand(job, snapshot) {
+async function createDatasetSnapshotForTraining(job) {
+  if (job.dataset_snapshot_id) {
+    const existing = (await query("SELECT * FROM dataset_snapshots WHERE id=$1", [job.dataset_snapshot_id])).rows[0];
+    if (existing) return existing;
+  }
+  const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+  const requested = params.datasetSplits || {};
+  const splitProjectIds = {
+    train: requested.trainProjectId || requested.train_project_id || job.dataset_project_id,
+    val: requested.valProjectId || requested.val_project_id || null,
+    test: requested.testProjectId || requested.test_project_id || null,
+  };
+  if (!splitProjectIds.train) throw new Error("Training split project is required");
+  const selectedIds = [...new Set(Object.values(splitProjectIds).filter(Boolean))];
+  if (selectedIds.length !== Object.values(splitProjectIds).filter(Boolean).length) throw new Error("train, val and test must reference independent projects");
+  const projects = (await query("SELECT * FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedIds])).rows;
+  const projectById = new Map(projects.map((row) => [String(row.id), row]));
+  for (const [splitName, projectId] of Object.entries(splitProjectIds)) {
+    if (!projectId) continue;
+    const selectedProject = projectById.get(String(projectId));
+    if (!selectedProject) throw new Error(`${splitName} split project does not exist`);
+    if (!selectedProject.active_label_version_id) throw new Error(`${splitName} split project has no active label version`);
+  }
+  const rows = (await query(
+    `SELECT pi.*, ia.object_key, ia.original_ext, ia.width, ia.height
+     FROM project_images pi JOIN image_assets ia ON ia.id=pi.image_asset_id
+     LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
+     WHERE pi.project_id=ANY($1::uuid[]) AND pi.deleted_at IS NULL AND (ib.id IS NULL OR ib.deleted_at IS NULL)
+     ORDER BY pi.project_id, pi.created_at, pi.id`,
+    [selectedIds],
+  )).rows;
+  if (!rows.some((row) => String(row.project_id) === String(splitProjectIds.train))) throw new Error("Training split has no trainable images");
+  const annRows = (await query(
+    `SELECT a.* FROM image_annotations a
+     JOIN project_images pi ON pi.id=a.project_image_id JOIN projects p ON p.id=pi.project_id
+     WHERE pi.project_id=ANY($1::uuid[]) AND a.label_version_id=p.active_label_version_id ORDER BY a.label, a.id`,
+    [selectedIds],
+  )).rows;
+  const labels = [...new Set(annRows.map((ann) => String(ann.label || "unknown")))].sort((a, b) => a.localeCompare(b));
+  if (!labels.length) throw new Error("Selected dataset splits have no annotations");
+  const labelToIndex = new Map(labels.map((label, index) => [label, index]));
+  const annsByImage = new Map();
+  for (const ann of annRows) {
+    const key = String(ann.project_image_id);
+    if (!annsByImage.has(key)) annsByImage.set(key, []);
+    annsByImage.get(key).push(ann);
+  }
+  const trainProject = projectById.get(String(splitProjectIds.train));
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
+  const snapshotName = `${cleanName(trainProject.name, "dataset")}_${stamp}`;
+  const snapshotRoot = path.join(storageRoot, "runtime", "snapshots", snapshotName);
+  const split = { train: 0, val: 0, test: 0, projects: splitProjectIds };
+  fs.mkdirSync(path.join(snapshotRoot, "annotations"), { recursive: true });
+  for (const part of ["train", "val", "test"]) {
+    fs.mkdirSync(path.join(snapshotRoot, "images", part), { recursive: true });
+    fs.mkdirSync(path.join(snapshotRoot, "labels", part), { recursive: true });
+  }
+  const cocoBySplit = Object.fromEntries(["train", "val", "test"].map((name) => [name, { images: [], annotations: [], categories: labels.map((label, index) => ({ id: index + 1, name: label })) }]));
+  let annotationId = 1;
+  for (let index = 0; index < rows.length; index += 1) {
+    const item = rows[index];
+    const part = Object.entries(splitProjectIds).find(([, projectId]) => projectId && String(projectId) === String(item.project_id))?.[0];
+    if (!part) continue;
+    split[part] += 1;
+    const ext = item.original_ext || ".jpg";
+    const base = `${exportBaseName(item, index + 1)}_${String(item.id).slice(0, 8)}`;
+    const imageName = `${base}${ext}`;
+    await writeObjectToFile(item.object_key, path.join(snapshotRoot, "images", part, imageName));
+    const annotations = annsByImage.get(String(item.id)) || [];
+    const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
+    fs.writeFileSync(path.join(snapshotRoot, "labels", part, `${base}.txt`), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
+    cocoBySplit[part].images.push({ id: String(item.id), file_name: imageName, width: Number(item.width || 0), height: Number(item.height || 0) });
+    for (const ann of annotations) cocoBySplit[part].annotations.push({
+      id: annotationId++, image_id: String(item.id), category_id: (labelToIndex.get(String(ann.label || "unknown")) ?? 0) + 1,
+      bbox: [Number(ann.bbox_x || 0), Number(ann.bbox_y || 0), Number(ann.bbox_w || 0), Number(ann.bbox_h || 0)],
+      area: Number(ann.bbox_w || 0) * Number(ann.bbox_h || 0), iscrowd: 0,
+    });
+  }
+  for (const part of ["train", "val", "test"]) fs.writeFileSync(path.join(snapshotRoot, "annotations", `${part}.json`), JSON.stringify(cocoBySplit[part], null, 2), "utf8");
+  const dataYaml = [
+    `path: ${yamlScalar(snapshotRoot.replace(/\\/g, "/"))}`, "train: images/train", "val: images/val", "test: images/test",
+    `nc: ${labels.length}`, "names:", ...labels.map((label, index) => `  ${index}: ${yamlScalar(label)}`), "",
+  ].join("\n");
+  fs.writeFileSync(path.join(snapshotRoot, "data.yaml"), dataYaml, "utf8");
+  fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, labels, split, imageCount: rows.length, annotationCount: annRows.length }, null, 2), "utf8");
+  const snapshot = (await query(
+    `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
+     VALUES ($1,$2,$3,'yolo+coco',$4,$5,$6,$7,$8) RETURNING *`,
+    [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, rows.length, annRows.length,
+      JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds })],
+  )).rows[0];
+  await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
+  await appendTrainingLog(job.id, "system", `dataset snapshot created from independent splits: train=${split.train}, val=${split.val}, test=${split.test}`);
+  return snapshot;
+}
+
+async function resolveTrainingAlgorithmSource(params = {}) {
+  const algorithmId = params.algorithmAssetId || null;
+  let algorithm = null;
+  if (algorithmId) algorithm = (await query("SELECT * FROM algorithm_assets WHERE id=$1 AND deleted_at IS NULL", [algorithmId])).rows[0];
+  if (!algorithm && params.algorithmKey) algorithm = (await query(
+    "SELECT * FROM algorithm_assets WHERE algorithm_key=$1 AND deleted_at IS NULL ORDER BY source_type='builtin' DESC, updated_at DESC LIMIT 1",
+    [params.algorithmKey],
+  )).rows[0];
+  if (!algorithm) return null;
+  const cacheRoot = path.join(storageRoot, "runtime", "algorithm-cache", algorithm.id, assetPathSegmentForCache(algorithm.version || "current"));
+  const sourcePrefix = String(algorithm.source_prefix || `${algorithm.minio_prefix || ""}/source/`).replace(/\\/g, "/");
+  if (sourcePrefix) {
+    const keys = await store.listObjectKeys(sourcePrefix);
+    for (const objectKey of keys) {
+      const relative = objectKey.slice(sourcePrefix.length).replace(/^\/+/, "");
+      if (!relative || relative.includes("..")) continue;
+      const target = path.join(cacheRoot, relative.split("/").join(path.sep));
+      if (!fs.existsSync(target) || Number(fs.statSync(target).size) !== Number(await store.objectSize(objectKey).catch(() => -1))) await writeObjectToFile(objectKey, target);
+    }
+  }
+  return { algorithm, cacheRoot };
+}
+
+function assetPathSegmentForCache(value) {
+  return cleanName(String(value || "asset"), "asset").replace(/[. ]+$/g, "") || "asset";
+}
+
+function findFileUnder(root, predicate) {
+  if (!root || !fs.existsSync(root)) return "";
+  return walk(root).find((file) => fs.statSync(file).isFile() && predicate(file)) || "";
+}
+
+async function buildDinoTrainingCommand(job, snapshot, params) {
+  const resolved = await resolveTrainingAlgorithmSource(params);
+  if (!resolved) throw new Error("DINOv3 algorithm asset is not registered");
+  const { algorithm, cacheRoot } = resolved;
+  const trainScript = [
+    path.join(cacheRoot, "tools", "train.py"),
+    findFileUnder(cacheRoot, (file) => /[\\/]tools[\\/]train\.py$/i.test(file)),
+  ].find((file) => file && fs.existsSync(file));
+  if (!trainScript) throw new Error(`DINOv3 algorithm source cache has no tools/train.py: ${cacheRoot}`);
+  const requestedConfig = String(params.config_path || params.configPath || algorithm.default_params_json?.config_path || "").trim();
+  const configCandidates = [
+    requestedConfig && path.isAbsolute(requestedConfig) ? requestedConfig : "",
+    requestedConfig ? path.join(cacheRoot, requestedConfig) : "",
+    findFileUnder(cacheRoot, (file) => /[\\/]configs[\\/].*\.py$/i.test(file) && /(dino|faster|rcnn)/i.test(file)),
+  ].filter(Boolean);
+  const configPath = configCandidates.find((file) => fs.existsSync(file));
+  if (!configPath) throw new Error("DINOv3 training config was not found; set config_path in the algorithm parameters");
+  const python = params.python || process.env.PYTHON || "python";
+  const workDir = path.join(job.output_root, "run");
+  const cfgOptions = [
+    `train_cfg.max_epochs=${Number(params.epochs || job.total_epochs || 12)}`,
+    `train_dataloader.batch_size=${Number(params.batch_size || params.batch || 2)}`,
+    `train_dataloader.num_workers=${Number(params.num_workers ?? 4)}`,
+    `train_dataloader.dataset.data_root=${snapshot.path.replace(/\\/g, "/")}/`,
+    "train_dataloader.dataset.ann_file=annotations/train.json",
+    "train_dataloader.dataset.data_prefix.img=images/train/",
+    `val_dataloader.dataset.data_root=${snapshot.path.replace(/\\/g, "/")}/`,
+    "val_dataloader.dataset.ann_file=annotations/val.json",
+    "val_dataloader.dataset.data_prefix.img=images/val/",
+    `test_dataloader.dataset.data_root=${snapshot.path.replace(/\\/g, "/")}/`,
+    "test_dataloader.dataset.ann_file=annotations/test.json",
+    "test_dataloader.dataset.data_prefix.img=images/test/",
+    `optim_wrapper.optimizer.lr=${Number(params.learning_rate || params.lr0 || 0.0001)}`,
+    `default_hooks.checkpoint.interval=${Math.max(1, Number(params.save_period || 1))}`,
+  ];
+  if (params.amp === true) cfgOptions.push("optim_wrapper.type=AmpOptimWrapper");
+  if (params.resolvedWeights) cfgOptions.push(`load_from=${String(params.resolvedWeights).replace(/\\/g, "/")}`);
+  const args = [trainScript, configPath, "--work-dir", workDir, "--cfg-options", ...cfgOptions];
+  if (params.resume) args.push("--resume");
+  return { command: python, args, cwd: cacheRoot };
+}
+
+async function buildTrainingCommand(job, snapshot) {
   const params = job.params_json || {};
   if (Array.isArray(params.command) && params.command.length) {
     return { command: params.command[0], args: params.command.slice(1) };
   }
   const python = params.python || process.env.PYTHON || "python";
-  const model = params.resolvedWeights || params.weights || params.model || "yolov8n.pt";
+  if (String(params.algorithmKey || params.templateKey || "").toLowerCase() === "dinov3_faster_rcnn") return buildDinoTrainingCommand(job, snapshot, params);
+  const initializationStrategy = params.initializationStrategy || (params.resolvedWeights ? "pretrained" : "random");
+  const yoloVersion = String(params.yolo_version || "yolov8").replace(/[^a-zA-Z0-9_-]/g, "") || "yolov8";
+  const model = params.resolvedWeights || params.weights || params.model || `${yoloVersion}n.yaml`;
   const taskType = ["detect", "segment", "classify"].includes(params.taskType) ? params.taskType : "detect";
   const args = [
     "-c", "from ultralytics.cfg import entrypoint; entrypoint()",
@@ -4425,7 +4959,23 @@ function buildTrainingCommand(job, snapshot) {
     "name=run",
     "exist_ok=True",
   ];
+  args.push(`save_period=${Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1}`);
+  if (params.optimizer) args.push(`optimizer=${params.optimizer}`);
+  if (params.lr0 != null) args.push(`lr0=${Number(params.lr0)}`);
+  if (params.resume && params.resolvedWeights) args.push("resume=True");
   if (params.device !== "" && params.device != null) args.push(`device=${params.device}`);
+  if (initializationStrategy === "zero") {
+    const trainOptions = {
+      data: path.join(snapshot.path, "data.yaml"), epochs: Number(params.epochs || job.total_epochs || 100),
+      imgsz: Number(params.imgsz || 640), batch: Number(params.batch || 16), project: job.output_root,
+      name: "run", exist_ok: true, save_period: Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1,
+    };
+    if (params.device !== "" && params.device != null) trainOptions.device = params.device;
+    if (params.optimizer) trainOptions.optimizer = params.optimizer;
+    if (params.lr0 != null) trainOptions.lr0 = Number(params.lr0);
+    const script = "import json,sys,torch; from ultralytics import YOLO; c=json.loads(sys.argv[1]); m=YOLO(c.pop('model')); [torch.nn.init.zeros_(p) for p in m.model.parameters()]; m.train(**c)";
+    return { command: python, args: ["-c", script, JSON.stringify({ model, ...trainOptions })] };
+  }
   return { command: python, args };
 }
 
@@ -4477,8 +5027,8 @@ async function ensureTrainingModelRevision(job) {
   const versionName = await nextModelVersionName(prefix, modelId);
   const version = (await query(
     `INSERT INTO model_revisions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
-     VALUES ($1,$2,$3,$4,$5,'candidate',$6,$7) RETURNING *`,
-    [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify(params), job.output_root],
+     VALUES ($1,$2,$3,$4,$5,'training',$6,$7) RETURNING *`,
+    [modelId, versionName, job.id, job.dataset_project_id, job.dataset_snapshot_id, JSON.stringify({ ...params, assetCategory: "training" }), job.output_root],
   )).rows[0];
   await query(
     "UPDATE runtime_training_jobs SET model_id=$1, generated_model_version_id=$2 WHERE id=$3",
@@ -4494,9 +5044,16 @@ async function syncTrainingWeightArtifacts(job, modelVersionId) {
   const files = walk(root).filter((file) => {
     if (!fs.statSync(file).isFile()) return false;
     const parts = path.relative(root, file).split(path.sep).map((part) => part.toLowerCase());
-    return parts.includes("weights") && [".pt", ".pth", ".onnx"].includes(path.extname(file).toLowerCase());
+    const extension = path.extname(file).toLowerCase();
+    const checkpointName = path.basename(file).toLowerCase();
+    return [".pt", ".pth", ".onnx"].includes(extension)
+      && (parts.includes("weights") || /^(?:epoch[_-]?\d+|best|last)(?:[_-].*)?\.(?:pt|pth|onnx)$/.test(checkpointName));
   });
   const saved = [];
+  const version = (await query(
+    `SELECT mv.*, mc.name, mc.framework, mc.task_type FROM model_revisions mv JOIN model_clusters mc ON mc.id=mv.model_id WHERE mv.id=$1`,
+    [modelVersionId],
+  )).rows[0];
   for (const file of files) {
     const rel = path.relative(root, file).replace(/\\/g, "/");
     const objectKey = `ml/artifacts/training/${job.id}/${rel}`;
@@ -4513,7 +5070,7 @@ async function syncTrainingWeightArtifacts(job, modelVersionId) {
     await store.putFile(objectKey, file);
     const sha = stat.size < 1024 * 1024 * 1024 ? await hashFile(file).catch(() => null) : null;
     const baseName = path.basename(file).toLowerCase();
-    const epochMatch = baseName.match(/^epoch(\d+)\.(?:pt|pth|onnx)$/);
+    const epochMatch = baseName.match(/^epoch[_-]?(\d+)(?:[_-].*)?\.(?:pt|pth|onnx)$/);
     const weightRole = baseName.startsWith("best.") ? "best" : baseName.startsWith("last.") ? "last" : epochMatch ? "epoch" : "other";
     const metadata = {
       localPath: file,
@@ -4542,6 +5099,11 @@ async function syncTrainingWeightArtifacts(job, modelVersionId) {
 
 async function finalizeTrainingModelRevision(job, version) {
   const artifacts = await syncTrainingWeightArtifacts(job, version.id);
+  const successfulArtifact = artifacts.find((item) => item.metadata_json?.weightRole === "best") || artifacts.find((item) => item.metadata_json?.weightRole === "last") || artifacts[0];
+  await query(
+    `UPDATE model_revisions SET stage='training', params_json=params_json || $1::jsonb WHERE id=$2`,
+    [JSON.stringify({ assetCategory: "training", completed: true, primaryArtifactId: successfulArtifact?.id || null }), version.id],
+  );
   await query(
     `UPDATE runtime_training_jobs
      SET model_id=$1, generated_model_version_id=$2, status='done', progress=100,
@@ -4550,6 +5112,30 @@ async function finalizeTrainingModelRevision(job, version) {
     [version.model_id, version.id, `Training completed; model version ${version.version_name}; registered ${artifacts.length} weight artifacts`, job.id],
   );
   await appendTrainingLog(job.id, "system", `model version finalized: ${version.version_name}; weight artifacts=${artifacts.length}`);
+  await recordTrainingAssetLink(job, version, successfulArtifact).catch((error) => appendTrainingLog(job.id, "error", `asset relation update failed: ${error.message}`));
+}
+
+async function recordTrainingAssetLink(job, version, artifact) {
+  const params = job.params_json || {};
+  let algorithmAssetId = params.algorithmAssetId || null;
+  if (!algorithmAssetId && params.templateKey) {
+    algorithmAssetId = (await query("SELECT id FROM algorithm_assets WHERE algorithm_key=$1 AND deleted_at IS NULL ORDER BY source_type='builtin' DESC LIMIT 1", [params.templateKey])).rows[0]?.id || null;
+  }
+  const pythonEnvId = params.pythonEnvId || null;
+  const datasetProjectId = job.dataset_project_id || null;
+  const metricsRows = (await query(
+    `SELECT DISTINCT ON (key) key, value FROM runtime_training_metrics WHERE job_id=$1 ORDER BY key, created_at DESC`,
+    [job.id],
+  )).rows;
+  const metrics = Object.fromEntries(metricsRows.map((row) => [row.key, Number(row.value)]));
+  const relationParams = {
+    ...params,
+    algorithmAssetId,
+    pythonEnvId,
+    modelId: version.model_id,
+    output: { metrics, primaryArtifactId: artifact?.id || null },
+  };
+  await recordRuntimeAssetLink({ ...job, params_json: relationParams, model_version_id: version.id }, metrics);
 }
 
 function parseMetricLine(line) {
@@ -4585,17 +5171,24 @@ async function runTrainingJob(job, workerId) {
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     version = await ensureTrainingModelRevision(job);
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
-    if (job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
+    if (["pretrained", "training"].includes(job.params_json?.initializationStrategy) && job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
       const weightPath = await findWeightArtifact(job.params_json.initialModelVersionId);
       if (!weightPath) throw new Error("选择的初始化模型版本没有可用权重 artifact");
       job.params_json = { ...(job.params_json || {}), resolvedWeights: weightPath };
       await query("UPDATE runtime_training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
       await appendTrainingLog(job.id, "system", `resolved initial weights: ${weightPath}`);
     }
-    const { command, args } = buildTrainingCommand(job, snapshot);
+    if (job.params_json?.pythonEnvId) {
+      let runtimeEnv = (await query("SELECT * FROM runtime_envs WHERE id=$1", [job.params_json.pythonEnvId])).rows[0];
+      if (!runtimeEnv) throw new Error("Training Python environment no longer exists");
+      runtimeEnv = await resolveRuntimePythonEnv(runtimeEnv);
+      job.params_json = { ...(job.params_json || {}), python: runtimeEnv.python_path };
+      await query("UPDATE runtime_training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
+    }
+    const { command, args, cwd } = await buildTrainingCommand(job, snapshot);
     await query("UPDATE runtime_training_jobs SET status='running', message=$1, heartbeat_at=now() WHERE id=$2", [`正在执行: ${command} ${args.join(" ")}`, job.id]);
     await appendTrainingLog(job.id, "system", `command: ${command} ${args.join(" ")}`);
-    const child = spawn(command, args, { cwd: job.output_root, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    const child = spawn(command, args, { cwd: cwd || job.output_root, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
     await query("UPDATE runtime_training_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]);
     artifactTimer = setInterval(() => {
       syncWeights().catch((error) => console.warn(`training artifact sync failed for ${job.id}:`, error.message));
@@ -4843,11 +5436,11 @@ async function projectSummary(projectId) {
        WHERE p.deleted_at IS NULL
      )
      SELECT
-      (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE s.id=$1 AND pi.deleted_at IS NULL) AS direct_image_count,
-      (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE s.id=$1 AND pv.deleted_at IS NULL) AS direct_video_count,
+      (SELECT count(DISTINCT pi.image_asset_id)::int FROM project_images pi WHERE pi.project_id=$1 AND pi.deleted_at IS NULL) AS direct_image_count,
+      (SELECT count(DISTINCT pv.video_asset_id)::int FROM project_videos pv WHERE pv.project_id=$1 AND pv.deleted_at IS NULL) AS direct_video_count,
       (SELECT count(*)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id WHERE s.id=$1 AND s.effective_label_version_id=a.label_version_id AND pi.deleted_at IS NULL) AS direct_annotation_count,
-      (SELECT count(*)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS image_count,
-      (SELECT count(*)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE pv.deleted_at IS NULL) AS video_count,
+      (SELECT count(DISTINCT pi.image_asset_id)::int FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS image_count,
+      (SELECT count(DISTINCT pv.video_asset_id)::int FROM project_videos pv JOIN subtree s ON s.id=pv.project_id WHERE pv.deleted_at IS NULL) AS video_count,
       (SELECT count(DISTINCT a.project_image_id)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL) AS labeled_image_count,
       (SELECT count(*)::int FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL) AS annotation_count,
       (SELECT COALESCE(json_agg(json_build_object('label', label, 'count', count) ORDER BY count DESC, label), '[]'::json)
@@ -5104,6 +5697,8 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req)) });
   if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await listPythonEnvs() });
   if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await createPythonEnv(await readBody(req)) });
+  const pythonEnvDownload = parsed.pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
+  if (method === "GET" && pythonEnvDownload) return streamPythonEnvArtifact(res, pythonEnvDownload[1]);
   const renameModelVersionMatch = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
   if (method === "PATCH" && renameModelVersionMatch) return sendJson(res, { version: await renameModelVersion(renameModelVersionMatch[1], await readBody(req)) });
   const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
@@ -5278,6 +5873,7 @@ async function main() {
   console.log("Boot: ensureRuntimeSchema start");
   await ensureRuntimeSchema();
   console.log("Boot: ensureRuntimeSchema done");
+  await cleanupLegacyHistoryProjects();
   await backfillUnknownScenes();
   console.log("Boot: ensureBucketSafe start");
 

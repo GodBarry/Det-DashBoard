@@ -11930,3 +11930,197 @@ button:disabled:hover {
   background: var(--accent-soft, rgba(20,184,166,.13)) !important;
   border-color: rgba(20,184,166,.40) !important;
 }
+
+/* Structured training configuration and selectable asset exports. */
+.dataset-split-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.split-target-control {
+  margin: 0 8px 8px;
+  padding: 3px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft, rgba(127, 146, 166, .07));
+}
+
+.split-target-control button {
+  min-width: 0;
+  height: 27px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+}
+
+.split-target-control button.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+
+.dataset-split-grid > label,
+.parameter-groups fieldset > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dataset-split-grid > label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dataset-split-grid small,
+.asset-version-row small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.dataset-meta-row {
+  display: flex;
+  gap: 24px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.model-init-row {
+  grid-template-columns: auto minmax(140px, .8fr) auto minmax(130px, .7fr) auto minmax(180px, 1.2fr) 32px !important;
+}
+
+.icon-toggle {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 !important;
+}
+
+.icon-toggle.active {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+
+.parameter-groups {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr .8fr;
+  gap: 9px;
+}
+
+.parameter-groups fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.schema-parameter-groups {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.parameter-placeholder {
+  min-height: 46px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+
+.parameter-groups legend {
+  padding: 0 5px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.parameter-groups input,
+.parameter-groups select,
+.dataset-split-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.save-period-input {
+  width: 72px !important;
+  margin-left: 7px;
+}
+
+.resource-tree .depth-1 { padding-left: calc(10px + 16px) !important; }
+.resource-tree .depth-2 { padding-left: calc(10px + 32px) !important; }
+.resource-tree .depth-3 { padding-left: calc(10px + 48px) !important; }
+
+.asset-version-row > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.asset-export-selection {
+  margin: 10px 8px;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--accent-border, rgba(20,184,166,.35));
+  border-radius: 6px;
+  background: var(--accent-soft, rgba(20,184,166,.09));
+}
+
+.asset-export-selection div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.asset-export-selection span { color: var(--muted); font-size: 10px; }
+.asset-export-selection b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.asset-export-selection button { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); }
+.asset-export-selection button:disabled { color: var(--muted); cursor: not-allowed; opacity: .72; }
+
+.asset-tree-children > button.active {
+  color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+
+.queue-empty {
+  min-height: 56px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.training-builder,
+.inference-workspace .reference-builder {
+  margin-bottom: 10px !important;
+}
+
+@media (max-width: 1500px) {
+  .dataset-split-grid { grid-template-columns: 1fr; }
+  .parameter-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-init-row { grid-template-columns: auto minmax(130px, 1fr) auto minmax(120px, .8fr) !important; }
+}
