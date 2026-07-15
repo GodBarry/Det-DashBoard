@@ -88,6 +88,9 @@ X,
 
 } from "lucide-react";
 
+import { AuthDialog as AuthDialogView } from "./features/auth/AuthDialog.jsx";
+import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
+
 import { readUiState, restorableViews, updateUiState } from "./app/ui-state.js";
 import {
   colors,
@@ -3394,161 +3397,35 @@ onClose={() => setActiveInferenceResult(null)}
 
 }
 
-function AuthDialog({ mode, setMode, onClose, onSignedIn, required = false }) {
-
-  const [form, setForm] = useState({ username: mode === "login" ? "admin" : "", password: mode === "login" ? "admin" : "", confirm: "", displayName: "" });
-
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-
-    if (busy) return;
-
-    if (mode === "register" && form.password !== form.confirm) return window.alert("两次密码不一");
-
-    setBusy(true);
-
-    try {
-
-      const credentials = { username: form.username.trim(), password: form.password, displayName: form.displayName.trim() };
-      const signed = mode === "login"
-        ? await loginSession(credentials)
-        : await registerSession(credentials);
-
-      onSignedIn(signed);
-
-      onClose();
-
-    } catch (error) {
-
-      window.alert(error.message || "认证失败");
-
-    } finally {
-
-      setBusy(false);
-
-    }
-
-  };
-
+function AuthDialog(props) {
   return (
-
-    <div className="auth-overlay">
-
-      <section className="auth-dialog">
-
-        {!required && <button className="auth-close" onClick={onClose}><X size={16} /></button>}
-
-        <h2>{mode === "login" ? "登录 Det Dashboard" : "注册用户"}</h2>
-
-        <label>用户名<input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label>
-
-        {mode === "register" && <label>显示名称<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="可" /></label>}
-
-        <label>密码<input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
-
-        {mode === "register" && <label>确认密码<input type="password" value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} /></label>}
-
-        <button className="primary" onClick={submit} disabled={busy}>{busy ? "处理中..." : (mode === "login" ? "登录" : "注册并登录")}</button>
-
-        <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "没有账号？注册" : "已有账号？登录"}</button>
-
-      </section>
-
-    </div>
-
+    <AuthDialogView
+      {...props}
+      onSubmit={({ mode, credentials }) => (
+        mode === "login" ? loginSession(credentials) : registerSession(credentials)
+      )}
+    />
   );
-
 }
 
-function SettingsDialog({ config, onClose }) {
-
-  const initialSettings = config?.settings || {};
-
-  const [form, setForm] = useState({
-
-    postgres: initialSettings.postgres || config?.postgres || "127.0.0.1:55432 / det_dashboard",
-
-    dataStorage: initialSettings.dataStorage || config?.dataRootDisplay || config?.dataRoot || "",
-
-    browseRoot: initialSettings.browseRoot || config?.browseRootDisplay || config?.browseRoot || "",
-
-    minioStorage: initialSettings.minioStorage || (config?.minio ? `${config.minio.endPoint}:${config.minio.port} / ${config.minio.bucket}` : "127.0.0.1:9000 / zbh-datasets"),
-
-    minioDataDir: initialSettings.minioDataDir || config?.minio?.dataDir || "E:\\projects\\DD-runtime\\minio",
-
-    pythonAssets: initialSettings.pythonAssets || "D:\\Program Files\\miniforge3",
-
-    algorithmAssets: initialSettings.algorithmAssets || "E:\\projects\\DD-runtime\\minio\\zbh-datasets\\code-assets\\algorithms",
-
-    exportRoot: initialSettings.exportRoot || config?.exportRoot || "exports",
-
-  });
-
-  const [busy, setBusy] = useState(false);
-
-  const fields = [
-    ["postgres", "Postgres", "连接串或 host:port / db"],
-    ["dataStorage", "数据存储", "Windows 数据集根路径"],
-    ["browseRoot", "导入浏览根路径", "打开目录选择器时的根路径"],
-    ["minioStorage", "MinIO", "endpoint:port / bucket"],
-    ["minioDataDir", "MinIO 数据目录", "E:\\projects\\DD-runtime\\minio 或实际数据路径"],
-    ["pythonAssets", "Python 资产", "Miniforge / Python 环境路径"],
-    ["algorithmAssets", "算法源码", "算法适配器和源码路径"],
-    ["exportRoot", "导出目录", "报告与导出文件路径"],
-  ];
-
-  const save = async () => {
-
-    setBusy(true);
-
-    try {
-
-      const response = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ settings: form }) });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) throw new Error(data.error || "保存设置失败");
-
-      window.alert("设置已保");
-
-      onClose();
-
-    } catch (error) {
-
-      window.alert(error.message || "保存设置失败");
-
-    } finally {
-
-      setBusy(false);
-
-    }
-
-  };
-
+function SettingsDialog(props) {
   return (
-
-    <div className="auth-overlay settings-overlay">
-
-      <section className="settings-dialog">
-
-        <button className="auth-close" onClick={onClose}><X size={16} /></button>
-
-        <h2>系统设置</h2>
-
-        <p>配置 Postgres、数据存储、MinIO、Python 资产与算法源码路径</p>
-
-        <div className="settings-list">{fields.map(([key, label, placeholder]) => <label key={key}>{label}<input value={form[key]} placeholder={placeholder} onChange={(event) => setForm({ ...form, [key]: event.target.value })} /></label>)}</div>
-
-        <div className="settings-actions"><button onClick={onClose}>取消</button><button className="primary" disabled={busy} onClick={save}>{busy ? "保存中..." : "保存设置"}</button></div>
-
-      </section>
-
-    </div>
-
+    <SettingsDialogView
+      {...props}
+      onSave={async (settings) => {
+        const response = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ settings }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "保存设置失败");
+        return data;
+      }}
+    />
   );
-
 }
+
 function TrainingWorkspace({
 
   projects,
