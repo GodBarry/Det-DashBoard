@@ -759,11 +759,19 @@ function createAccessControl(dependencies = {}) {
     const resourceType = normalizeResourceType(input.resourceType || input.resource_type);
     const resourceId = normalizeUuid(input.resourceId || input.resource_id, "resource id");
     if (!isAdmin(actor)) await requireAssetPermission(actor, resourceType, resourceId, PERMISSIONS.SHARE, { allowPublic: false });
-    const recipientUserId = input.recipientUserId || input.recipient_user_id
+    let recipientUserId = input.recipientUserId || input.recipient_user_id
       ? normalizeUuid(input.recipientUserId || input.recipient_user_id, "recipient user id")
       : null;
     const recipientIdentifier = String(input.recipientIdentifier || input.recipient_identifier || "").trim().slice(0, 320);
     if (!recipientUserId && !recipientIdentifier) fail(400, "invitation recipient required");
+    if (!recipientUserId && recipientIdentifier) {
+      recipientUserId = (await query(
+        `SELECT id FROM app_users
+         WHERE status='active' AND lower(username)=lower($1)
+         LIMIT 1`,
+        [recipientIdentifier],
+      )).rows[0]?.id || null;
+    }
     if (recipientUserId) {
       const recipient = (await query("SELECT id FROM app_users WHERE id=$1 AND status='active'", [recipientUserId])).rows[0];
       if (!recipient) fail(404, "recipient user not found");
@@ -784,9 +792,14 @@ function createAccessControl(dependencies = {}) {
   async function acceptShareInvitation(token, user, options = {}) {
     requireUser(user);
     const invitation = await transaction(async (client) => {
+      const invitationId = UUID_PATTERN.test(String(token || "")) ? String(token) : null;
       const row = (await client.query(
-        `SELECT * FROM share_invitations WHERE token_hash=$1 FOR UPDATE`,
-        [tokenHash(token)],
+        invitationId
+          ? `SELECT * FROM share_invitations
+             WHERE id=$1 AND (recipient_user_id=$2 OR (recipient_user_id IS NULL AND lower(recipient_identifier)=lower($3)))
+             FOR UPDATE`
+          : `SELECT * FROM share_invitations WHERE token_hash=$1 FOR UPDATE`,
+        invitationId ? [invitationId, user.id, user.username || ""] : [tokenHash(token)],
       )).rows[0];
       if (!row) fail(404, "invitation not found");
       if (row.status !== "pending") fail(409, `invitation is ${row.status}`);
@@ -832,6 +845,9 @@ function createAccessControl(dependencies = {}) {
       if (!isAdmin(actor) && invitation.invited_by !== actor.id) fail(403, "only the inviter or an administrator may revoke this invitation");
     } else if (invitation.recipient_user_id && invitation.recipient_user_id !== actor.id) {
       fail(403, "invitation belongs to another user");
+    } else if (!invitation.recipient_user_id && invitation.recipient_identifier
+      && String(invitation.recipient_identifier).toLowerCase() !== String(actor.username || "").toLowerCase()) {
+      fail(403, "invitation belongs to another user");
     }
     if (invitation.status !== "pending") fail(409, `invitation is ${invitation.status}`);
     const row = (await query(
@@ -848,8 +864,9 @@ function createAccessControl(dependencies = {}) {
     const params = [];
     const where = [];
     if (!isAdmin(actor)) {
-      params.push(actor.id);
-      where.push(`(si.invited_by=$${params.length} OR si.recipient_user_id=$${params.length})`);
+      params.push(actor.id, String(actor.username || "").toLowerCase());
+      where.push(`(si.invited_by=$${params.length - 1} OR si.recipient_user_id=$${params.length - 1}
+        OR (si.recipient_user_id IS NULL AND lower(si.recipient_identifier)=$${params.length}))`);
     }
     if (filters.resourceType || filters.resource_type) {
       params.push(normalizeResourceType(filters.resourceType || filters.resource_type));
@@ -874,7 +891,29 @@ function createAccessControl(dependencies = {}) {
        ORDER BY si.created_at DESC LIMIT $${params.length}`,
       params,
     );
-    return rows.rows;
+    return enrichResourceNames(rows.rows);
+  }
+
+  async function enrichResourceNames(rows = []) {
+    const definitions = {
+      project: ["projects", "name"],
+      model: ["model_clusters", "name"],
+      model_revision: ["model_revisions", "version_name"],
+      runtime_env: ["runtime_envs", "name"],
+      algorithm: ["algorithm_assets", "name"],
+      training_template: ["training_templates", "name"],
+    };
+    const result = rows.map((row) => ({ ...row }));
+    for (const [resourceType, [table, nameColumn]] of Object.entries(definitions)) {
+      const ids = [...new Set(result.filter((row) => row.resource_type === resourceType).map((row) => row.resource_id))];
+      if (!ids.length) continue;
+      const names = await query(`SELECT id, ${nameColumn} AS resource_name FROM ${table} WHERE id=ANY($1::uuid[])`, [ids]);
+      const byId = new Map(names.rows.map((row) => [String(row.id), row.resource_name]));
+      for (const row of result) {
+        if (row.resource_type === resourceType) row.resource_name = byId.get(String(row.resource_id)) || null;
+      }
+    }
+    return result;
   }
 
   async function createPublishRequest(input = {}) {
@@ -973,7 +1012,7 @@ function createAccessControl(dependencies = {}) {
        ORDER BY pr.created_at DESC LIMIT $${params.length}`,
       params,
     );
-    return rows.rows;
+    return enrichResourceNames(rows.rows);
   }
 
   function requestMetadata(request) {

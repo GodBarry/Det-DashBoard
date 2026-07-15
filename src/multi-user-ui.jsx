@@ -148,7 +148,7 @@ export function createMultiUserApi({
     }),
     createShare: (payload) => request(paths.shares, { method: "POST", body: toBody(payload) }),
     listShares: () => request(paths.shares),
-    acceptShare: (token) => request(`${paths.shares}/accept`, { method: "POST", body: toBody({ token }) }),
+    acceptShare: (invitationId) => request(`${paths.shares}/${encodeURIComponent(invitationId)}/accept`, { method: "POST" }),
     declineShare: (invitationId) => request(`${paths.shares}/${encodeURIComponent(invitationId)}/decline`, { method: "POST" }),
     revokeShare: (invitationId) => request(`${paths.shares}/${encodeURIComponent(invitationId)}/revoke`, { method: "POST" }),
     createPublicRequest: (payload) => request(paths.publicRequestSubmissions, { method: "POST", body: toBody(payload) }),
@@ -227,7 +227,7 @@ function entityId(entity) {
 }
 
 function entityName(entity, fallback = "未命名") {
-  return entity?.name || entity?.title || entity?.username || entity?.displayName || entity?.fileName || fallback;
+  return entity?.name || entity?.resource_name || entity?.title || entity?.username || entity?.displayName || entity?.fileName || fallback;
 }
 
 function formatTime(value) {
@@ -1033,7 +1033,6 @@ export function AnnotationTaskPanel({
   const [selectedTask, setSelectedTask] = useState(null);
   const [items, setItems] = useState([]);
   const [locks, setLocks] = useState({});
-  const [acceptTokens, setAcceptTokens] = useState({});
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState("");
@@ -1197,9 +1196,7 @@ export function AnnotationTaskPanel({
     setSuccess("");
     try {
       if (action === "accept") {
-        const token = String(acceptTokens[id] || "").trim();
-        if (!token) throw new Error("请输入邀请链接中的令牌后再接受。");
-        await client.acceptShare(token);
+        await client.acceptShare(id);
       } else if (action === "decline") await client.declineShare(id);
       else await client.revokeShare(id);
       setSuccess(action === "accept" ? "分享已接受。" : action === "decline" ? "分享已拒绝。" : "分享邀请已撤销。");
@@ -1224,7 +1221,8 @@ export function AnnotationTaskPanel({
 
   const currentUserId = entityId(currentUser);
   const sentShares = shares.filter((item) => (item.invited_by || item.invitedBy) === currentUserId || currentUser?.role === "admin" && !(item.recipient_user_id || item.recipientUserId));
-  const receivedShares = shares.filter((item) => (item.recipient_user_id || item.recipientUserId) === currentUserId);
+  const receivedShares = shares.filter((item) => (item.recipient_user_id || item.recipientUserId) === currentUserId
+    || (!item.recipient_user_id && String(item.recipient_identifier || "").toLowerCase() === String(currentUser?.username || "").toLowerCase()));
   const canCreate = currentUser?.role === "admin" || permissions.includes("datasets.annotate");
   const visibleTasks = queue === "review"
     ? tasks.filter((task) => Number(task.submitted_count || 0) > 0)
@@ -1300,7 +1298,7 @@ export function AnnotationTaskPanel({
         </div>
         )}
       </> : null}
-      {!loading && !selectedTask && workspace === "shares" ? <ShareWorkspace shares={shares} sentShares={sentShares} receivedShares={receivedShares} currentUser={currentUser} busyId={busyId} acceptTokens={acceptTokens} setAcceptTokens={setAcceptTokens} onAction={runShareAction} /> : null}
+      {!loading && !selectedTask && workspace === "shares" ? <ShareWorkspace sentShares={sentShares} receivedShares={receivedShares} busyId={busyId} onAction={runShareAction} /> : null}
       {!loading && !selectedTask && workspace === "public" ? <PublicRequestWorkspace requests={publicRequests} busyId={busyId} onCancel={cancelPublicRequest} /> : null}
       {!loading && selectedTask ? <TaskItemList items={items} locks={locks} currentUser={currentUser} busyId={busyId} onOpen={openAnnotationItem} onRenew={renewLock} onRelease={releaseLock} onReview={reviewItem} /> : null}
       <CreateTaskDialog open={showCreate} projects={projects} client={client} onClose={() => setShowCreate(false)} onCreated={async () => { setShowCreate(false); setSuccess("协同标注任务已创建。"); await loadWorkspace(); }} onError={(requestError) => notifyError(requestError, onError, setError)} />
@@ -1308,17 +1306,16 @@ export function AnnotationTaskPanel({
   );
 }
 
-function ShareWorkspace({ sentShares, receivedShares, busyId, acceptTokens, setAcceptTokens, onAction }) {
+function ShareWorkspace({ sentShares, receivedShares, busyId, onAction }) {
   const renderShare = (share, direction) => {
     const id = entityId(share);
     const pending = String(share.status || "pending") === "pending";
     return <article key={`${direction}:${id}`} style={ui.listRow}>
       <span style={ui.listIcon}>{direction === "received" ? <Inbox size={17} /> : <Send size={17} />}</span>
       <span style={ui.rowMain}>
-        <b>{share.resource_type || "资产"} · {String(share.resource_id || "").slice(0, 12)}</b>
+        <b>{share.resource_name || share.resource_type || "资产"}</b>
         <small style={ui.muted}>{direction === "received" ? `来自 ${share.inviter_username || "未知用户"}` : `发送给 ${share.recipient_username || share.recipient_identifier || "未知用户"}`} · {formatTime(share.created_at)}</small>
         {share.message ? <span style={ui.reason}>{share.message}</span> : null}
-        {direction === "received" && pending ? <input style={ui.input} value={acceptTokens[id] || ""} onChange={(event) => setAcceptTokens((current) => ({ ...current, [id]: event.target.value }))} placeholder="粘贴邀请令牌后接受" /> : null}
       </span>
       <StatusBadge status={share.status} />
       {pending ? <span style={ui.actions}>
@@ -1338,7 +1335,7 @@ function PublicRequestWorkspace({ requests, busyId, onCancel }) {
       const id = entityId(requestItem);
       return <article key={id} style={ui.listRow}>
         <span style={ui.listIcon}><Globe2 size={17} /></span>
-        <span style={ui.rowMain}><b>{requestItem.resource_type || "资产"} · {String(requestItem.resource_id || "").slice(0, 12)}</b><small style={ui.muted}>{formatTime(requestItem.created_at)}</small>{requestItem.reason ? <span style={ui.reason}>{requestItem.reason}</span> : null}</span>
+        <span style={ui.rowMain}><b>{requestItem.resource_name || requestItem.resource_type || "资产"}</b><small style={ui.muted}>{formatTime(requestItem.created_at)}</small>{requestItem.reason ? <span style={ui.reason}>{requestItem.reason}</span> : null}</span>
         <StatusBadge status={requestItem.status} />
         {String(requestItem.status || "pending") === "pending" ? <ActionButton icon={XCircle} busy={busyId === `public:${id}`} onClick={() => onCancel(requestItem)}>取消申请</ActionButton> : null}
       </article>;

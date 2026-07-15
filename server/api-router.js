@@ -355,6 +355,9 @@ function createMultiUserRouter(deps = {}) {
   router.post("/api/shares/accept", async ({ body, user, req }) => ({
     invitation: await accessControl.acceptShareInvitation(body.token, user, { ...body, request: req }),
   }));
+  router.post("/api/shares/:invitationId/accept", async ({ params, user, req }) => ({
+    invitation: await accessControl.acceptShareInvitation(params.invitationId, user, { request: req }),
+  }));
   router.post("/api/shares/:invitationId/decline", async ({ params, user }) => ({
     invitation: await accessControl.declineShareInvitation(params.invitationId, user),
   }));
