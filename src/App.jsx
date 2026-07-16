@@ -241,10 +241,10 @@ const {
   loadMlPlatform,
   setError,
   messages: {
-    createModel: "创建模型簇失",
+    createModel: "创建模型簇失败",
     createModelVersion: "登记模型版本失败",
     createPythonEnv: "登记环境失败",
-    renameModelVersion: "重命名失",
+    renameModelVersion: "重命名失败",
   },
   promptForModelVersionName: (version) => window.prompt("请输入新的模型版本名", version.version_name),
 });

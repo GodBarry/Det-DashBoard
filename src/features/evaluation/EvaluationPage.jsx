@@ -27,6 +27,7 @@ import {
 import { EvaluationConfusionMatrix } from "./EvaluationConfusionMatrix.jsx";
 import { EvaluationCurve } from "./EvaluationCurve.jsx";
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { evaluationBarPalette, evaluationErrorBoxes } from "./evaluationPresentation.js";
 
 export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
@@ -228,7 +229,7 @@ return (
 
 <span className="evaluation-run-content">
 
-<b>{task.name}</b><small>数据集：{job.dataset_project_name || "未绑"}</small><small>模型：{job.model_name || "未指"}</small>
+<b>{task.name}</b><small>数据集：{job.dataset_project_name || "未绑定"}</small><small>模型：{job.model_name || "未指定"}</small>
 
 <small>完成时间：{formatDateTime(job.finished_at || job.created_at)}</small>
 
@@ -328,7 +329,7 @@ return (
 
 <div className="evaluation-sample-grid">
 
-<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}>{row.thumb_url ? <img src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}<span>{row.display_name || "图片结果"}</span>{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null; })}</article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
+<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}<span>{row.display_name || "图片结果"}</span>{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null; })}</article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
 
 {!samples.length && <div className="empty-state">当前类型没有错误样本</div>}
 
@@ -342,7 +343,7 @@ return (
 
 <h2>评估洞察</h2>
 
-<section className="evaluation-rating"><span>总体评级</span><div><b>{evaluation?.evaluated ? (Number(metrics.map50 || 0) >= .7 ? "A" : Number(metrics.map50 || 0) >= .4 ? "B" : "C") : "--"}</b><strong>{evaluation?.evaluated ? "已评" : "无标"}</strong></div><p>发布建议 <em>{Number(metrics.map50 || 0) >= .5 ? "可进入验" : "暂不建议发布"}</em></p></section>
+<section className="evaluation-rating"><span>总体评级</span><div><b>{evaluation?.evaluated ? (Number(metrics.map50 || 0) >= .7 ? "A" : Number(metrics.map50 || 0) >= .4 ? "B" : "C") : "--"}</b><strong>{evaluation?.evaluated ? "已评估" : "无标注"}</strong></div><p>发布建议 <em>{Number(metrics.map50 || 0) >= .5 ? "可进入验证" : "暂不建议发布"}</em></p></section>
 
 <section className="evaluation-problems"><h3>问题统计</h3><div><p><span>漏检</span><b>{problemCounts.false_negative}</b></p><p><span>误检</span><b>{problemCounts.false_positive}</b></p><p><span>定位偏差</span><b>{problemCounts.localization}</b></p><p><span>类别错误</span><b>{problemCounts.class_error}</b></p></div></section>
 

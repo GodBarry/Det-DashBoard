@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { colors } from "../../shared/presentation.js";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 function labelColor(label = "") {
 
 let hash = 0;
@@ -320,7 +321,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<img src={`/api/project-images/${item.id}/full`} draggable="false" onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
+<AuthenticatedImage src={`/api/project-images/${item.id}/full`} draggable="false" onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
 
 {editMode ? (
 

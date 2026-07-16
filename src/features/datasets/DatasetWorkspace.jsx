@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import {
-  ArrowLeft, CheckCircle, CheckCircle2, ChevronDown, ChevronRight, Copy, Database, Download, Edit3, Eye,
+  ArrowLeft, CheckCircle, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Copy, Database, Download, Edit3, Eye,
   Folder, FolderOpen, FolderPlus, Globe2, Grid, Image as ImageIcon, Import, List, MoreVertical, Move,
   RefreshCw, RotateCcw, Search, Share2, SlidersHorizontal, Tags, Trash2, Upload, Video, X,
 } from "lucide-react";
@@ -10,6 +10,7 @@ import {
 import { AnnotationOverlay, ImageViewer, labelColor } from "./ImageViewer.jsx";
 import { AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from "../../multi-user-ui.jsx";
 import { formatCount } from "../../shared/presentation.js";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 
 export function DatasetWorkspace({ mode, viewModel }) {
   const {
@@ -867,7 +868,7 @@ return (
 
 <MultiFilter title="场景" values={optionList(summary?.scenes)} selected={filters.scenes} onToggle={(value) => toggle("scenes", value)} />
 
-<MultiFilter title="模" values={[["infrared", "IR"], ["visible", "RGB"]]} selected={filters.modalities} onToggle={(value) => toggle("modalities", value)} />
+<MultiFilter title="模态" values={[["infrared", "IR"], ["visible", "RGB"]]} selected={filters.modalities} onToggle={(value) => toggle("modalities", value)} />
 
 <MultiFilter title="标签" values={optionList(summary?.labels)} selected={filters.labels} onToggle={(value) => toggle("labels", value)} />
 
@@ -1074,7 +1075,7 @@ return (
 
 <div className="thumb-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}` }}>
 
-<img src={`/api/project-images/${item.id}/thumb`} loading="lazy" />
+<AuthenticatedImage src={`/api/project-images/${item.id}/thumb`} loading="lazy" />
 
 <AnnotationOverlay item={item} compact />
 
@@ -1242,7 +1243,7 @@ return (
 
 {sources[0]?.image_id ? (
 
-<img src={`/api/project-images/${sources[0].image_id}/full`} />
+<AuthenticatedImage src={`/api/project-images/${sources[0].image_id}/full`} />
 
 ) : (
 
@@ -1300,7 +1301,7 @@ return (
 
 <aside className="inspector-panel">
 
-<div className="inspector-title"><h2>数据集统</h2><button title="刷新"><RefreshCw size={14} /></button></div>
+<div className="inspector-title"><h2>数据集统计</h2><button title="刷新"><RefreshCw size={14} /></button></div>
 
 <InspectorStats summary={summary} labels={topLabels} />
 
@@ -1326,7 +1327,7 @@ return (
 
 <aside className="inspector-panel">
 
-<div className="inspector-title"><h2>数据集统</h2><button title="刷新"><RefreshCw size={14} /></button></div>
+<div className="inspector-title"><h2>数据集统计</h2><button title="刷新"><RefreshCw size={14} /></button></div>
 
 <InspectorStats summary={summary} labels={topLabels} />
 
@@ -1344,7 +1345,7 @@ return (
 
 <div className="kv"><span>视角</span><b>{item.view || "--"}</b></div>
 
-<div className="kv"><span>模</span><b>{item.modality === "infrared" ? "IR" : "RGB"}</b></div>
+<div className="kv"><span>模态</span><b>{item.modality === "infrared" ? "IR" : "RGB"}</b></div>
 
 <div className="kv"><span>坐标</span><b>WGS84</b></div>
 
@@ -1414,7 +1415,7 @@ return (
 
 <section className="class-bars">
 
-<h3>类别分布（标注框</h3>
+<h3>类别分布（标注框）</h3>
 
 {labelRows.slice(0, 6).map((item) => (
 

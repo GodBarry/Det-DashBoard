@@ -372,7 +372,7 @@ return (
 
 <section className="activity-panel">
 
-<div className="panel-title"><h3>最近活</h3><button>查看全部</button></div>
+<div className="panel-title"><h3>最近活动</h3><button>查看全部</button></div>
 
 {recentItems.map(([title, detail, time, user, Icon]) => (
 
