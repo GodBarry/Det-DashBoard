@@ -41,6 +41,7 @@ const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
+const { createMlRoutes } = require("./routes/ml-routes");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
@@ -108,6 +109,7 @@ let datasetContentService;
 let baselineService;
 let importService;
 let datasetRoutes;
+let mlRoutes;
 let runtimeJobService;
 let trainingCatalogService;
 let runtimeQueueService;
@@ -272,58 +274,6 @@ function inferenceJobName(taskName, datasetName, fallbackName = "inference") {
   return [normalize(taskName) || normalize(fallbackName), normalize(datasetName) || "dataset", minuteCode()].join("_");
 }
 
-async function presentTrainingJobs(jobs) {
-  return runtimeJobService.presentTrainingJobs(jobs);
-}
-
-async function listTrainingJobs(actor, scope = "mine") {
-  return runtimeJobService.listTrainingJobs(actor, scope);
-}
-
-async function normalizeTrainingInitialization(body, params, actor) {
-  return runtimeJobService.normalizeTrainingInitialization(body, params, actor);
-}
-
-async function createTrainingJob(body = {}, actor) {
-  return runtimeJobService.createTrainingJob(body, actor);
-}
-
-async function requeueTrainingJob(jobId, body = {}) {
-  return runtimeJobService.requeueTrainingJob(jobId, body);
-}
-
-async function pauseTrainingJob(jobId) {
-  return runtimeJobService.pauseTrainingJob(jobId);
-}
-
-async function resumeTrainingJob(jobId) {
-  return runtimeJobService.resumeTrainingJob(jobId);
-}
-
-async function deleteTrainingJob(jobId) {
-  return runtimeJobService.deleteTrainingJob(jobId);
-}
-
-async function listInferenceJobs(actor, scope = "mine") {
-  return runtimeJobService.listInferenceJobs(actor, scope);
-}
-
-async function listInferenceResults(jobId) {
-  return runtimeJobService.listInferenceResults(jobId);
-}
-
-async function getInferenceEvaluation(jobId) {
-  return runtimeJobService.getInferenceEvaluation(jobId);
-}
-
-async function deleteInferenceJob(jobId) {
-  return runtimeJobService.deleteInferenceJob(jobId);
-}
-
-async function requeueInferenceJob(jobId) {
-  return runtimeJobService.requeueInferenceJob(jobId);
-}
-
 async function createInferenceJob(body = {}, actor) {
   const datasetProjectId = body.datasetProjectId || body.dataset_project_id || null;
   if (datasetProjectId) await resourceAccess.assertProjectRead(actor, datasetProjectId);
@@ -452,60 +402,7 @@ async function route(req, res) {
     });
   }
   if (await datasetRoutes.handle(req, res, parsed, actor)) return;
-  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await modelService.listMlModels(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await modelService.createMlModel(await readBody(req), actor) });
-  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await modelService.listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await modelService.createModelVersion(await readBody(req), actor) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await modelMaintenanceService.clearModelAssets(await readBody(req))); }
-  if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await algorithmAssetService.listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await runtimeAssetLinkService.listLinks(actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await trainingCatalogService.listTrainingTemplates(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await trainingCatalogService.createTrainingTemplate(await readBody(req), actor) });
-  if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await pythonEnvService.listPythonEnvs(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await pythonEnvService.createPythonEnv(await readBody(req), actor) });
-  const pythonEnvDownload = parsed.pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
-  if (method === "GET" && pythonEnvDownload) { await resourceAccess.assertIndependentAccess("runtime_envs", pythonEnvDownload[1], actor, "read"); return pythonEnvService.streamPythonEnvArtifact(res, pythonEnvDownload[1]); }
-  const renameModelVersionMatch = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
-  if (method === "PATCH" && renameModelVersionMatch) { await resourceAccess.assertIndependentAccess("model_revisions", renameModelVersionMatch[1], actor, "write"); return sendJson(res, { version: await modelService.renameModelVersion(renameModelVersionMatch[1], await readBody(req)) }); }
-  const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
-  if (method === "GET" && modelVersionDownload) { await resourceAccess.assertIndependentAccess("model_revisions", modelVersionDownload[1], actor, "read"); return modelService.streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id); }
-  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await trainingCatalogService.listDatasetSnapshots(actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req), actor) });
-  const trainingPriorityMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && trainingPriorityMatch) { await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]); return sendJson(res, { job: await runtimeQueueService.moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction, actor) }); }
-  const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
-  if (method === "POST" && requeueTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, requeueTrainingMatch[1]); return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) }); }
-  const pauseTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/pause$/);
-  if (method === "POST" && pauseTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, pauseTrainingMatch[1]); return sendJson(res, { job: await pauseTrainingJob(pauseTrainingMatch[1]) }); }
-  const resumeTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/resume$/);
-  if (method === "POST" && resumeTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, resumeTrainingMatch[1]); return sendJson(res, { job: await resumeTrainingJob(resumeTrainingMatch[1]) }); }
-  const deleteTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)$/);
-  if (method === "DELETE" && deleteTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, deleteTrainingMatch[1]); return sendJson(res, await deleteTrainingJob(deleteTrainingMatch[1])); }
-  const trainingLogsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/logs$/);
-  if (method === "GET" && trainingLogsMatch) {
-    await resourceAccess.assertTrainingJobRead(actor, trainingLogsMatch[1]);
-    const rows = await query("SELECT * FROM runtime_training_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 300", [trainingLogsMatch[1]]);
-    return sendJson(res, { logs: rows.rows.reverse() });
-  }
-  const trainingMetricsMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/metrics$/);
-  if (method === "GET" && trainingMetricsMatch) {
-    await resourceAccess.assertTrainingJobRead(actor, trainingMetricsMatch[1]);
-    const rows = await query("SELECT * FROM runtime_training_metrics WHERE job_id=$1 ORDER BY id DESC LIMIT 500", [trainingMetricsMatch[1]]);
-    return sendJson(res, { metrics: rows.rows.reverse() });
-  }
-  if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req), actor) });
-  const inferencePriorityMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && inferencePriorityMatch) { await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]); return sendJson(res, { job: await runtimeQueueService.moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction, actor) }); }
-  const requeueInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/requeue$/);
-  if (method === "POST" && requeueInferenceMatch) { await resourceAccess.assertInferenceJobWrite(actor, requeueInferenceMatch[1]); return sendJson(res, { job: await requeueInferenceJob(requeueInferenceMatch[1]) }); }
-  const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
-  if (method === "DELETE" && deleteInferenceMatch) { await resourceAccess.assertInferenceJobWrite(actor, deleteInferenceMatch[1]); return sendJson(res, await deleteInferenceJob(deleteInferenceMatch[1])); }
-  const inferenceEvaluationMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/evaluation$/);
-  if (method === "GET" && inferenceEvaluationMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceEvaluationMatch[1]); return sendJson(res, { evaluation: await getInferenceEvaluation(inferenceEvaluationMatch[1]) }); }
-  const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
-  if (method === "GET" && inferenceResultsMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]); return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) }); }
+  if (await mlRoutes.handle(req, res, parsed, actor)) return;
   if (method === "GET" && parsed.pathname === "/api/jobs") {
     const scoped = scopedSql("jobs", "j", actor, requestedScope(parsed, actor));
     const rows = await query(`SELECT j.* FROM jobs j WHERE ${scoped.sql} ORDER BY created_at DESC LIMIT 50`, scoped.params);
@@ -667,6 +564,23 @@ async function main() {
     logger: console,
     clock: runtimeWorkerClock,
     dateCode,
+  });
+  mlRoutes = createMlRoutes({
+    query,
+    readBody,
+    sendJson,
+    requestedScope,
+    accessControl,
+    resourceAccess,
+    modelService,
+    modelMaintenanceService,
+    algorithmAssetService,
+    runtimeAssetLinkService,
+    trainingCatalogService,
+    pythonEnvService,
+    runtimeQueueService,
+    runtimeJobService,
+    createInferenceJob,
   });
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });
   datasetContentService = createDatasetContentService({
