@@ -79,6 +79,7 @@ X,
 } from "lucide-react";
 
 import { AuthDialog as AuthDialogView } from "./features/auth/AuthDialog.jsx";
+import { submitAuth, useAuthSessionController } from "./features/auth/useAuthSessionController.js";
 import { AssetManagementWorkspace } from "./features/assets/AssetManagementWorkspace.jsx";
 import { MainNav } from "./components/layout/MainNav.jsx";
 import { EvaluationDetailPage } from "./features/evaluation/EvaluationDetailPage.jsx";
@@ -104,16 +105,7 @@ import {
   taskLabel,
 } from "./shared/presentation.js";
 import { useWorkspaceColumns } from "./shared/useWorkspaceColumns.jsx";
-import {
-  clearSession,
-  login as loginSession,
-  logout as logoutSession,
-  me as loadSession,
-  readSession,
-  register as registerSession,
-  UNAUTHORIZED_EVENT,
-  withScope,
-} from "./api-client.js";
+import { withScope } from "./api-client.js";
 import { AdminCenter, AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from "./multi-user-ui.jsx";
 
 export default function App() {
@@ -125,17 +117,9 @@ const [view, setView] = useState(() => restorableViews.has(restoredUiState.view)
 
 const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dark" : "light");
 
-const [currentUser, setCurrentUser] = useState(() => readSession());
+const { authMode, currentUser, setAuthMode, setCurrentUser, signOut } = useAuthSessionController();
 
 const [userPermissions, setUserPermissions] = useState([]);
-
-const [authMode, setAuthMode] = useState(() => window.localStorage.getItem("det-dashboard-user") ? null : "login");
-
-const signOut = async () => {
-  await logoutSession().catch(() => clearSession());
-  setCurrentUser(null);
-  setAuthMode("login");
-};
 
 const [datasetScope, setDatasetScope] = useState(() => window.localStorage.getItem("det-dashboard-dataset-scope") || "mine");
 const [assetScope, setAssetScope] = useState(() => window.localStorage.getItem("det-dashboard-asset-scope") || "mine");
@@ -318,23 +302,6 @@ const restoredActiveProjectIdRef = useRef(restoredUiState.view === "workspace" ?
 const restoredSelectedImageIdRef = useRef(restoredUiState.selectedImageId || null);
 
 const [activeInferenceResult, setActiveInferenceResult] = useState(null);
-
-useEffect(() => {
-  const handleUnauthorized = () => {
-    clearSession();
-    setCurrentUser(null);
-    setAuthMode("login");
-  };
-  window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
-  return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
-}, []);
-
-useEffect(() => {
-  if (!currentUser) return;
-  loadSession()
-    .then(() => setCurrentUser(readSession()))
-    .catch(() => {});
-}, [currentUser?.token]);
 
 useEffect(() => {
   if (!currentUser) {
@@ -2457,9 +2424,7 @@ function AuthDialog(props) {
   return (
     <AuthDialogView
       {...props}
-      onSubmit={({ mode, credentials }) => (
-        mode === "login" ? loginSession(credentials) : registerSession(credentials)
-      )}
+      onSubmit={submitAuth}
     />
   );
 }
