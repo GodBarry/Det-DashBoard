@@ -38,12 +38,14 @@ const { createProjectService } = require("./dataset/project-service");
 const { createDatasetContentService } = require("./dataset/content-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
+const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
 const { createRuntimeWorkerSupport } = require("./runtime-jobs/worker-support");
 const { createInferenceWorker } = require("./runtime-jobs/inference-worker");
 const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createModelService } = require("./ml-assets/model-service");
+const { createModelMaintenanceService } = require("./ml-assets/model-maintenance-service");
 const { createPythonEnvService } = require("./ml-assets/python-env-service");
 const { createAlgorithmAssetService } = require("./ml-assets/algorithm-asset-service");
 const { createAlgorithmRuntimeSource } = require("./ml-assets/algorithm-runtime-source");
@@ -101,9 +103,11 @@ let multiUserRouter;
 let projectService;
 let datasetContentService;
 let runtimeJobService;
+let trainingCatalogService;
 let runtimeQueueService;
 let prepareInferenceInputCache;
 let modelService;
+let modelMaintenanceService;
 let pythonEnvService;
 let algorithmAssetService;
 let runtimeAssetLinkService;
@@ -136,6 +140,7 @@ const {
   listFolders,
   selectFolder,
 } = pathService;
+modelMaintenanceService = createModelMaintenanceService({ query, store, fs, path, storageRoot, isInsideRoot });
 pythonEnvService = createPythonEnvService({
   query,
   scopeSql: (input) => resourceAccess.scopeSql(input),
@@ -810,125 +815,6 @@ function inferenceJobName(taskName, datasetName, fallbackName = "inference") {
   return [normalize(taskName) || normalize(fallbackName), normalize(datasetName) || "dataset", minuteCode()].join("_");
 }
 
-async function clearModelAssets(body = {}) {
-  const confirm = String(body.confirm || "");
-  const execute = confirm === "CLEAR_MODEL_ASSETS";
-  const modelFiles = (await query("SELECT id, path, metadata_json FROM model_files ORDER BY created_at DESC")).rows;
-  const modelVersions = (await query("SELECT id, artifact_root FROM model_revisions ORDER BY created_at DESC")).rows;
-  const modelClusters = (await query("SELECT id FROM model_clusters WHERE deleted_at IS NULL")).rows;
-  const objectKeys = new Set();
-  for (const row of modelFiles) {
-    if (row.path && String(row.path).startsWith("ml/artifacts/models/")) objectKeys.add(row.path);
-    const meta = row.metadata_json || {};
-    if (meta.manifestKey && String(meta.manifestKey).startsWith("ml/artifacts/models/")) objectKeys.add(meta.manifestKey);
-    if (meta.weightKey && String(meta.weightKey).startsWith("ml/artifacts/models/")) objectKeys.add(meta.weightKey);
-  }
-  for (const key of await store.listObjectKeys("ml/artifacts/models/")) objectKeys.add(key);
-
-  const localRoots = [
-    path.join(storageRoot, "runtime", "models"),
-    path.join(storageRoot, "runtime", "model-cache"),
-  ];
-
-  if (!execute) {
-    return {
-      dryRun: true,
-      requiresConfirm: "CLEAR_MODEL_ASSETS",
-      counts: {
-        modelClusters: modelClusters.length,
-        modelVersions: modelVersions.length,
-        modelFiles: modelFiles.length,
-        minioObjects: objectKeys.size,
-        localRoots: localRoots.filter((root) => fs.existsSync(root)).length,
-      },
-      scope: {
-        tables: ["model_files", "model_revisions", "model_clusters"],
-        minioPrefix: "ml/artifacts/models/",
-        localRoots,
-        excludes: ["projects", "project_images", "project_videos", "image_assets", "image_annotations", "dataset_snapshots"],
-      },
-    };
-  }
-
-  for (const key of objectKeys) await store.removeObject(key);
-  for (const root of localRoots) {
-    const resolved = path.resolve(root);
-    if (isInsideRoot(storageRoot, resolved) && fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true });
-  }
-  await query("DELETE FROM model_files");
-  await query("DELETE FROM model_revisions");
-  await query("UPDATE model_clusters SET deleted_at=now(), updated_at=now() WHERE deleted_at IS NULL");
-  return {
-    dryRun: false,
-    deleted: {
-      modelClusters: modelClusters.length,
-      modelVersions: modelVersions.length,
-      modelFiles: modelFiles.length,
-      minioObjects: objectKeys.size,
-      localRoots: localRoots.filter((root) => !fs.existsSync(root)).length,
-    },
-  };
-}
-
-async function listDatasetSnapshots(actor, scope = "mine") {
-  const scoped = scopedSql("dataset_snapshots", "ds", actor, scope);
-  const rows = await query(
-    `SELECT ds.*, p.name AS source_project_name
-     FROM dataset_snapshots ds
-     LEFT JOIN projects p ON p.id=ds.source_project_id
-     WHERE ${scoped.sql}
-     ORDER BY ds.created_at DESC
-     LIMIT 200`,
-    scoped.params,
-  );
-  return rows.rows;
-}
-
-async function listTrainingTemplates(actor, scope = "mine") {
-  try {
-    const scoped = scopedSql("training_templates", "t", actor, scope);
-    return (await query(`SELECT t.* FROM training_templates t WHERE ${scoped.sql} ORDER BY created_at DESC`, scoped.params)).rows;
-  } catch (error) {
-    if (error.code !== "42P01") throw error;
-    return algorithmAssetService.getBuiltinTrainingTemplateFallbacks();
-  }
-}
-
-function templateCapabilities(body = {}) {
-  const raw = body.capabilities || body.capabilities_json || {};
-  if (Array.isArray(raw.tasks) && raw.tasks.length) {
-    return { ...raw, tasks: raw.tasks.filter((task) => ["detect", "segment", "classify"].includes(task)) };
-  }
-  const key = String(body.templateKey || body.template_key || "").toLowerCase();
-  const framework = String(body.framework || "").toLowerCase();
-  if (framework === "ultralytics" || key.includes("ultralytics") || key.includes("yolo")) {
-    return { tasks: ["detect", "segment", "classify"], autoDetected: true };
-  }
-  return { tasks: [body.taskType || body.task_type || "detect"], autoDetected: false };
-}
-
-async function createTrainingTemplate(body = {}, actor) {
-  const name = String(body.name || "").trim();
-  if (!name) throw new Error("模板名称不能为空");
-  const capabilities = templateCapabilities(body);
-  const taskType = capabilities.tasks?.[0] || body.taskType || body.task_type || "detect";
-  const rows = await query(
-    `INSERT INTO training_templates (name, template_key, framework, task_type, command_json, default_params_json, capabilities_json, description)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [
-      name,
-      body.templateKey || body.template_key || "ultralytics_yolo",
-      body.framework || "ultralytics",
-      taskType,
-      JSON.stringify(body.command || body.command_json || {}),
-      JSON.stringify(body.defaultParams || body.default_params_json || {}),
-      JSON.stringify(capabilities),
-      body.description || "",
-    ],
-  );
-  return resourceAccess.assignOwner("training_templates", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
-}
-
 async function presentTrainingJobs(jobs) {
   return runtimeJobService.presentTrainingJobs(jobs);
 }
@@ -1132,11 +1018,11 @@ async function route(req, res) {
   if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await modelService.createMlModel(await readBody(req), actor) });
   if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await modelService.listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await modelService.createModelVersion(await readBody(req), actor) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await clearModelAssets(await readBody(req))); }
+  if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await modelMaintenanceService.clearModelAssets(await readBody(req))); }
   if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await algorithmAssetService.listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await runtimeAssetLinkService.listLinks(actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await listTrainingTemplates(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await createTrainingTemplate(await readBody(req), actor) });
+  if (method === "GET" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { templates: await trainingCatalogService.listTrainingTemplates(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/training-templates") return sendJson(res, { template: await trainingCatalogService.createTrainingTemplate(await readBody(req), actor) });
   if (method === "GET" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { envs: await pythonEnvService.listPythonEnvs(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/python-envs") return sendJson(res, { env: await pythonEnvService.createPythonEnv(await readBody(req), actor) });
   const pythonEnvDownload = parsed.pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
@@ -1145,7 +1031,7 @@ async function route(req, res) {
   if (method === "PATCH" && renameModelVersionMatch) { await resourceAccess.assertIndependentAccess("model_revisions", renameModelVersionMatch[1], actor, "write"); return sendJson(res, { version: await modelService.renameModelVersion(renameModelVersionMatch[1], await readBody(req)) }); }
   const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
   if (method === "GET" && modelVersionDownload) { await resourceAccess.assertIndependentAccess("model_revisions", modelVersionDownload[1], actor, "read"); return modelService.streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id); }
-  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots(actor, requestedScope(parsed, actor)) });
+  if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await trainingCatalogService.listDatasetSnapshots(actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req), actor) });
   const trainingPriorityMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/priority$/);
@@ -1313,6 +1199,12 @@ async function main() {
     algorithmAssetPrefix,
     algorithmManifestKey,
     algorithmAdapterKey,
+  });
+  trainingCatalogService = createTrainingCatalogService({
+    query,
+    scopedSql,
+    algorithmAssetService,
+    resourceAccess,
   });
   modelService = createModelService({
     query,
