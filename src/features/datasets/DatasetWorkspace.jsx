@@ -11,6 +11,7 @@ import { AnnotationOverlay, ImageViewer, labelColor } from "./ImageViewer.jsx";
 import { AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from "../../multi-user-ui.jsx";
 import { formatCount } from "../../shared/presentation.js";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { metadataOption, modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 
 export function DatasetWorkspace({ mode, viewModel }) {
   const {
@@ -864,11 +865,11 @@ return (
 
 <label className="search-control"><Search size={15} /><input value={filters.q} onChange={(e) => set("q", e.target.value)} placeholder="搜索文件" /></label>
 
-<MultiFilter title="视角" values={optionList(summary?.views)} selected={filters.views} onToggle={(value) => toggle("views", value)} />
+<MultiFilter title="视角" values={optionList(summary?.views).map((value) => metadataOption(value, "view"))} selected={filters.views} onToggle={(value) => toggle("views", value)} />
 
-<MultiFilter title="场景" values={optionList(summary?.scenes)} selected={filters.scenes} onToggle={(value) => toggle("scenes", value)} />
+<MultiFilter title="场景" values={optionList(summary?.scenes).map((value) => metadataOption(value, "scene"))} selected={filters.scenes} onToggle={(value) => toggle("scenes", value)} />
 
-<MultiFilter title="模态" values={[["infrared", "IR"], ["visible", "RGB"]]} selected={filters.modalities} onToggle={(value) => toggle("modalities", value)} />
+<MultiFilter title="模态" values={optionList(summary?.modalities).map((value) => metadataOption(value, "modality"))} selected={filters.modalities} onToggle={(value) => toggle("modalities", value)} />
 
 <MultiFilter title="标签" values={optionList(summary?.labels)} selected={filters.labels} onToggle={(value) => toggle("labels", value)} />
 
@@ -1079,7 +1080,7 @@ return (
 
 <AnnotationOverlay item={item} compact />
 
-<span className="thumb-tags"><em>{item.view || "视角"}</em><em>{item.modality === "infrared" ? "IR" : "RGB"}</em></span>
+<span className="thumb-tags"><em>{viewLabel(item.view)}</em><em>{modalityLabel(item.modality)}</em></span>
 
 
 
@@ -1341,11 +1342,11 @@ return (
 
 <div className="kv"><span>尺寸</span><b>{item.image_width || "--"} × {item.image_height || "--"}</b></div>
 
-<div className="kv"><span>场景</span><b>{item.scene || "--"}</b></div>
+<div className="kv"><span>场景</span><b>{sceneLabel(item.scene)}</b></div>
 
-<div className="kv"><span>视角</span><b>{item.view || "--"}</b></div>
+<div className="kv"><span>视角</span><b>{viewLabel(item.view)}</b></div>
 
-<div className="kv"><span>模态</span><b>{item.modality === "infrared" ? "IR" : "RGB"}</b></div>
+<div className="kv"><span>模态</span><b>{modalityLabel(item.modality)}</b></div>
 
 <div className="kv"><span>坐标</span><b>WGS84</b></div>
 

@@ -24,6 +24,7 @@ import {
   runStatusLabel,
   sortRuntimeJobsByTime,
 } from "../../shared/presentation.js";
+import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 export function InferenceWorkspace({
 
@@ -580,9 +581,9 @@ return (
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
-            <select value={inferenceForm.inputViews} onChange={(e) => setField("inputViews", e.target.value)}><option value="">视角：全部</option>{inferenceFilterOptions.views.map((value) => <option key={value} value={value}>{value}</option>)}</select>
-            <select value={inferenceForm.inputScenes} onChange={(e) => setField("inputScenes", e.target.value)}><option value="">场景：全部</option>{inferenceFilterOptions.scenes.map((value) => <option key={value} value={value}>{value}</option>)}</select>
-            <select value={inferenceForm.inputModalities} onChange={(e) => setField("inputModalities", e.target.value)}><option value="">模态：全部</option>{inferenceFilterOptions.modalities.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+            <select value={inferenceForm.inputViews} onChange={(e) => setField("inputViews", e.target.value)}><option value="">视角：全部</option>{inferenceFilterOptions.views.map((value) => <option key={value} value={value}>{metadataLabel(value, "view")}</option>)}</select>
+            <select value={inferenceForm.inputScenes} onChange={(e) => setField("inputScenes", e.target.value)}><option value="">场景：全部</option>{inferenceFilterOptions.scenes.map((value) => <option key={value} value={value}>{metadataLabel(value, "scene")}</option>)}</select>
+            <select value={inferenceForm.inputModalities} onChange={(e) => setField("inputModalities", e.target.value)}><option value="">模态：全部</option>{inferenceFilterOptions.modalities.map((value) => <option key={value} value={value}>{metadataLabel(value, "modality")}</option>)}</select>
             <select value={inferenceForm.inputLabels} onChange={(e) => setField("inputLabels", e.target.value)}><option value="">标签：全部</option>{inferenceFilterOptions.labels.map((value) => <option key={value} value={value}>{value}</option>)}</select>
             <input value={inferenceForm.inputQuery} onChange={(e) => setField("inputQuery", e.target.value)} placeholder="其他标签/关键词" />
             <button type="button" onClick={() => setInferenceForm({ ...inferenceForm, inputViews: "", inputScenes: "", inputModalities: "", inputLabels: "", inputQuery: "" })}>清空</button>

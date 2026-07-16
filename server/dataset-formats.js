@@ -150,6 +150,7 @@ function parseCoco(jsonFiles, index, matches, unresolved, usedLabelFiles) {
         imageHeight: Number(image.height) || null,
         scene: image.scene || image.attributes?.scene || "",
         view: image.view || image.attributes?.view || "",
+        modality: image.modality || image.attributes?.modality || "",
         keyword: image.keyword || image.attributes?.keyword || "",
         shapes: annotations.get(String(image.id)) || [],
       };

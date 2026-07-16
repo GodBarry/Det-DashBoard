@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
+import { metadataLabel } from "../../shared/datasetMetadata.js";
 export function TrainingWorkspace({
 
   projects,
@@ -330,7 +331,7 @@ export function TrainingWorkspace({
             </div>
             <div className="dataset-filter-panel">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
-              {[["views", "视角"], ["scenes", "场景"], ["modalities", "模态"], ["labels", "目标标签"]].map(([key, label]) => <label key={key}><span>{label}</span><select multiple value={activeDatasetFilter[key] || []} onChange={(event) => setDatasetFilter(key, Array.from(event.target.selectedOptions, (option) => option.value))}>{trainingFilterOptions[key].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>)}
+              {[["views", "视角"], ["scenes", "场景"], ["modalities", "模态"], ["labels", "目标标签"]].map(([key, label]) => <label key={key}><span>{label}</span><select multiple value={activeDatasetFilter[key] || []} onChange={(event) => setDatasetFilter(key, Array.from(event.target.selectedOptions, (option) => option.value))}>{trainingFilterOptions[key].map((value) => <option key={value} value={value}>{metadataLabel(value, key)}</option>)}</select></label>)}
               <label><span>其他标签/关键词</span><input value={(activeDatasetFilter.keywords || []).join(", ")} onChange={(event) => setDatasetFilter("keywords", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} placeholder="逗号分隔" /></label>
             </div>
             <div className="dataset-meta-row"><span>活动标签：{String(selectedProject.active_label_version_id || 'active').slice(0, 8)}</span><span>训练图像：{formatCount(selectedProject.image_count || 0)}</span><span>划分由导入结果确定，不再使用固定比例</span></div>
