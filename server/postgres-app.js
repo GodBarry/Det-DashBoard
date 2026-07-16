@@ -35,6 +35,7 @@ const { createAuthService } = require("./auth-service");
 const { createSettingsService } = require("./settings-service");
 const { createPathService } = require("./platform/path-service");
 const { createProjectService } = require("./dataset/project-service");
+const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
 const {
   imageObjectKey,
   videoObjectKey,
@@ -66,6 +67,7 @@ let resourceAccess;
 let collaborationService;
 let multiUserRouter;
 let projectService;
+let runtimeQueueService;
 const authService = createAuthService({ query, httpError });
 const settingsService = createSettingsService({
   query,
@@ -2956,36 +2958,6 @@ async function listInferenceJobs(actor, scope = "mine") {
 }
 
 
-async function moveRuntimeJobPriority(tableName, jobId, direction, actor) {
-  const allowedTables = new Set(["runtime_training_jobs", "runtime_inference_jobs"]);
-  if (!allowedTables.has(tableName)) throw new Error("unsupported queue type");
-  if (!["up", "down"].includes(direction)) throw new Error("direction must be up or down");
-  return transaction(async (client) => {
-    const ownerFilter = accessControl.isAdmin(actor) ? { sql: "", params: [] } : { sql: "WHERE created_by_user_id=$1", params: [actor.id] };
-    const rows = (await client.query(
-      `SELECT id, COALESCE(priority, 0)::int AS priority, created_at
-       FROM ${tableName}
-       ${ownerFilter.sql}
-       ORDER BY COALESCE(priority, 0) DESC, created_at DESC, id DESC
-       LIMIT 200`,
-      ownerFilter.params,
-    )).rows;
-    const index = rows.findIndex((row) => String(row.id) === String(jobId));
-    if (index < 0) throw new Error("job not found");
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= rows.length) return rows[index];
-
-    const normalized = rows.map((row, rowIndex) => ({ ...row, priority: rows.length - rowIndex }));
-    for (const row of normalized) {
-      await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [row.priority, row.id]);
-    }
-    const current = normalized[index];
-    const target = normalized[targetIndex];
-    await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [target.priority, current.id]);
-    await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [current.priority, target.id]);
-    return (await client.query(`SELECT * FROM ${tableName} WHERE id=$1`, [jobId])).rows[0];
-  });
-}
 async function listInferenceResults(jobId) {
   const rows = await query(
     `SELECT ir.*, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
@@ -3420,25 +3392,6 @@ async function prepareInferenceInputCache(job) {
     [JSON.stringify(nextParams), `推理输入缓存已准备：${manifestImages.length} 张图片`, job.id],
   );
   return manifest;
-}
-
-async function claimInferenceJob(workerId) {
-  return transaction(async (client) => {
-    const row = (await client.query(
-      `SELECT *
-       FROM runtime_inference_jobs
-       WHERE status='pending'
-       ORDER BY created_at
-       FOR UPDATE SKIP LOCKED
-       LIMIT 1`,
-    )).rows[0];
-    if (!row) return null;
-    await client.query(
-      "UPDATE runtime_inference_jobs SET status='running', progress=10, message=$1, started_at=COALESCE(started_at, now()) WHERE id=$2",
-      [`推理 worker ${workerId} 已接管任务`, row.id],
-    );
-    return { ...row, status: "running" };
-  });
 }
 
 function isDummyInferenceJob(job) {
@@ -4323,7 +4276,7 @@ function startInferenceWorker() {
     busy = true;
     activeTick = (async () => {
       try {
-        const job = await claimInferenceJob(workerId);
+        const job = await runtimeQueueService.claimInferenceJob(workerId);
         if (job) await runInferenceJob(job, workerId);
       } catch (error) {
         console.error("inference worker error:", error);
@@ -4749,26 +4702,6 @@ async function buildTrainingCommand(job, snapshot) {
   return { command: python, args };
 }
 
-async function claimTrainingJob(workerId) {
-  return transaction(async (client) => {
-    const row = (await client.query(
-      `SELECT * FROM runtime_training_jobs
-       WHERE status='pending'
-       ORDER BY priority DESC, created_at
-       FOR UPDATE SKIP LOCKED
-       LIMIT 1`,
-    )).rows[0];
-    if (!row) return null;
-    const updated = (await client.query(
-      `UPDATE runtime_training_jobs
-       SET status='preparing', worker_id=$1, heartbeat_at=now(), started_at=COALESCE(started_at, now()), message=$2
-       WHERE id=$3 RETURNING *`,
-      [workerId, "正在生成数据集快照", row.id],
-    )).rows[0];
-    return updated;
-  });
-}
-
 async function ensureTrainingModelRevision(job) {
   if (job.generated_model_version_id) {
     const generated = (await query("SELECT * FROM model_revisions WHERE id=$1", [job.generated_model_version_id])).rows[0];
@@ -4988,7 +4921,7 @@ function startTrainingWorker() {
     busy = true;
     activeTick = (async () => {
       try {
-        const job = await claimTrainingJob(workerId);
+        const job = await runtimeQueueService.claimTrainingJob(workerId);
         if (job) await runTrainingJob(job, workerId);
       } catch (error) {
         console.error("training worker error:", error);
@@ -5428,7 +5361,7 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req), actor) });
   const trainingPriorityMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && trainingPriorityMatch) { await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]); return sendJson(res, { job: await moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction, actor) }); }
+  if (method === "PATCH" && trainingPriorityMatch) { await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]); return sendJson(res, { job: await runtimeQueueService.moveRuntimeJobPriority("runtime_training_jobs", trainingPriorityMatch[1], (await readBody(req)).direction, actor) }); }
   const requeueTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/requeue$/);
   if (method === "POST" && requeueTrainingMatch) { await resourceAccess.assertTrainingJobWrite(actor, requeueTrainingMatch[1]); return sendJson(res, { job: await requeueTrainingJob(requeueTrainingMatch[1], await readBody(req)) }); }
   const pauseTrainingMatch = parsed.pathname.match(/^\/api\/ml\/training-jobs\/([^/]+)\/pause$/);
@@ -5452,7 +5385,7 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { jobs: await listInferenceJobs(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/inference-jobs") return sendJson(res, { job: await createInferenceJob(await readBody(req), actor) });
   const inferencePriorityMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
-  if (method === "PATCH" && inferencePriorityMatch) { await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]); return sendJson(res, { job: await moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction, actor) }); }
+  if (method === "PATCH" && inferencePriorityMatch) { await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]); return sendJson(res, { job: await runtimeQueueService.moveRuntimeJobPriority("runtime_inference_jobs", inferencePriorityMatch[1], (await readBody(req)).direction, actor) }); }
   const requeueInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/requeue$/);
   if (method === "POST" && requeueInferenceMatch) { await resourceAccess.assertInferenceJobWrite(actor, requeueInferenceMatch[1]); return sendJson(res, { job: await requeueInferenceJob(requeueInferenceMatch[1]) }); }
   const deleteInferenceMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
@@ -5555,6 +5488,7 @@ async function main() {
     },
   });
   await accessControl.ensureSchema();
+  runtimeQueueService = createRuntimeQueueService({ query, transaction, accessControl });
   resourceAccess = createResourceAccess({ query, transaction, httpError, accessControl });
   await resourceAccess.initializeSchema();
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });
