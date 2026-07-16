@@ -12343,15 +12343,56 @@ button:disabled:hover {
 
 .inference-workspace .reference-queue .inference-table-head,
 .inference-workspace .reference-queue .inference-table-row {
-  grid-template-columns: 150px 92px 108px 70px 116px 64px 64px 68px 68px 68px 194px !important;
+  grid-template-columns: var(--inference-table-columns) !important;
   column-gap: 5px !important;
 }
 
 .inference-workspace .reference-queue .inference-table-head > span:last-child,
 .inference-workspace .reference-queue .inference-table-row > .queue-actions {
-  width: 194px !important;
-  min-width: 194px !important;
-  max-width: 194px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+.inference-workspace .inference-table {
+  min-width: 1080px;
+  overflow-x: auto;
+}
+
+.inference-workspace .inference-table-head > span {
+  position: relative;
+  overflow: visible !important;
+}
+
+.table-column-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 3px;
+  right: -4px;
+  bottom: 3px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.table-column-resizer::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  bottom: 2px;
+  width: 1px;
+  background: transparent;
+}
+
+.table-column-resizer:hover::after,
+body.resizing-table-column .table-column-resizer::after {
+  background: var(--accent);
+}
+
+body.resizing-table-column {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 @media (max-width: 1500px) {

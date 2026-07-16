@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArrowDown,
@@ -71,6 +71,55 @@ helpers,
 const { bestAssetLink, envTooltip, formatMetric, modelFamilyLabel, parseMaybeJson, predictionBoxStyle, predictionColor, predictionItems, predictionLegend, projectTreeRows, versionTooltip } = helpers;
 
 const { columns, beginResize } = useWorkspaceColumns("det-dashboard.inference-columns", { left: 292, right: 418 });
+
+const inferenceTableRef = useRef(null);
+const [inferenceColumnWidths, setInferenceColumnWidths] = useState(() => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem("det-dashboard.inference-table-columns") || "null");
+    return Array.isArray(stored) && stored.length === 11 ? stored : null;
+  } catch {
+    return null;
+  }
+});
+const inferenceColumnTemplate = inferenceColumnWidths
+  ? inferenceColumnWidths.map((width) => `${Math.round(width)}px`).join(" ")
+  : "minmax(145px,1.35fr) minmax(90px,.78fr) minmax(105px,.9fr) minmax(68px,.5fr) minmax(112px,.82fr) minmax(62px,.48fr) minmax(62px,.48fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(184px,1.15fr)";
+const inferenceTableStyle = { "--inference-table-columns": inferenceColumnTemplate };
+const resetInferenceColumns = () => {
+  setInferenceColumnWidths(null);
+  window.localStorage.removeItem("det-dashboard.inference-table-columns");
+};
+const beginInferenceColumnResize = (event, index) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const cells = Array.from(inferenceTableRef.current?.querySelectorAll(":scope > .inference-table-head > span") || []);
+  if (!cells[index] || !cells[index + 1]) return;
+  const widths = cells.map((cell) => cell.getBoundingClientRect().width);
+  const startX = event.clientX;
+  const leftStart = widths[index];
+  const rightStart = widths[index + 1];
+  const minimums = [120, 76, 86, 62, 92, 54, 54, 58, 58, 58, 170];
+  const onMove = (moveEvent) => {
+    const requested = moveEvent.clientX - startX;
+    const delta = Math.max(minimums[index] - leftStart, Math.min(requested, rightStart - minimums[index + 1]));
+    const next = [...widths];
+    next[index] = leftStart + delta;
+    next[index + 1] = rightStart - delta;
+    setInferenceColumnWidths(next);
+  };
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.body.classList.remove("resizing-table-column");
+    setInferenceColumnWidths((current) => {
+      if (current) window.localStorage.setItem("det-dashboard.inference-table-columns", JSON.stringify(current));
+      return current;
+    });
+  };
+  document.body.classList.add("resizing-table-column");
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp, { once: true });
+};
 
 const selectedProject = projects.find((project) => project.id === inferenceForm.datasetProjectId);
 
@@ -668,10 +717,17 @@ return (
           <h2>推理任务队列</h2>
           <span className="muted">共 {inferenceJobs.length} 条</span>
         </div>
-        <div className="inference-table">
+        <div className="inference-table" ref={inferenceTableRef} style={inferenceTableStyle}>
           <div className="inference-table-head">
-            <span className="inference-task-name"><input type="checkbox" checked={allVisibleInferenceJobsSelected} onChange={toggleVisibleInferenceJobsSelection} disabled={!displayJobs.length} />任务名称</span>
-            <span>数据集</span><span>模型</span><span>状态</span><span>进度</span><span>图像数</span><span>预测数</span><span>Precision</span><span>Recall</span><span>mAP50</span><span>操作</span>
+            {[
+              <><input type="checkbox" checked={allVisibleInferenceJobsSelected} onChange={toggleVisibleInferenceJobsSelection} disabled={!displayJobs.length} />任务名称</>,
+              "数据集", "模型", "状态", "进度", "图像数", "预测数", "Precision", "Recall", "mAP50", "操作",
+            ].map((label, index) => (
+              <span className={index === 0 ? "inference-task-name" : ""} key={index}>
+                {label}
+                {index < 10 && <i className="table-column-resizer" role="separator" aria-orientation="vertical" title="拖动调整列宽，双击恢复自动宽度" onPointerDown={(event) => beginInferenceColumnResize(event, index)} onDoubleClick={resetInferenceColumns} />}
+              </span>
+            ))}
           </div>
           {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
