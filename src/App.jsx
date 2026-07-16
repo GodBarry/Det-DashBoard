@@ -93,6 +93,7 @@ import { MainNav } from "./components/layout/MainNav.jsx";
 import { EvaluationDetailPage } from "./features/evaluation/EvaluationDetailPage.jsx";
 import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
 import { EvaluationReportPage } from "./features/evaluation/EvaluationReportPage.jsx";
+import { useEvaluationController } from "./features/evaluation/useEvaluationController.js";
 import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
 import { TrainingLogPanel } from "./features/training/TrainingLogPanel.jsx";
 
@@ -3079,63 +3080,20 @@ const title = view === "training" ? "训练平台" : view === "inference" ? "推
 
 const supportedTasks = ["detect", "segment", "classify"];
 
-const [evaluationCluster, setEvaluationCluster] = useState("all");
-
-const [evaluationType, setEvaluationType] = useState("all");
-
-const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState([]);
-
-const [activeEvaluationTask, setActiveEvaluationTask] = useState(null);
-
-const [activeEvaluationReportTask, setActiveEvaluationReportTask] = useState(null);
-
-const [selectedEvaluationTaskId, setSelectedEvaluationTaskId] = useState(() => readUiState().evaluation?.selectedTaskId || "");
-
-useEffect(() => {
-  updateUiState({ evaluation: { selectedTaskId: selectedEvaluationTaskId } });
-}, [selectedEvaluationTaskId]);
-
-const evaluationTasks = inferenceJobs
-
-.filter((job) => !hiddenEvaluationJobIds.includes(job.id))
-
-.map((job) => {
-
-const cluster = job.task_type || job.taskType || "detect";
-
-const modelText = job.model_name ? `${job.model_name}/${job.version_name || "版本"}` : "未指定模型版";
-
-return {
-
-id: job.id,
-
-name: job.name || `推理任务 ${job.id}`,
-
-cluster,
-
-type: "inference",
-
-description: job.message || `${job.dataset_project_name || "未绑定数据集"} · ${modelText} · 已完成推理任务，可进入评估`,
-
-creator: job.created_by || job.creator || "admin",
-
-createdAt: formatDateTime(job.created_at),
-
-sourceJob: job,
-
-};
-
-});
-
-const filteredEvaluationTasks = evaluationTasks.filter((task) => {
-
-const clusterMatch = evaluationCluster === "all" || task.cluster === evaluationCluster;
-
-const typeMatch = evaluationType === "all" || task.type === evaluationType;
-
-return clusterMatch && typeMatch;
-
-});
+const {
+  activeEvaluationReportTask,
+  activeEvaluationTask,
+  evaluationCluster,
+  evaluationType,
+  filteredEvaluationTasks,
+  hideEvaluationTask,
+  selectedEvaluationTaskId,
+  setActiveEvaluationReportTask,
+  setActiveEvaluationTask,
+  setEvaluationCluster,
+  setEvaluationType,
+  setSelectedEvaluationTaskId,
+} = useEvaluationController({ inferenceJobs });
 
 const inferenceVersions = modelVersions.filter((version) => {
 
@@ -3321,7 +3279,7 @@ environments={pythonEnvs}
 
 onDetail={setActiveEvaluationTask}
 
-onDelete={(taskId) => setHiddenEvaluationJobIds((ids) => Array.from(new Set([...ids, taskId])))}
+onDelete={hideEvaluationTask}
 
 parseMaybeJson={parseMaybeJson}
 
