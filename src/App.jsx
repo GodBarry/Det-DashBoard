@@ -76,8 +76,7 @@ X,
 
 } from "lucide-react";
 
-import { AuthDialog as AuthDialogView } from "./features/auth/AuthDialog.jsx";
-import { submitAuth, useAuthSessionController } from "./features/auth/useAuthSessionController.js";
+import { useAuthSessionController } from "./features/auth/useAuthSessionController.js";
 import { AssetManagementWorkspace } from "./features/assets/AssetManagementWorkspace.jsx";
 import { useAssetMutationController } from "./features/assets/useAssetMutationController.js";
 import { MainNav } from "./components/layout/MainNav.jsx";
@@ -85,7 +84,6 @@ import { EvaluationDetailPage } from "./features/evaluation/EvaluationDetailPage
 import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
 import { EvaluationReportPage } from "./features/evaluation/EvaluationReportPage.jsx";
 import { useEvaluationController } from "./features/evaluation/useEvaluationController.js";
-import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
 import { useSettingsOverlayController } from "./features/settings/useSettingsOverlayController.js";
 import { InferenceWorkspace } from "./features/inference/InferenceWorkspace.jsx";
 import { InferenceResultDialog } from "./features/inference/InferenceResultDialog.jsx";
@@ -98,6 +96,7 @@ import { useDatasetImportController } from "./features/datasets/useDatasetImport
 import { useDatasetWorkspaceController } from "./features/datasets/useDatasetWorkspaceController.js";
 import { useProjectCatalogController } from "./features/datasets/useProjectCatalogController.js";
 import { useMlPlatformController } from "./features/platform/useMlPlatformController.js";
+import { PlatformPage as PlatformPageView } from "./features/platform/PlatformPage.jsx";
 import {
   bestAssetLink,
   envTooltip,
@@ -114,6 +113,7 @@ import {
 } from "./features/platform/mlPresentation.js";
 
 import { useUiStateController } from "./app/useUiStateController.js";
+import { AuthDialog, SettingsDialog } from "./app/AppOverlays.jsx";
 import {
   evaluationTypeLabels,
   formatCount,
@@ -585,12 +585,11 @@ return (
 );
 
 }
-
 if (view === "training" || view === "inference" || view === "models" || view === "evaluation" || view === "admin") {
 
 return (
 
-<PlatformPage
+<PlatformPageView
 
 view={view}
 
@@ -1139,29 +1138,3 @@ onClose={() => setActiveInferenceResult(null)}
 
 }
 
-function AuthDialog(props) {
-  return (
-    <AuthDialogView
-      {...props}
-      onSubmit={submitAuth}
-    />
-  );
-}
-
-function SettingsDialog(props) {
-  return (
-    <SettingsDialogView
-      {...props}
-      onSave={async (settings) => {
-        const response = await fetch("/api/settings", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ settings }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "保存设置失败");
-        return data;
-      }}
-    />
-  );
-}
