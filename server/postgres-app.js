@@ -39,6 +39,7 @@ const { createDatasetContentService } = require("./dataset/content-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
+const { createRuntimeWorkerSupport } = require("./runtime-jobs/worker-support");
 const { createModelService } = require("./ml-assets/model-service");
 const { createPythonEnvService } = require("./ml-assets/python-env-service");
 const { createAlgorithmAssetService } = require("./ml-assets/algorithm-asset-service");
@@ -83,6 +84,7 @@ const {
 
 const lifecycle = runtime.lifecycle;
 const staticHandler = runtime.staticHandler;
+const { stopProcess, runChildProcess, appendTrainingLog } = createRuntimeWorkerSupport({ query, spawn, processRef: process });
 
 let accessControl;
 let resourceAccess;
@@ -1047,25 +1049,6 @@ async function requeueTrainingJob(jobId, body = {}) {
   return updated.rows[0];
 }
 
-function stopProcess(pid) {
-  const numericPid = Number(pid);
-  if (!numericPid || numericPid === process.pid) return false;
-  try {
-    process.kill(numericPid);
-    return true;
-  } catch (error) {
-    if (process.platform === "win32") {
-      try {
-        spawn("taskkill", ["/PID", String(numericPid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
-    return false;
-  }
-}
-
 async function pauseTrainingJob(jobId) {
   const job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [jobId])).rows[0];
   if (!job) throw new Error("训练任务不存在");
@@ -1780,29 +1763,6 @@ async function computeDetectionMetrics(job, predictionRows) {
   };
 }
 
-function runChildProcess(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, ...options });
-    let stdout = "";
-    let stderr = "";
-    let combined = "";
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; combined += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; combined += chunk; });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) return resolve({ stdout, stderr, combined, code });
-      const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
-      error.code = code;
-      error.stdout = stdout;
-      error.stderr = stderr;
-      error.combined = combined;
-      reject(error);
-    });
-  });
-}
-
 async function runUltralyticsInferenceJob(job) {
   const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
   const envId = params.pythonEnvId || params.python_env_id;
@@ -2125,12 +2085,6 @@ function startInferenceWorker() {
       await activeTick;
     },
   };
-}
-
-async function appendTrainingLog(jobId, stream, line) {
-  const text = String(line || "").slice(0, 4000);
-  if (!text) return;
-  await query("INSERT INTO runtime_training_logs (job_id, stream, line) VALUES ($1,$2,$3)", [jobId, stream, text]).catch(() => {});
 }
 
 async function createLegacyDatasetSnapshotForTraining(job) {
