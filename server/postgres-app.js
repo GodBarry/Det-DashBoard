@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const sharp = require("sharp");
 const { createRuntimeContext } = require("./bootstrap/runtime-context");
+const { createProcessLifecycle } = require("./bootstrap/process-lifecycle");
 const runtime = createRuntimeContext();
 const { host, port, dataRoot, dataRootDisplay, browseRoot, browseRootDisplay, browseAllDrives, hostPathMode, hostDialogUrl, nativeDialogMode, maxRequestBodyBytes, storageRoot, exportRoot, exportRootDisplay, databaseUrl, minio } = runtime.config;
 const { pool, query, transaction } = runtime.database;
@@ -1385,55 +1386,28 @@ async function main() {
   console.log("Boot: ensureBucketSafe done");
   await algorithmAssetService.ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
   await resourceAccess.initializeSchema();
-  const server = http.createServer((req, res) => {
-    route(req, res).catch((error) => {
-      const statusCode = error.statusCode || 500;
-      if (statusCode >= 500) console.error(error);
-      if (!res.headersSent) sendError(res, statusCode, error.message);
-      else res.end();
-    });
-  });
-  globalThis.detDashboardServer = server;
-  server.on("error", (error) => console.error("HTTP server error:", error));
-  server.on("close", () => console.error("HTTP server closed"));
-  server.listen(port, host, () => {
-    console.log(`PostgreSQL + MinIO API: http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
-    console.log(`DATA_ROOT=${dataRoot}`);
-    console.log(`DATA_ROOT_DISPLAY=${dataRootDisplay}`);
-    console.log(`BROWSE_ROOT=${browseRoot}`);
-    console.log(`BROWSE_ROOT_DISPLAY=${browseRootDisplay}`);
-    console.log(`HOST_PATH_MODE=${hostPathMode}`);
-    console.log(`STORAGE_ROOT=${storageRoot}`);
-  });
-  const trainingWorker = trainingWorkerController.startTrainingWorker();
-  const inferenceWorker = inferenceWorkerController.startInferenceWorker();
-  if (trainingWorker) lifecycle.registerWorker(trainingWorker);
-  if (inferenceWorker) lifecycle.registerWorker(inferenceWorker);
-  return server;
+  return processLifecycle.startHttpServer();
 }
 
-let httpServer;
+const processLifecycle = createProcessLifecycle({
+  createServer: http.createServer,
+  route,
+  sendError,
+  lifecycle,
+  startTrainingWorker: () => trainingWorkerController.startTrainingWorker(),
+  startInferenceWorker: () => inferenceWorkerController.startInferenceWorker(),
+  pool,
+  port,
+  host,
+  dataRoot,
+  dataRootDisplay,
+  browseRoot,
+  browseRootDisplay,
+  hostPathMode,
+  storageRoot,
+  processRef: process,
+  globalRef: globalThis,
+  logger: console,
+});
 
-async function shutdown(signal) {
-  if (!lifecycle.beginShutdown()) return;
-  console.log(`Received ${signal}; stopping gracefully`);
-  const serverClosed = new Promise((resolve) => {
-    if (!httpServer) return resolve();
-    httpServer.close(resolve);
-  });
-  const workersStopped = lifecycle.stopWorkers();
-  const backgroundTasksStopped = lifecycle.waitForBackgroundTasks();
-  const timeout = new Promise((resolve) => setTimeout(resolve, 25000));
-  await Promise.race([Promise.all([serverClosed, workersStopped, backgroundTasksStopped]), timeout]);
-  await pool.end().catch((error) => console.error("PostgreSQL shutdown error:", error.message));
-}
-
-process.on("SIGINT", () => shutdown("SIGINT").finally(() => process.exit(0)));
-process.on("SIGTERM", () => shutdown("SIGTERM").finally(() => process.exit(0)));
-
-main()
-  .then((server) => { httpServer = server; })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+processLifecycle.run(main);
