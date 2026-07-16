@@ -23,6 +23,7 @@ function createInferenceWorker({
   modelService,
   runtimeAssetLinkService,
   runChildProcess,
+  appendInferenceLog,
   algorithmRuntimeSource,
   uniqueExistingPaths,
   logger,
@@ -610,7 +611,10 @@ function createInferenceWorker({
       "with open(cfg['manifestPath'], 'r', encoding='utf-8') as f: manifest = json.load(f)",
       "items = manifest.get('images') or []",
       "root = manifest.get('cacheRoot') or os.path.dirname(cfg['manifestPath'])",
+      "print('[DINO] manifest loaded: %d images' % len(items), flush=True)",
+      "print('[DINO] initializing model on %s' % cfg['device'], flush=True)",
       "model = init_detector(cfg['configPath'], cfg['weightPath'], device=cfg['device'])",
+      "print('[DINO] model initialized', flush=True)",
       "classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('classNames') or [])",
       "rows = []",
       "for item in items:",
@@ -636,18 +640,54 @@ function createInferenceWorker({
       "    visual_path = os.path.join(cfg['visualizationDir'], visual_name)",
       "    if canvas is not None: cv2.imwrite(visual_path, canvas)",
       "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(image_path), 'width': item.get('width'), 'height': item.get('height'), 'visualizationPath': visual_path if canvas is not None and os.path.isfile(visual_path) else None, 'predictions': preds})",
+      "    print('[DINO_PROGRESS] %d/%d %s predictions=%d' % (len(rows), len(items), os.path.basename(image_path), len(preds)), flush=True)",
       "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'dinov3_faster_rcnn', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
       "os.makedirs(os.path.dirname(cfg['predictionsPath']), exist_ok=True)",
       "with open(cfg['predictionsPath'], 'w', encoding='utf-8') as f: json.dump(payload, f, ensure_ascii=False, indent=2)",
-      "print(json.dumps({'imageCount': payload['imageCount'], 'predictionCount': payload['predictionCount'], 'predictionsPath': cfg['predictionsPath']}))",
+      "print(json.dumps({'imageCount': payload['imageCount'], 'predictionCount': payload['predictionCount'], 'predictionsPath': cfg['predictionsPath']}), flush=True)",
     ].join("\n");
     fs.writeFileSync(runnerPath, runner, "utf8");
-    const commandArgs = [runnerPath];
+    const commandArgs = ["-u", runnerPath];
     await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`Running DINO inference: ${env.python_path} ${commandArgs.join(" ")}`, job.id]);
+    await appendInferenceLog?.(job.id, "system", `$ ${env.python_path} ${commandArgs.join(" ")}`);
+    let logQueue = Promise.resolve();
+    let lastProgress = 35;
+    const outputBuffers = { stdout: "", stderr: "" };
+    const handleOutput = (stream, chunk) => {
+      outputBuffers[stream] += String(chunk || "");
+      const lines = outputBuffers[stream].split(/\r?\n/);
+      outputBuffers[stream] = lines.pop() || "";
+      for (const line of lines) {
+        if (!line) continue;
+        logQueue = logQueue.then(async () => {
+          await appendInferenceLog?.(job.id, stream, line);
+          const match = line.match(/^\[DINO_PROGRESS\]\s+(\d+)\/(\d+)\s+(.*?)\s+predictions=(\d+)$/);
+          if (!match) return;
+          const completed = Number(match[1]);
+          const total = Math.max(1, Number(match[2]));
+          const progress = Math.min(94, 35 + Math.round((completed / total) * 59));
+          if (progress === lastProgress) return;
+          lastProgress = progress;
+          await query(
+            "UPDATE runtime_inference_jobs SET progress=$1, message=$2 WHERE id=$3",
+            [progress, `DINO inference ${completed}/${total}: ${match[3]}, ${match[4]} predictions`, job.id],
+          );
+        });
+      }
+    };
     let result;
     try {
-      result = await runChildProcess(env.python_path, commandArgs, { cwd: sourceRoot, env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONPATH: [sourceRoot, cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) } });
+      result = await runChildProcess(env.python_path, commandArgs, {
+        cwd: sourceRoot,
+        env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [sourceRoot, cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+        onOutput: handleOutput,
+      });
+      for (const stream of ["stdout", "stderr"]) {
+        if (outputBuffers[stream]) await appendInferenceLog?.(job.id, stream, outputBuffers[stream]);
+      }
+      await logQueue;
     } catch (error) {
+      await logQueue;
       const wrapped = new Error(`DINO inference command failed: ${env.python_path} ${commandArgs.join(" ")} (cwd=${sourceRoot})\n${error.stderr || error.message}`);
       wrapped.stdout = error.stdout || "";
       wrapped.stderr = error.stderr || "";
@@ -730,6 +770,10 @@ function createInferenceWorker({
   function startInferenceWorker() {
     if (String(processRef.env.INFERENCE_WORKER_ENABLED || "true").toLowerCase() === "false") return;
     const workerId = `local-infer-${processRef.pid}`;
+    const recovery = query(
+      "UPDATE runtime_inference_jobs SET status='pending', progress=5, message=$1, started_at=NULL WHERE status='running' AND finished_at IS NULL",
+      ["Inference service restarted; job returned to the queue"],
+    ).catch((error) => logger.error("inference job recovery failed:", error));
     let busy = false;
     let stopped = false;
     let activeTick = Promise.resolve();
@@ -738,6 +782,7 @@ function createInferenceWorker({
       busy = true;
       activeTick = (async () => {
         try {
+          await recovery;
           const job = await runtimeQueueService.claimInferenceJob(workerId);
           if (job) await runInferenceJob(job, workerId);
         } catch (error) {

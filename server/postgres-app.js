@@ -78,7 +78,7 @@ const {
 
 const lifecycle = runtime.lifecycle;
 const staticHandler = runtime.staticHandler;
-const { stopProcess, runChildProcess, appendTrainingLog } = createRuntimeWorkerSupport({ query, spawn, processRef: process });
+const { stopProcess, runChildProcess, appendTrainingLog, appendInferenceLog } = createRuntimeWorkerSupport({ query, spawn, processRef: process });
 const runtimeWorkerClock = {
   now: Date.now,
   setInterval,
@@ -470,6 +470,7 @@ async function main() {
     modelService,
     runtimeAssetLinkService,
     runChildProcess,
+    appendInferenceLog,
     algorithmRuntimeSource,
     uniqueExistingPaths,
     logger: console,

@@ -102,6 +102,15 @@ function createInferenceInputCacheService({
     )).rows;
     if (!rows.length) throw new Error("推理输入范围内没有可用图片");
 
+    const preparingParams = {
+      ...paramsJson,
+      input: { ...input, filters, limit, imageCount: rows.length },
+    };
+    await query(
+      "UPDATE runtime_inference_jobs SET progress=2, params_json=$1, message=$2 WHERE id=$3",
+      [JSON.stringify(preparingParams), `Preparing inference input: ${rows.length} images`, job.id],
+    );
+
     const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
     const cacheRoot = path.join(outputRoot, "input-cache");
     const imagesDir = path.join(cacheRoot, "images");

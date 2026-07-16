@@ -241,8 +241,8 @@ function createRuntimeJobService({
         return {
           ...row,
           metrics_json: metrics,
-          image_count: Number(metrics.images || params?.output?.resultCount || 0) || null,
-          prediction_count: Number(metrics.predictions || params?.output?.predictionCount || 0) || null,
+          image_count: Number(metrics.images ?? params?.output?.resultCount ?? params?.input?.imageCount ?? 0),
+          prediction_count: Number(metrics.predictions ?? params?.output?.predictionCount ?? 0),
           algorithm_asset_id: params.algorithmAssetId || params.templateId || null,
           algorithm_name: params.templateName || params.algorithmKey || "",
           python_env_id: params.pythonEnvId || null,
@@ -271,6 +271,14 @@ function createRuntimeJobService({
       thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
       image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
     }));
+  }
+
+  async function listInferenceLogs(jobId) {
+    const rows = await query(
+      "SELECT id, job_id, stream, line, created_at FROM runtime_inference_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 500",
+      [jobId],
+    );
+    return rows.rows.reverse();
   }
 
   async function getInferenceEvaluation(jobId) {
@@ -355,6 +363,7 @@ function createRuntimeJobService({
     resumeTrainingJob,
     deleteTrainingJob,
     listInferenceJobs,
+    listInferenceLogs,
     listInferenceResults,
     getInferenceEvaluation,
     deleteInferenceJob,

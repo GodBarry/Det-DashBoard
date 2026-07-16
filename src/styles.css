@@ -11414,7 +11414,7 @@ button:disabled:hover {
 .reference-queue .inference-table-row,
 .inference-table-head,
 .inference-table-row {
-  grid-template-columns: minmax(170px, 1.08fr) minmax(118px, .76fr) minmax(136px, .84fr) 76px 92px 76px 76px 76px 76px 76px 214px !important;
+  grid-template-columns: minmax(138px, 1fr) 108px 126px 70px 116px 64px 64px 68px 68px 68px 194px !important;
   column-gap: 8px !important;
   align-items: center !important;
 }
@@ -11426,8 +11426,8 @@ button:disabled:hover {
 .inference-table-head > span:last-child,
 .inference-table-row > .queue-actions {
   justify-self: end !important;
-  width: 214px !important;
-  min-width: 214px !important;
+  width: 194px !important;
+  min-width: 194px !important;
   text-align: right !important;
 }
 .inference-table-row > .queue-actions {
@@ -11913,6 +11913,26 @@ button:disabled:hover {
     grid-template-rows: none !important;
   }
 }
+.inference-progress {
+  min-width: 0;
+  display: grid !important;
+  grid-template-columns: minmax(54px, 1fr) 34px;
+  align-items: center;
+  gap: 5px;
+  overflow: visible !important;
+}
+.inference-progress progress {
+  width: 100% !important;
+  min-width: 0;
+  margin: 0 !important;
+}
+.inference-progress small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
 
 /* Queue layout guard: this must remain after legacy responsive overrides. */
 .training-table-head,
@@ -12323,15 +12343,15 @@ button:disabled:hover {
 
 .inference-workspace .reference-queue .inference-table-head,
 .inference-workspace .reference-queue .inference-table-row {
-  grid-template-columns: minmax(150px,1.35fr) minmax(78px,.72fr) minmax(86px,.78fr) 70px 72px 54px 54px 58px 58px 58px 166px !important;
+  grid-template-columns: 150px 92px 108px 70px 116px 64px 64px 68px 68px 68px 194px !important;
   column-gap: 5px !important;
 }
 
 .inference-workspace .reference-queue .inference-table-head > span:last-child,
 .inference-workspace .reference-queue .inference-table-row > .queue-actions {
-  width: 166px !important;
-  min-width: 166px !important;
-  max-width: 166px !important;
+  width: 194px !important;
+  min-width: 194px !important;
+  max-width: 194px !important;
 }
 
 @media (max-width: 1500px) {

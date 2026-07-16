@@ -172,6 +172,13 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       artifact_path TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
+    `CREATE TABLE IF NOT EXISTS runtime_inference_logs (
+      id BIGSERIAL PRIMARY KEY,
+      job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
+      stream TEXT NOT NULL DEFAULT 'stdout',
+      line TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
     `CREATE TABLE IF NOT EXISTS runtime_asset_links (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       algorithm_asset_id UUID,
@@ -420,6 +427,13 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         artifact_path TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_logs (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
+        stream TEXT NOT NULL DEFAULT 'stdout',
+        line TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
       `CREATE TABLE IF NOT EXISTS runtime_asset_links (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         algorithm_asset_id UUID,
@@ -576,6 +590,13 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         project_image_id UUID REFERENCES project_images(id) ON DELETE SET NULL,
         predictions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
         artifact_path TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS runtime_inference_logs (
+        id BIGSERIAL PRIMARY KEY,
+        job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
+        stream TEXT NOT NULL DEFAULT 'stdout',
+        line TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`,
       `CREATE TABLE IF NOT EXISTS runtime_asset_links (

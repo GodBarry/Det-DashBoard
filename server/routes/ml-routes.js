@@ -210,6 +210,12 @@ function createMlRoutes(deps) {
       return true;
     }
     const inferenceResultsMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
+    const inferenceLogsMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/logs$/);
+    if (method === "GET" && inferenceLogsMatch) {
+      await resourceAccess.assertInferenceJobRead(actor, inferenceLogsMatch[1]);
+      sendJson(res, { logs: await runtimeJobService.listInferenceLogs(inferenceLogsMatch[1]) });
+      return true;
+    }
     if (method === "GET" && inferenceResultsMatch) {
       await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]);
       sendJson(res, { results: await runtimeJobService.listInferenceResults(inferenceResultsMatch[1]) });

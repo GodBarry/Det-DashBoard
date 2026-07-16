@@ -99,6 +99,8 @@ const latestDone = completedEvaluationStatuses.has(String(latestJob?.status || "
 
 const [previewRows, setPreviewRows] = useState([]);
 
+const [liveLogs, setLiveLogs] = useState([]);
+
 const [evaluation, setEvaluation] = useState(null);
 
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
@@ -191,6 +193,21 @@ fetch(`/api/ml/inference-jobs/${latestJob.id}/results`)
 return () => { ignore = true; };
 
 }, [latestJob?.id, latestJob?.status, latestJob?.progress]);
+
+useEffect(() => {
+  if (!latestJob?.id) {
+    setLiveLogs([]);
+    return undefined;
+  }
+  let ignore = false;
+  const loadLogs = () => fetch(`/api/ml/inference-jobs/${latestJob.id}/logs`)
+    .then((response) => response.json())
+    .then((data) => { if (!ignore) setLiveLogs(data.logs || []); })
+    .catch(() => {});
+  loadLogs();
+  const timer = window.setInterval(loadLogs, 1000);
+  return () => { ignore = true; window.clearInterval(timer); };
+}, [latestJob?.id]);
 
 const selectAlgorithm = (id) => {
 
@@ -468,7 +485,9 @@ const previewItems = previewRows.slice(0, 12);
   const legendItems = predictionLegend(previewItems);
 
 const latestJobParams = parseMaybeJson(latestJob?.params_json);
-const executionLog = latestJobParams?.output?.executionLog
+const executionLog = liveLogs.length
+  ? liveLogs.map((entry) => `[${entry.stream}] ${entry.line}`).join("\n")
+  : latestJobParams?.output?.executionLog
   || latestJobParams?.output?.stderr
   || latestJobParams?.output?.stdout
   || latestJob?.message
@@ -657,15 +676,16 @@ return (
           {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
             const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
+            const progress = Math.max(0, Math.min(100, Number(job.progress ?? (done ? 100 : 0)) || 0));
             return (
               <div className="inference-table-row" key={job.id}>
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
                 <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
-                <progress value={job.progress || (done ? 100 : 0)} max="100" />
-                <span>{metrics.images || job.image_count || 0}</span>
-                <span>{metrics.predictions || job.prediction_count || 0}</span>
+                <span className="inference-progress" title={`进度 ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
+                <span>{metrics.images ?? job.image_count ?? 0}</span>
+                <span>{metrics.predictions ?? job.prediction_count ?? 0}</span>
                 <span>{formatMetric(metrics.precision)}</span>
                 <span>{formatMetric(metrics.recall)}</span>
                 <span>{formatMetric(metrics.map50)}</span>

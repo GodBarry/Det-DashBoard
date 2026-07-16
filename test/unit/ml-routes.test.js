@@ -14,6 +14,7 @@ function createHarness(overrides = {}) {
     resumeTrainingJob: async () => ({ id: "train-1", status: "queued" }),
     deleteTrainingJob: async () => ({ deleted: "train-1" }),
     listInferenceJobs: async (...args) => ({ type: "inference", args }),
+    listInferenceLogs: async () => [{ id: 1, stream: "stdout", line: "running" }],
     requeueInferenceJob: async () => ({ id: "infer-1", status: "queued" }),
     deleteInferenceJob: async () => ({ deleted: "infer-1" }),
     getInferenceEvaluation: async () => ({ precision: 0.8 }),
@@ -116,6 +117,18 @@ test("inference evaluation checks read access before returning metrics", async (
   assert.deepEqual(calls, [
     ["inferenceRead", actor, "infer-8"],
     ["sendJson", { evaluation: { precision: 0.8 } }],
+  ]);
+});
+
+test("inference logs check read access and preserve chronological rows", async () => {
+  const { routes, calls } = createHarness();
+  const actor = { id: "user-1" };
+
+  await routes.handle(request("GET"), {}, parsed("/api/ml/inference-jobs/infer-1/logs"), actor);
+
+  assert.deepEqual(calls, [
+    ["inferenceRead", actor, "infer-1"],
+    ["sendJson", { logs: [{ id: 1, stream: "stdout", line: "running" }] }],
   ]);
 });
 

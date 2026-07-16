@@ -361,7 +361,7 @@ test("listInferenceJobs normalizes stored and output metrics", async () => {
   assert.equal(jobs[0].python_env_id, "env-1");
   assert.deepEqual(jobs[1].metrics_json, { images: 2, predictions: 0, map50: 0.81 });
   assert.equal(jobs[1].image_count, 2);
-  assert.equal(jobs[1].prediction_count, null);
+  assert.equal(jobs[1].prediction_count, 0);
   assert.equal(jobs[1].algorithm_asset_id, "template-2");
   assert.equal(jobs[1].algorithm_name, "fallback-detector");
   assert.equal(jobs[1].python_env_id, null);

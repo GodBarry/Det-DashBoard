@@ -58,6 +58,24 @@ test("runChildProcess preserves combined output arrival order", async () => {
   });
 });
 
+test("runChildProcess streams output callbacks without passing them to spawn", async () => {
+  const calls = [];
+  const streamed = [];
+  const spawn = (...args) => {
+    calls.push(args);
+    return createChild([["stdout", "one\n"], ["stderr", "two\n"]], 0);
+  };
+  const { runChildProcess } = createRuntimeWorkerSupport({ query: async () => {}, spawn, processRef: {} });
+
+  await runChildProcess("python", ["worker.py"], {
+    cwd: "job",
+    onOutput: (stream, chunk) => streamed.push([stream, chunk]),
+  });
+
+  assert.deepEqual(calls, [["python", ["worker.py"], { windowsHide: true, cwd: "job" }]]);
+  assert.deepEqual(streamed, [["stdout", "one\n"], ["stderr", "two\n"]]);
+});
+
 test("runChildProcess preserves nonzero exit details", async () => {
   const spawn = () => createChild([["stdout", "details\n"], ["stderr", " failure \n"]], 7);
   const { runChildProcess } = createRuntimeWorkerSupport({ query: async () => {}, spawn, processRef: {} });
