@@ -90,7 +90,9 @@ import { useEvaluationController } from "./features/evaluation/useEvaluationCont
 import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
 import { useSettingsOverlayController } from "./features/settings/useSettingsOverlayController.js";
 import { InferenceWorkspace } from "./features/inference/InferenceWorkspace.jsx";
+import { useInferenceController } from "./features/inference/useInferenceController.js";
 import { TrainingWorkspace } from "./features/training/TrainingWorkspace.jsx";
+import { useTrainingController } from "./features/training/useTrainingController.js";
 import { DatasetWorkspace } from "./features/datasets/DatasetWorkspace.jsx";
 import { useBaselineController } from "./features/datasets/useBaselineController.js";
 import { useDatasetImportController } from "./features/datasets/useDatasetImportController.js";
@@ -185,104 +187,7 @@ const [lastCheckedId, setLastCheckedId] = useState(null);
 
 const [homeExpandedIds, setHomeExpandedIds] = useState(() => new Set());
 
-const [trainingForm, setTrainingForm] = useState(() => ({
-name: "",
-datasetProjectId: "",
-trainProjectId: "",
-trainProjectIds: [],
-valProjectId: "",
-valProjectIds: [],
-testProjectId: "",
-testProjectIds: [],
-datasetFilters: {
-  train: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
-  val: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
-  test: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
-},
-modelId: "",
-initializationMode: "random",
-initialModelVersionId: "",
-resume: false,
-templateId: "",
-taskType: "detect",
-pythonEnvId: "",
-python: "D:\\ProgramData\\miniforge3\\python.exe",
-yoloVersion: "v8",
-epochs: 100,
-imgsz: 640,
-batch: 16,
-learningRate: 0.0032,
-optimizer: "SGD",
-savePeriod: 10,
-earlyStop: true,
-amp: true,
-freezeBackbone: false,
-device: "0",
-algorithmParams: {},
-...(restoredTrainingForm || {}),
-}));
-
-const [inferenceForm, setInferenceForm] = useState(() => ({
-
-name: "",
-
-datasetProjectId: "",
-
-modelId: "",
-
-modelVersionId: "",
-
-templateId: "",
-
-taskType: "detect",
-
-pythonEnvId: "",
-
-conf: 0.25,
-
-iou: 0.7,
-
-imgsz: 640,
-
-batch: 16,
-
-device: "0",
-
-inputScope: "project",
-
-inputScenes: "",
-
-inputViews: "",
-
-inputModalities: "",
-
-inputImportBatchIds: "",
-
-inputLabels: "",
-
-inputQuery: "",
-
-inputLimit: 0,
-
-cachePolicy: "reuse_asset_cache",
-
-saveJson: true,
-
-saveVisualization: true,
-
-createLabelVersion: false,
-
-fakeReferenceMode: false,
-
-...(restoredInferenceForm || {}),
-
-}));
-
-const [trainingLogs, setTrainingLogs] = useState([]);
-
 const importRefreshKeyRef = useRef("");
-
-const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
 useEffect(() => {
   if (!currentUser) {
@@ -372,6 +277,42 @@ const {
 } = useMlPlatformController({ assetScope, currentUser, refreshHome, view });
 
 const {
+  deleteTrainingJob,
+  requeueTrainingJob,
+  setTrainingForm,
+  submitTrainingJob,
+  trainingForm,
+  trainingLogs,
+  updateTrainingJobState,
+} = useTrainingController({
+  activeTrainingJobId,
+  currentUser,
+  loadMlPlatform,
+  restoredTrainingForm,
+  setActiveTrainingJobId,
+  setError,
+  trainingJobs,
+});
+
+const {
+  activeInferenceResult,
+  deleteInferenceJob,
+  deleteInferenceJobs,
+  inferenceForm,
+  requeueInferenceJob,
+  setActiveInferenceResult,
+  setInferenceForm,
+  submitInferenceJob,
+  viewInferenceResults,
+} = useInferenceController({
+  algorithmAssets,
+  confirmDelete: (message) => window.confirm(message),
+  loadMlPlatform,
+  restoredInferenceForm,
+  setError,
+});
+
+const {
   createModel,
   createModelVersion,
   createPythonEnv,
@@ -397,26 +338,6 @@ const {
 useEffect(() => {
   persistUiState({ activeProject, selected, trainingForm, inferenceForm });
 }, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
-
-useEffect(() => {
-
-if (!currentUser || !activeTrainingJobId || String(activeTrainingJobId).startsWith("mock-")) {
-
-setTrainingLogs([]);
-
-return;
-
-}
-
-fetch(`/api/ml/training-jobs/${activeTrainingJobId}/logs`)
-
-.then((r) => r.json())
-
-.then((d) => setTrainingLogs(d.logs || []))
-
-.catch(() => {});
-
-}, [activeTrainingJobId, trainingJobs, currentUser?.id]);
 
 const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
@@ -620,393 +541,6 @@ refreshHome();
 
 }
 
-function submitTrainingJob() {
-
-fetch("/api/ml/training-jobs", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({
-
-name: trainingForm.name,
-
-datasetProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId,
-
-datasetSplits: {
-trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
-trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
-valProjectId: trainingForm.valProjectId || null,
-valProjectIds: trainingForm.valProjectIds?.length ? trainingForm.valProjectIds : (trainingForm.valProjectId ? [trainingForm.valProjectId] : []),
-testProjectId: trainingForm.testProjectId || null,
-testProjectIds: trainingForm.testProjectIds?.length ? trainingForm.testProjectIds : (trainingForm.testProjectId ? [trainingForm.testProjectId] : []),
-},
-datasetFilters: trainingForm.datasetFilters,
-
-modelId: trainingForm.modelId || null,
-
-templateId: trainingForm.templateId || null,
-
-initializationStrategy: trainingForm.initializationMode,
-
-resume: Boolean(trainingForm.resume),
-
-savePeriod: Number(trainingForm.savePeriod),
-
-taskType: trainingForm.taskType,
-
-pythonEnvId: trainingForm.pythonEnvId || null,
-
-initialModelVersionId: ["pretrained", "training"].includes(trainingForm.initializationMode) ? (trainingForm.initialModelVersionId || null) : null,
-
-params: {
-...(trainingForm.algorithmParams || {}),
-python: trainingForm.python,
-initializationMode: trainingForm.initializationMode,
-initializationStrategy: trainingForm.initializationMode,
-resume: Boolean(trainingForm.resume),
-yoloVersion: trainingForm.yoloVersion,
-yolo_version: trainingForm.yoloVersion === "v11" ? "yolo11" : `yolov${String(trainingForm.yoloVersion || "v8").replace(/^v/i, "")}`,
-epochs: Number(trainingForm.epochs),
-imgsz: Number(trainingForm.imgsz),
-batch: Number(trainingForm.batch),
-learningRate: Number(trainingForm.learningRate),
-lr0: Number(trainingForm.learningRate),
-optimizer: trainingForm.optimizer,
-savePeriod: Number(trainingForm.savePeriod),
-save_period: Number(trainingForm.savePeriod),
-datasetSplits: {
-trainProjectId: trainingForm.trainProjectId || trainingForm.datasetProjectId || null,
-trainProjectIds: trainingForm.trainProjectIds?.length ? trainingForm.trainProjectIds : (trainingForm.trainProjectId ? [trainingForm.trainProjectId] : []),
-valProjectId: trainingForm.valProjectId || null,
-valProjectIds: trainingForm.valProjectIds?.length ? trainingForm.valProjectIds : (trainingForm.valProjectId ? [trainingForm.valProjectId] : []),
-testProjectId: trainingForm.testProjectId || null,
-testProjectIds: trainingForm.testProjectIds?.length ? trainingForm.testProjectIds : (trainingForm.testProjectId ? [trainingForm.testProjectId] : []),
-},
-datasetFilters: trainingForm.datasetFilters,
-earlyStop: Boolean(trainingForm.earlyStop),
-amp: Boolean(trainingForm.amp),
-freezeBackbone: Boolean(trainingForm.freezeBackbone),
-device: trainingForm.device,
-},
-
-}),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "提交训练失败");
-
-setTrainingForm({ ...trainingForm, name: "" });
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function requeueTrainingJob(jobId) {
-
-fetch(`/api/ml/training-jobs/${jobId}/requeue`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ params: { python: trainingForm.python, initialModelVersionId: trainingForm.initialModelVersionId || undefined } }),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "重新入队失败");
-
-setActiveTrainingJobId(jobId);
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function updateTrainingJobState(jobId, action) {
-
-fetch(`/api/ml/training-jobs/${jobId}/${action}`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "训练任务状态更新失败");
-
-setActiveTrainingJobId(jobId);
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function deleteTrainingJob(jobId) {
-
-if (!window.confirm("确定删除该训练任务吗？正在运行的任务会先停止。")) return;
-
-fetch(`/api/ml/training-jobs/${jobId}`, { method: "DELETE" })
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "删除训练任务失败");
-
-if (activeTrainingJobId === jobId) setActiveTrainingJobId(null);
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function submitInferenceJob() {
-
-const fakeAlgorithm = algorithmAssets.find((item) => item.algorithm_key === "fake_reference_detector" || item.template_key === "fake_reference_detector");
-
-const selectedAlgorithm = inferenceForm.fakeReferenceMode ? fakeAlgorithm : algorithmAssets.find((item) => item.id === inferenceForm.templateId);
-
-if (!inferenceForm.datasetProjectId) {
-
-setError("请选择数据集项目");
-
-return;
-
-}
-
-if (!selectedAlgorithm) {
-
-setError("请选择算法名称");
-
-return;
-
-}
-
-const algorithmKey = selectedAlgorithm.algorithm_key || selectedAlgorithm.template_key || "";
-
-const isBuiltInNoEnvAlgorithm = algorithmKey === "dummy_empty_detector" || algorithmKey === "fake_reference_detector";
-
-if (!isBuiltInNoEnvAlgorithm) {
-
-if (!inferenceForm.pythonEnvId) {
-
-setError("真实算法推理需要先选择运行环境资产");
-
-return;
-
-}
-
-if (!inferenceForm.modelVersionId) {
-
-setError("真实算法推理需要先选择模型权重版本");
-
-return;
-
-}
-
-}
-
-fetch("/api/ml/inference-jobs", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({
-
-name: inferenceForm.name,
-
-datasetProjectId: inferenceForm.datasetProjectId,
-
-modelVersionId: inferenceForm.fakeReferenceMode ? null : (inferenceForm.modelVersionId || null),
-
-params: {
-
-modelId: null,
-
-algorithmAssetId: selectedAlgorithm.id || inferenceForm.templateId || null,
-
-templateId: selectedAlgorithm.id || inferenceForm.templateId || null,
-
-fakeReferenceMode: Boolean(inferenceForm.fakeReferenceMode),
-
-taskType: inferenceForm.taskType,
-
-pythonEnvId: inferenceForm.pythonEnvId || null,
-
-conf: Number(inferenceForm.conf),
-
-iou: Number(inferenceForm.iou),
-
-imgsz: Number(inferenceForm.imgsz),
-
-batch: Number(inferenceForm.batch),
-
-device: inferenceForm.device,
-
-input: {
-
-sourceType: "project_images",
-
-scope: inferenceForm.inputScope,
-
-filters: inferenceForm.inputScope === "project" ? {} : {
-
-scenes: inferenceForm.inputScenes.split(",").map((item) => item.trim()).filter(Boolean),
-
-views: inferenceForm.inputViews.split(",").map((item) => item.trim()).filter(Boolean),
-
-modalities: inferenceForm.inputModalities.split(",").map((item) => item.trim()).filter(Boolean),
-
-importBatchIds: inferenceForm.inputImportBatchIds.split(",").map((item) => item.trim()).filter(Boolean),
-
-labels: inferenceForm.inputLabels.split(",").map((item) => item.trim()).filter(Boolean),
-
-q: inferenceForm.inputQuery,
-
-},
-
-limit: 0,
-
-cachePolicy: "reuse_asset_cache",
-
-},
-
-output: {
-
-saveJson: Boolean(inferenceForm.saveJson),
-
-saveVisualization: Boolean(inferenceForm.saveVisualization),
-
-createLabelVersion: Boolean(inferenceForm.createLabelVersion),
-
-},
-
-},
-
-}),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "提交推理失败");
-
-setInferenceForm({ ...inferenceForm, name: "" });
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function deleteInferenceJob(jobId) {
-
-if (!window.confirm("确认删除这个推理任务")) return;
-
-fetch(`/api/ml/inference-jobs/${jobId}`, { method: "DELETE" })
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "删除推理任务失败");
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function requeueInferenceJob(jobId) {
-  fetch(`/api/ml/inference-jobs/${jobId}/requeue`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-  })
-    .then((r) => Promise.all([r.status, r.json().catch(() => ({}))]))
-    .then(([status, data]) => {
-      if (status >= 400) throw new Error(data.error || "重新开始推理任务失败");
-      loadMlPlatform();
-    })
-    .catch((err) => setError(err.message || "重新开始推理任务失败"));
-}
-
-function deleteInferenceJobs(jobIds) {
-
-const ids = Array.from(new Set((jobIds || []).filter(Boolean)));
-
-if (!ids.length) {
-
-setError("请选择要删除的推理任务");
-
-return Promise.resolve(false);
-
-}
-
-if (!window.confirm(`确认删除 ${ids.length} 个推理任务？`)) return Promise.resolve(false);
-
-return Promise.all(ids.map((jobId) => fetch(`/api/ml/inference-jobs/${jobId}`, { method: "DELETE" })
-
-.then((r) => Promise.all([r.status, r.json().catch(() => ({}))]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "删除推理任务失败");
-
-return data;
-
-})))
-
-.then(() => {
-
-loadMlPlatform();
-
-return true;
-
-})
-
-.catch((err) => {
-
-setError(err.message);
-
-return false;
-
-});
-
-}
 function moveRuntimeQueueJob(kind, jobId, direction) {
 
 const path = kind === "training" ? "training-jobs" : "inference-jobs";
@@ -1034,34 +568,6 @@ loadMlPlatform();
 .catch((err) => setError(err.message || "调整队列优先级失"));
 
 }
-function viewInferenceResults(job) {
-
-setError(null);
-
-setActiveInferenceResult({ job, results: [], loading: true });
-
-fetch(`/api/ml/inference-jobs/${job.id}/results`)
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "读取推理结果失败");
-
-setActiveInferenceResult({ job, results: data.results || [], loading: false });
-
-})
-
-.catch((err) => {
-
-setActiveInferenceResult(null);
-
-setError(err.message);
-
-});
-
-}
-
 function loadWorkspace(projectId) {
 
 const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), q: filters.q || "" });
