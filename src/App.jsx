@@ -94,7 +94,7 @@ import { DatasetWorkspace } from "./features/datasets/DatasetWorkspace.jsx";
 import { useBaselineController } from "./features/datasets/useBaselineController.js";
 import { useDatasetImportController } from "./features/datasets/useDatasetImportController.js";
 
-import { readUiState, restorableViews, updateUiState } from "./app/ui-state.js";
+import { useUiStateController } from "./app/useUiStateController.js";
 import {
   colors,
   evaluationTypeLabels,
@@ -111,12 +111,21 @@ import { AdminCenter, AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, Share
 
 export default function App() {
 
-const restoredUiStateRef = useRef(readUiState());
-const restoredUiState = restoredUiStateRef.current;
-
-const [view, setView] = useState(() => restorableViews.has(restoredUiState.view) || restoredUiState.view === "admin" ? restoredUiState.view : "home");
-
-const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dark" : "light");
+const {
+  activeTrainingJobId,
+  consumeRestoredActiveProjectId,
+  consumeRestoredSelected,
+  currentFolderId,
+  persistUiState,
+  restoredInferenceForm,
+  restoredTrainingForm,
+  setActiveTrainingJobId,
+  setCurrentFolderId,
+  setTheme,
+  setView,
+  theme,
+  view,
+} = useUiStateController();
 
 const { authMode, currentUser, setAuthMode, setCurrentUser, signOut } = useAuthSessionController();
 
@@ -132,8 +141,6 @@ const [collaborationViewer, setCollaborationViewer] = useState(null);
 const { closeSettings, openSettings, showSettings } = useSettingsOverlayController();
 
 const [projects, setProjects] = useState([]);
-
-const [currentFolderId, setCurrentFolderId] = useState(() => restoredUiState.currentFolderId || null);
 
 const [trashProjects, setTrashProjects] = useState([]);
 
@@ -229,7 +236,7 @@ amp: true,
 freezeBackbone: false,
 device: "0",
 algorithmParams: {},
-...(restoredUiState.trainingForm || {}),
+...(restoredTrainingForm || {}),
 }));
 
 const [inferenceForm, setInferenceForm] = useState(() => ({
@@ -284,7 +291,7 @@ createLabelVersion: false,
 
 fakeReferenceMode: false,
 
-...(restoredUiState.inferenceForm || {}),
+...(restoredInferenceForm || {}),
 
 }));
 
@@ -292,15 +299,9 @@ const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", s
 
 const [envForm, setEnvForm] = useState({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
 
-const [activeTrainingJobId, setActiveTrainingJobId] = useState(() => restoredUiState.activeTrainingJobId || null);
-
 const [trainingLogs, setTrainingLogs] = useState([]);
 
 const importRefreshKeyRef = useRef("");
-
-const restoredActiveProjectIdRef = useRef(restoredUiState.view === "workspace" ? restoredUiState.activeProjectId || null : null);
-
-const restoredSelectedImageIdRef = useRef(restoredUiState.selectedImageId || null);
 
 const [activeInferenceResult, setActiveInferenceResult] = useState(null);
 
@@ -394,53 +395,7 @@ return () => window.clearInterval(timer);
 }, [view, assetScope, currentUser?.id]);
 
 useEffect(() => {
-  const persistedActiveProjectId = activeProject?.id || (view === "workspace" ? restoredActiveProjectIdRef.current : null);
-  const persistedSelectedImageId = selected?.id || (view === "workspace" ? restoredSelectedImageIdRef.current : null);
-  updateUiState({
-    view,
-    theme,
-    currentFolderId,
-    activeProjectId: persistedActiveProjectId,
-    selectedImageId: persistedSelectedImageId,
-    activeTrainingJobId,
-    trainingForm: {
-      datasetProjectId: trainingForm.datasetProjectId,
-      trainProjectId: trainingForm.trainProjectId,
-      trainProjectIds: trainingForm.trainProjectIds,
-      valProjectId: trainingForm.valProjectId,
-      valProjectIds: trainingForm.valProjectIds,
-      testProjectId: trainingForm.testProjectId,
-      testProjectIds: trainingForm.testProjectIds,
-      datasetFilters: trainingForm.datasetFilters,
-      modelId: trainingForm.modelId,
-      initializationMode: trainingForm.initializationMode,
-      initialModelVersionId: trainingForm.initialModelVersionId,
-      resume: trainingForm.resume,
-      templateId: trainingForm.templateId,
-      taskType: trainingForm.taskType,
-      pythonEnvId: trainingForm.pythonEnvId,
-      yoloVersion: trainingForm.yoloVersion,
-      epochs: trainingForm.epochs,
-      imgsz: trainingForm.imgsz,
-      batch: trainingForm.batch,
-      learningRate: trainingForm.learningRate,
-      optimizer: trainingForm.optimizer,
-      savePeriod: trainingForm.savePeriod,
-      earlyStop: trainingForm.earlyStop,
-      amp: trainingForm.amp,
-      freezeBackbone: trainingForm.freezeBackbone,
-      device: trainingForm.device,
-      algorithmParams: trainingForm.algorithmParams,
-    },
-    inferenceForm: {
-      datasetProjectId: inferenceForm.datasetProjectId,
-      modelId: inferenceForm.modelId,
-      modelVersionId: inferenceForm.modelVersionId,
-      templateId: inferenceForm.templateId,
-      taskType: inferenceForm.taskType,
-      pythonEnvId: inferenceForm.pythonEnvId,
-    },
-  });
+  persistUiState({ activeProject, selected, trainingForm, inferenceForm });
 }, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
 useEffect(() => {
@@ -629,8 +584,7 @@ const rows = d.projects || [];
 setProjects(rows);
 
 setActiveProject((current) => {
-  const projectId = current?.id || restoredActiveProjectIdRef.current;
-  restoredActiveProjectIdRef.current = null;
+  const projectId = consumeRestoredActiveProjectId(current?.id);
   return projectId ? rows.find((project) => project.id === projectId) || null : null;
 });
 
@@ -1274,13 +1228,10 @@ fetch(`/api/projects/${projectId}/images?${params}`).then((r) => r.json()).then(
 
 setItems(d.items || []);
 
-const restoredSelected = restoredSelectedImageIdRef.current
-  ? d.items?.find((item) => item.id === restoredSelectedImageIdRef.current)
-  : null;
+const restoredSelected = consumeRestoredSelected(d.items);
 
 if (restoredSelected) {
   setSelected(restoredSelected);
-  restoredSelectedImageIdRef.current = null;
   return;
 }
 
