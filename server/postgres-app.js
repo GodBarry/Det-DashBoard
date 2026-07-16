@@ -37,6 +37,7 @@ const { createPathService } = require("./platform/path-service");
 const { createProjectService } = require("./dataset/project-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
+const { createModelService } = require("./ml-assets/model-service");
 const {
   seededRandom,
   hashToSeed,
@@ -82,6 +83,7 @@ let collaborationService;
 let multiUserRouter;
 let projectService;
 let runtimeQueueService;
+let modelService;
 const authService = createAuthService({ query, httpError });
 const settingsService = createSettingsService({
   query,
@@ -1787,46 +1789,6 @@ async function applyBaselineRun(runId, body = {}, actor) {
   return result;
 }
 
-async function listMlModels(actor, scope = "mine") {
-  const scoped = scopedSql("model_clusters", "m", actor, scope);
-  try {
-    const rows = await query(
-      `SELECT m.*,
-        (SELECT count(*)::int FROM model_revisions mv WHERE mv.model_id=m.id) AS version_count,
-        (SELECT max(mv.created_at) FROM model_revisions mv WHERE mv.model_id=m.id) AS last_version_at
-       FROM model_clusters m
-       WHERE m.deleted_at IS NULL AND ${scoped.sql}
-       ORDER BY m.created_at DESC`,
-      scoped.params,
-    );
-    return rows.rows;
-  } catch (error) {
-    if (error.code !== "42P01") throw error;
-    const rows = await query(
-      `SELECT m.*, 0::int AS version_count, NULL::timestamptz AS last_version_at
-       FROM model_clusters m
-       WHERE m.deleted_at IS NULL AND ${scoped.sql}
-       ORDER BY m.created_at DESC`,
-      scoped.params,
-    );
-    return rows.rows;
-  }
-}
-
-async function createMlModel(body = {}, actor) {
-  const name = String(body.name || "").trim();
-  if (!name) throw new Error("模型名称不能为空");
-  const taskType = String(body.taskType || body.task_type || "detect").trim() || "detect";
-  const framework = String(body.framework || "ultralytics").trim() || "ultralytics";
-  const description = String(body.description || "").trim();
-  const rows = await query(
-    `INSERT INTO model_clusters (name, task_type, framework, description)
-     VALUES ($1,$2,$3,$4) RETURNING *`,
-    [name, taskType, framework, description],
-  );
-  return resourceAccess.assignOwner("model_clusters", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
-}
-
 function dateCode() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
@@ -1839,76 +1801,6 @@ function minuteCode(date = new Date()) {
 function inferenceJobName(taskName, datasetName, fallbackName = "inference") {
   const normalize = (value) => String(value || "").trim().replace(/[\\/:*?"<>|\s]+/g, "_").replace(/^_+|_+$/g, "");
   return [normalize(taskName) || normalize(fallbackName), normalize(datasetName) || "dataset", minuteCode()].join("_");
-}
-
-async function nextModelVersionName(prefix, modelId) {
-  const base = cleanName(prefix, "version");
-  const like = `${base}_%`;
-  const rows = await query("SELECT count(*)::int AS count FROM model_revisions WHERE model_id=$1 AND version_name LIKE $2", [modelId, like]);
-  return `${base}_${String((rows.rows[0]?.count || 0) + 1).padStart(3, "0")}`;
-}
-
-async function createModelVersion(body = {}, actor) {
-  const modelId = body.modelId || body.model_id;
-  if (!modelId) throw new Error("Select a model cluster.");
-  await resourceAccess.assertIndependentAccess?.("model_clusters", modelId, actor, "write");
-  const model = (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0];
-  if (!model) throw new Error("模型簇不存在");
-  const requestedStage = String(body.stage || "pretrained").trim().toLowerCase();
-  const stage = ["pretrained", "training", "candidate", "production"].includes(requestedStage) ? requestedStage : "pretrained";
-  const sourcePath = String(body.sourcePath || body.source_path || "").trim();
-  const params = body.params || {};
-  const defaultPrefix = `${stage === "pretrained" ? "pretrain" : stage}_${model.name}_${dateCode()}`;
-  const versionName = String(body.versionName || body.version_name || await nextModelVersionName(defaultPrefix, model.id)).trim();
-  const artifactRoot = path.join(storageRoot, "runtime", "models", model.id, versionName);
-  fs.mkdirSync(artifactRoot, { recursive: true });
-  const version = (await query(
-    `INSERT INTO model_revisions (model_id, version_name, stage, params_json, artifact_root)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
-  )).rows[0];
-  await resourceAccess.assignOwner("model_revisions", version.id, actor);
-  if (sourcePath) {
-    if (!fs.existsSync(sourcePath)) throw new Error("Weight file does not exist.");
-    const ext = path.extname(sourcePath).toLowerCase() || ".pt";
-    const objectKey = `ml/artifacts/models/${model.id}/${version.id}/weights${ext}`;
-    await store.putFile(objectKey, sourcePath);
-    const stat = fs.statSync(sourcePath);
-    const sha = await hashFile(sourcePath).catch(() => null);
-    const manifestKey = modelWeightManifestKey(model.id, version.id);
-    const manifest = {
-      format: "det-dashboard.model-weight.v1",
-      assetType: "model_weight",
-      modelId: model.id,
-      modelName: model.name,
-      modelVersionId: version.id,
-      versionName,
-      framework: model.framework,
-      taskType: model.task_type,
-      weightKey: objectKey,
-      weightName: path.basename(objectKey),
-      size: stat.size,
-      sha256: sha,
-      extension: ext,
-      importSourcePath: sourcePath,
-      createdAt: new Date().toISOString(),
-    };
-    await store.putJson(manifestKey, manifest);
-    await query(
-      `INSERT INTO model_files (model_version_id, artifact_type, path, size, sha256, metadata_json)
-       VALUES ($1,'weights',$2,$3,$4,$5)`,
-      [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath, weightRole: stage === "pretrained" ? "pretrained" : "other" })],
-    );
-  }
-  return version;
-}
-
-async function renameModelVersion(versionId, body = {}) {
-  const name = String(body.versionName || body.version_name || "").trim();
-  if (!name) throw new Error("Version name cannot be empty.");
-  const rows = await query("UPDATE model_revisions SET version_name=$1 WHERE id=$2 RETURNING *", [name, versionId]);
-  if (!rows.rows[0]) throw new Error("模型版本不存在");
-  return rows.rows[0];
 }
 
 async function clearModelAssets(body = {}) {
@@ -2440,110 +2332,6 @@ async function createPythonEnv(body = {}, actor) {
     ],
   );
   return resourceAccess.assignOwner("runtime_envs", rows.rows[0].id, actor, { visibility: body.visibility || "private" });
-}
-
-async function listModelVersions(modelId, actor, scope = "mine") {
-  const params = [];
-  const where = [];
-  if (modelId) {
-    params.push(modelId);
-    where.push(`mv.model_id=$${params.length}`);
-  }
-  const scoped = scopedSql("model_clusters", "m", actor, scope, params);
-  params.splice(0, params.length, ...scoped.params);
-  where.push(scoped.sql);
-  const rows = await query(
-    `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name,
-       tj.name AS training_job_name, tj.current_epoch AS training_current_epoch,
-       tj.total_epochs AS training_total_epochs, tj.finished_at AS training_finished_at,
-       COALESCE((
-         SELECT jsonb_agg(
-           jsonb_build_object(
-             'id', mf.id,
-             'artifact_type', mf.artifact_type,
-             'path', mf.path,
-             'size', mf.size,
-             'sha256', mf.sha256,
-             'metadata_json', mf.metadata_json,
-             'created_at', mf.created_at
-           ) ORDER BY mf.created_at, mf.id
-         )
-         FROM model_files mf
-         WHERE mf.model_version_id=mv.id
-       ), '[]'::jsonb) AS artifacts
-     FROM model_revisions mv
-     JOIN model_clusters m ON m.id=mv.model_id
-     LEFT JOIN projects p ON p.id=mv.dataset_project_id
-     LEFT JOIN runtime_training_jobs tj ON tj.id=mv.training_job_id
-     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     ORDER BY mv.created_at DESC
-     LIMIT 200`,
-    params,
-  );
-  return rows.rows;
-}
-
-async function findWeightArtifact(modelVersionId) {
-  if (!modelVersionId) return null;
-  const rows = await query(
-    `SELECT ma.*
-     FROM model_files ma
-     WHERE ma.model_version_id=$1 AND ma.artifact_type='weights'
-     ORDER BY
-       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\weights\\best.pt' THEN 0 ELSE 1 END,
-       ma.created_at DESC
-     LIMIT 1`,
-    [modelVersionId],
-  );
-  const artifact = rows.rows[0];
-  if (!artifact) return null;
-  const ext = path.extname(artifact.path || "") || ".pt";
-  const cached = path.join(storageRoot, "runtime", "model-cache", modelVersionId, `weights${ext}`);
-  if (fs.existsSync(cached) && fs.statSync(cached).isFile()) return cached;
-  await writeObjectToFile(artifact.path, cached);
-  return cached;
-}
-async function streamModelArtifact(res, modelVersionId, artifactId) {
-  const params = [modelVersionId];
-  let where = "ma.model_version_id=$1";
-  if (artifactId) {
-    params.push(artifactId);
-    where += ` AND ma.id=$${params.length}`;
-  } else {
-    where += " AND ma.artifact_type='weights'";
-  }
-  const rows = await query(
-    `SELECT ma.*, mv.version_name, m.name AS model_name
-     FROM model_files ma
-     JOIN model_revisions mv ON mv.id=ma.model_version_id
-     JOIN model_clusters m ON m.id=mv.model_id
-     WHERE ${where}
-     ORDER BY
-       CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
-       ma.created_at DESC
-     LIMIT 1`,
-    params,
-  );
-  const artifact = rows.rows[0];
-  if (!artifact) return sendError(res, 404, "model artifact not found");
-  const ext = path.extname(artifact.path || "") || ".bin";
-  const fileName = `${cleanName(artifact.model_name, "model")}_${cleanName(artifact.version_name, "version")}_${path.basename(artifact.path || `artifact${ext}`)}`;
-  const meta = artifact.metadata_json || {};
-  const localPath = meta.localPath && fs.existsSync(meta.localPath) ? meta.localPath : store.localFallbackPath(artifact.path);
-  if (fs.existsSync(localPath)) {
-    res.writeHead(200, {
-      "content-type": "application/octet-stream",
-      "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
-    });
-    fs.createReadStream(localPath).pipe(res);
-    return;
-  }
-  const stream = await store.getStream(artifact.path);
-  res.writeHead(200, {
-    "content-type": "application/octet-stream",
-    "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
-  });
-  stream.pipe(res);
 }
 
 async function presentTrainingJobs(jobs) {
@@ -3693,7 +3481,7 @@ async function runUltralyticsInferenceJob(job) {
   env = await resolveRuntimePythonEnv(env);
   if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);  const capabilities = env.capabilities_json || {};
   if (!capabilities.ultralytics_detect) throw new Error("所选运行环境未检测到 ultralytics，不能执行 YOLO 推理");
-  const weightPath = await findWeightArtifact(job.model_version_id);
+  const weightPath = await modelService.findWeightArtifact(job.model_version_id);
   if (!weightPath) throw new Error("YOLO 推理缺少可用模型权重文件");
 
   const input = params.input || {};
@@ -3825,7 +3613,7 @@ async function runDinoInferenceJob(job) {
   const resolved = await resolveTrainingAlgorithmSource(params);
   if (!resolved) throw new Error(`DINO algorithm asset is not registered: ${params.algorithmAssetId || "(missing id)"}`);
   const { algorithm, cacheRoot } = resolved;
-  const weightPath = await findWeightArtifact(job.model_version_id);
+  const weightPath = await modelService.findWeightArtifact(job.model_version_id);
   if (!weightPath) throw new Error(`DINO inference has no real weight artifact for model version ${job.model_version_id || "(missing)"}`);
 
   const input = params.input || {};
@@ -4428,7 +4216,7 @@ async function ensureTrainingModelRevision(job) {
     );
     return existing;
   }
-  const modelId = job.model_id || (await createMlModel({
+  const modelId = job.model_id || (await modelService.createMlModel({
     name: `${job.name}_model`,
     taskType: "detect",
     framework: "ultralytics",
@@ -4437,7 +4225,7 @@ async function ensureTrainingModelRevision(job) {
   const project = (await query("SELECT name FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
   const params = job.params_json || {};
   const prefix = `detect_${project?.name || "dataset"}_yolo_ep${Number(params.epochs || job.total_epochs || 0) || "x"}_${dateCode()}`;
-  const versionName = await nextModelVersionName(prefix, modelId);
+  const versionName = await modelService.nextModelVersionName(prefix, modelId);
   const version = (await query(
     `INSERT INTO model_revisions (model_id, version_name, training_job_id, dataset_project_id, dataset_snapshot_id, stage, params_json, artifact_root)
      VALUES ($1,$2,$3,$4,$5,'training',$6,$7) RETURNING *`,
@@ -4571,7 +4359,7 @@ async function runTrainingJob(job, workerId) {
     version = await ensureTrainingModelRevision(job);
     job = (await query("SELECT * FROM runtime_training_jobs WHERE id=$1", [job.id])).rows[0];
     if (["pretrained", "training"].includes(job.params_json?.initializationStrategy) && job.params_json?.initialModelVersionId && !job.params_json?.resolvedWeights) {
-      const weightPath = await findWeightArtifact(job.params_json.initialModelVersionId);
+      const weightPath = await modelService.findWeightArtifact(job.params_json.initialModelVersionId);
       if (!weightPath) throw new Error("选择的初始化模型版本没有可用权重 artifact");
       job.params_json = { ...(job.params_json || {}), resolvedWeights: weightPath };
       await query("UPDATE runtime_training_jobs SET params_json=$1 WHERE id=$2", [JSON.stringify(job.params_json), job.id]);
@@ -5050,10 +4838,10 @@ async function route(req, res) {
     return sendJson(res, { ok: true });
   }
   if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req), actor));
-  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await listMlModels(actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await createMlModel(await readBody(req), actor) });
-  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
-  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await createModelVersion(await readBody(req), actor) });
+  if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await modelService.listMlModels(actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await modelService.createMlModel(await readBody(req), actor) });
+  if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await modelService.listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
+  if (method === "POST" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { version: await modelService.createModelVersion(await readBody(req), actor) });
   if (method === "POST" && parsed.pathname === "/api/ml/model-assets/clear") { accessControl.requireAdmin(actor); return sendJson(res, await clearModelAssets(await readBody(req))); }
   if (method === "GET" && parsed.pathname === "/api/ml/algorithm-assets") return sendJson(res, { algorithms: await listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/ml/asset-links") return sendJson(res, { links: await listRuntimeAssetLinks(actor, requestedScope(parsed, actor)) });
@@ -5064,9 +4852,9 @@ async function route(req, res) {
   const pythonEnvDownload = parsed.pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
   if (method === "GET" && pythonEnvDownload) { await resourceAccess.assertIndependentAccess("runtime_envs", pythonEnvDownload[1], actor, "read"); return streamPythonEnvArtifact(res, pythonEnvDownload[1]); }
   const renameModelVersionMatch = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
-  if (method === "PATCH" && renameModelVersionMatch) { await resourceAccess.assertIndependentAccess("model_revisions", renameModelVersionMatch[1], actor, "write"); return sendJson(res, { version: await renameModelVersion(renameModelVersionMatch[1], await readBody(req)) }); }
+  if (method === "PATCH" && renameModelVersionMatch) { await resourceAccess.assertIndependentAccess("model_revisions", renameModelVersionMatch[1], actor, "write"); return sendJson(res, { version: await modelService.renameModelVersion(renameModelVersionMatch[1], await readBody(req)) }); }
   const modelVersionDownload = parsed.pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
-  if (method === "GET" && modelVersionDownload) { await resourceAccess.assertIndependentAccess("model_revisions", modelVersionDownload[1], actor, "read"); return streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id); }
+  if (method === "GET" && modelVersionDownload) { await resourceAccess.assertIndependentAccess("model_revisions", modelVersionDownload[1], actor, "read"); return modelService.streamModelArtifact(res, modelVersionDownload[1], parsed.query.artifactId || parsed.query.artifact_id); }
   if (method === "GET" && parsed.pathname === "/api/ml/dataset-snapshots") return sendJson(res, { snapshots: await listDatasetSnapshots(actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { jobs: await listTrainingJobs(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/training-jobs") return sendJson(res, { job: await createTrainingJob(await readBody(req), actor) });
@@ -5201,6 +4989,20 @@ async function main() {
   runtimeQueueService = createRuntimeQueueService({ query, transaction, accessControl });
   resourceAccess = createResourceAccess({ query, transaction, httpError, accessControl });
   await resourceAccess.initializeSchema();
+  modelService = createModelService({
+    query,
+    resourceAccess,
+    fs,
+    path,
+    storageRoot,
+    store,
+    cleanName,
+    dateCode,
+    hashFile,
+    modelWeightManifestKey,
+    writeObjectToFile,
+    sendError,
+  });
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });
   collaborationService = createCollaborationService({
     query,
