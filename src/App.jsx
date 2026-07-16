@@ -96,6 +96,8 @@ import { useTrainingController } from "./features/training/useTrainingController
 import { DatasetWorkspace } from "./features/datasets/DatasetWorkspace.jsx";
 import { useBaselineController } from "./features/datasets/useBaselineController.js";
 import { useDatasetImportController } from "./features/datasets/useDatasetImportController.js";
+import { useDatasetWorkspaceController } from "./features/datasets/useDatasetWorkspaceController.js";
+import { useProjectCatalogController } from "./features/datasets/useProjectCatalogController.js";
 import { useMlPlatformController } from "./features/platform/useMlPlatformController.js";
 import {
   bestAssetLink,
@@ -156,51 +158,107 @@ const [collaborationViewer, setCollaborationViewer] = useState(null);
 
 const { closeSettings, openSettings, showSettings } = useSettingsOverlayController();
 
-const [projects, setProjects] = useState([]);
-
-const [trashProjects, setTrashProjects] = useState([]);
-
-const [activeProject, setActiveProject] = useState(null);
-
-const [summary, setSummary] = useState(null);
-
-const [items, setItems] = useState([]);
-
-const [imports, setImports] = useState([]);
-
-const [trashImports, setTrashImports] = useState([]);
-
-const [latestImport, setLatestImport] = useState(null);
-
-const [jobs, setJobs] = useState([]);
-
-const [selected, setSelected] = useState(null);
-
-const [filters, setFilters] = useState({ q: "", scenes: [], views: [], modalities: [], labels: [], importBatchIds: [] });
-
-const [page, setPage] = useState(1);
-
-const pageSize = 48;
-
 const [error, setError] = useState(null);
 
 const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", browseAllDrives: false, hostDialogUrl: "", nativeDialogMode: "server" });
 
-const [exportFormat, setExportFormat] = useState("labelme");
+const datasetWorkspaceRef = useRef(null);
 
-const [editingProjectId, setEditingProjectId] = useState(null);
+const {
+  activeBreadcrumbs,
+  activeChildProjects,
+  activeProject,
+  breadcrumbs,
+  cancelRenameProject,
+  commitRenameProject,
+  createProject,
+  currentFolder,
+  deleteProject,
+  deleteProjectPermanently,
+  editingProjectId,
+  editingProjectName,
+  emptyProjectTrash,
+  goHome,
+  goUpFolder,
+  homeExpandedIds,
+  homeStats,
+  openDatasetView,
+  openHomeFolder,
+  openProject,
+  projectById,
+  projectLastImportAt,
+  projects,
+  refreshHome,
+  restoreAllProjects,
+  restoreProject,
+  setActiveProject,
+  setEditingProjectName,
+  setHomeExpandedIds,
+  startRenameProject,
+  trashProjects,
+  visibleProjects,
+  workspaceRoot,
+} = useProjectCatalogController({
+  fetch,
+  prompt: (...args) => window.prompt(...args),
+  confirm: (...args) => window.confirm(...args),
+  withScope,
+  datasetScope,
+  view,
+  currentFolderId,
+  setCurrentFolderId,
+  setView,
+  setError,
+  consumeRestoredActiveProjectId,
+  resetWorkspace: () => datasetWorkspaceRef.current?.resetWorkspace(),
+});
 
-const [editingProjectName, setEditingProjectName] = useState("");
+const {
+  cancelLatestImport,
+  checkedIds,
+  deleteCheckedImages,
+  deleteImport,
+  emptyImportTrash,
+  exportFormat,
+  exportProject,
+  filters,
+  imports,
+  items,
+  jobs,
+  lastCheckedId,
+  latestImport,
+  loadWorkspace,
+  openWorkspaceTrash,
+  page,
+  pageSize,
+  resetWorkspace,
+  restoreImport,
+  selected,
+  setCheckedIds,
+  setExportFormat,
+  setFilters,
+  setImports,
+  setItems,
+  setJobs,
+  setLastCheckedId,
+  setLatestImport,
+  setPage,
+  setSelected,
+  setSummary,
+  setTrashImports,
+  setViewerIndex,
+  summary,
+  trashImports,
+  viewerIndex,
+} = useDatasetWorkspaceController({
+  activeProject,
+  currentUser,
+  consumeRestoredSelected,
+  setError,
+  fetch,
+});
 
-const [viewerIndex, setViewerIndex] = useState(null);
-
-const [checkedIds, setCheckedIds] = useState([]);
-
-const [lastCheckedId, setLastCheckedId] = useState(null);
-
-const [homeExpandedIds, setHomeExpandedIds] = useState(() => new Set());
-
-const importRefreshKeyRef = useRef("");
+datasetWorkspaceRef.current = { resetWorkspace };
 
 useEffect(() => {
   if (!currentUser) {
@@ -227,55 +285,6 @@ useEffect(() => {
   window.localStorage.setItem("det-dashboard-asset-scope", assetScope);
   window.localStorage.setItem("det-dashboard-home-section", homeSection);
 }, [datasetScope, assetScope, homeSection]);
-
-useEffect(() => {
-
-if (!activeProject) return;
-
-loadWorkspace(activeProject.id);
-
-}, [activeProject, page, filters]);
-
-useEffect(() => {
-
-if (!currentUser) return;
-
-const timer = window.setInterval(() => {
-
-fetch("/api/jobs").then((r) => r.json()).then((d) => setJobs(d.jobs || [])).catch(() => {});
-
-if (activeProject) {
-
-loadImports(activeProject.id);
-
-loadSummary(activeProject.id);
-
-} else {
-
-setLatestImport(null);
-
-}
-}, 1500);
-
-return () => window.clearInterval(timer);
-
-}, [activeProject, currentUser?.id]);
-
-useEffect(() => {
-
-if (!activeProject) return;
-
-const terminalImport = imports.find((row) => ["done", "failed", "cancelled"].includes(row.status));
-
-const refreshKey = terminalImport ? `${activeProject.id}:${terminalImport.id}:${terminalImport.status}:${terminalImport.finished_at || ""}` : "";
-
-if (!refreshKey || importRefreshKeyRef.current === refreshKey) return;
-
-importRefreshKeyRef.current = refreshKey;
-
-loadWorkspace(activeProject.id);
-
-}, [activeProject, imports]);
 
 const {
   algorithmAssets,
@@ -352,116 +361,6 @@ useEffect(() => {
   persistUiState({ activeProject, selected, trainingForm, inferenceForm });
 }, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
-const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-
-const projectLastImportAt = useMemo(() => {
-
-const childrenByParent = new Map();
-
-for (const project of projects) {
-
-const key = project.parent_id || "root";
-
-if (!childrenByParent.has(key)) childrenByParent.set(key, []);
-
-childrenByParent.get(key).push(project);
-
-}
-
-const memo = new Map();
-
-const newest = (project) => {
-
-if (!project) return "";
-
-if (memo.has(project.id)) return memo.get(project.id);
-
-let best = project.last_import_at || "";
-
-for (const child of childrenByParent.get(project.id) || []) {
-
-const childTime = newest(child);
-
-if (childTime && (!best || new Date(childTime).getTime() > new Date(best).getTime())) best = childTime;
-
-}
-
-memo.set(project.id, best);
-
-return best;
-
-};
-
-for (const project of projects) newest(project);
-
-return memo;
-
-}, [projects]);
-
-const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
-
-const visibleProjects = useMemo(
-
-() => projects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
-
-[projects, currentFolderId],
-
-);
-
-const breadcrumbs = useMemo(() => {
-
-const rows = [];
-
-let cursor = currentFolder;
-
-const seen = new Set();
-
-while (cursor && !seen.has(cursor.id) && rows.length < 3) {
-
-rows.unshift(cursor);
-
-seen.add(cursor.id);
-
-cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
-
-}
-
-return rows;
-
-}, [currentFolder, projectById]);
-
-const activeChildProjects = useMemo(
-
-() => activeProject ? projects.filter((project) => (project.parent_id || null) === activeProject.id) : [],
-
-[projects, activeProject],
-
-);
-
-const activeBreadcrumbs = useMemo(() => {
-
-const rows = [];
-
-let cursor = activeProject;
-
-const seen = new Set();
-
-while (cursor && !seen.has(cursor.id) && rows.length < 4) {
-
-rows.unshift(cursor);
-
-seen.add(cursor.id);
-
-cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
-
-}
-
-return rows;
-
-}, [activeProject, projectById]);
-
-const workspaceRoot = activeBreadcrumbs[0] || activeProject;
-
 const datasetImportController = useDatasetImportController({
   activeProject,
   currentFolder,
@@ -479,57 +378,6 @@ const baselineController = useBaselineController({
 
 const hasCurrentImages = Boolean((summary?.direct_image_count || 0) > 0 || items.length);
 
-const homeStats = useMemo(() => ({
-
-title: currentFolder?.name || "全部项目",
-
-projects: currentFolder ? 1 : projects.filter((project) => !project.parent_id).length,
-
-folders: currentFolder ? Number(currentFolder.child_count || 0) : projects.length,
-
-images: currentFolder
-
-? Number(currentFolder.image_count || 0)
-
-: projects.reduce((sum, project) => sum + Number(project.parent_id ? 0 : project.image_count || 0), 0),
-
-videos: currentFolder
-
-? Number(currentFolder.video_count || 0)
-
-: projects.reduce((sum, project) => sum + Number(project.parent_id ? 0 : project.video_count || 0), 0),
-
-annotations: currentFolder
-
-? Number(currentFolder.annotation_count || 0)
-
-: projects.reduce((sum, project) => sum + Number(project.parent_id ? 0 : project.annotation_count || 0), 0),
-
-trash: trashProjects.length,
-
-}), [currentFolder, projects, trashProjects]);
-
-function refreshHome() {
-
-fetch(withScope("/api/projects", datasetScope)).then((r) => r.json()).then((d) => {
-
-const rows = d.projects || [];
-
-setProjects(rows);
-
-setActiveProject((current) => {
-  const projectId = consumeRestoredActiveProjectId(current?.id);
-  return projectId ? rows.find((project) => project.id === projectId) || null : null;
-});
-
-setCurrentFolderId((current) => current && rows.some((project) => project.id === current) ? current : null);
-
-}).catch(() => {});
-
-fetch("/api/projects/trash").then((r) => r.json()).then((d) => setTrashProjects(d.projects || [])).catch(() => {});
-
-}
-
 function openPlatform(nextView) {
 
 setView(nextView);
@@ -537,20 +385,6 @@ setView(nextView);
 setError(null);
 
 loadMlPlatform();
-
-}
-
-function openDatasetView() {
-
-setError(null);
-
-setActiveProject(null);
-
-setCurrentFolderId(null);
-
-setView("home");
-
-refreshHome();
 
 }
 
@@ -581,441 +415,6 @@ loadMlPlatform();
 .catch((err) => setError(err.message || "调整队列优先级失"));
 
 }
-function loadWorkspace(projectId) {
-
-const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), q: filters.q || "" });
-
-for (const key of ["scenes", "views", "modalities", "labels", "importBatchIds"]) {
-
-if (filters[key]?.length) params.set(key, filters[key].join(","));
-
-}
-
-fetch(`/api/projects/${projectId}/images?${params}`).then((r) => r.json()).then((d) => {
-
-setItems(d.items || []);
-
-const restoredSelected = consumeRestoredSelected(d.items);
-
-if (restoredSelected) {
-  setSelected(restoredSelected);
-  return;
-}
-
-if (!selected && d.items?.[0]) setSelected(d.items[0]);
-
-if (selected && !d.items?.some((item) => item.id === selected.id)) setSelected(d.items?.[0] || null);
-
-setCheckedIds((ids) => ids.filter((id) => d.items?.some((item) => item.id === id)));
-
-}).catch(() => {});
-
-loadSummary(projectId);
-
-loadImports(projectId);
-
-}
-
-function loadSummary(projectId) {
-
-fetch(`/api/projects/${projectId}/summary`).then((r) => r.json()).then((d) => setSummary(d.summary || null)).catch(() => {});
-
-}
-
-function loadImports(projectId) {
-
-fetch(`/api/projects/${projectId}/imports`).then((r) => r.json()).then((d) => {
-
-const rows = d.imports || [];
-
-setImports(rows);
-
-const running = rows.find((row) => ["scanning", "running", "cancel_requested"].includes(row.status));
-
-setLatestImport(running || null);
-
-}).catch(() => {});
-
-fetch(`/api/projects/${projectId}/imports?trash=1`).then((r) => r.json()).then((d) => setTrashImports(d.imports || [])).catch(() => {});
-
-}
-
-function createProject() {
-
-const isWorkspace = view === "workspace" && activeProject;
-
-const depth = isWorkspace ? activeBreadcrumbs.length : breadcrumbs.length;
-
-if (depth >= 3) {
-
-setError("项目本身计为第 1 级，最多只能创建到第 3 级文件夹");
-
-return;
-
-}
-
-const name = window.prompt(isWorkspace ? "请输入新建文件夹名称" : "请输入项目名称或路径（最多 3 级，例如：任务A/批次1/样本集）", isWorkspace ? "新建文件" : "新建项目");
-
-if (!name) return;
-
-if (/[\\/]/.test(name)) {
-
-setError("请一次只创建一个项目或文件夹，名称不能包含路径分隔");
-
-return;
-
-}
-
-fetch("/api/projects", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ name, parentId: isWorkspace ? activeProject.id : currentFolderId }),
-
-})
-
-.then((r) => r.json().then((data) => {
-
-if (!r.ok) throw new Error(data.error || "新建项目失败");
-
-return data;
-
-}))
-
-.then((data) => {
-
-if (!isWorkspace && data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
-
-refreshHome();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function deleteProject(projectId) {
-
-if (!window.confirm("确定删除该项目或文件夹吗？其下级文件夹会一并进入回收站；可在回收站恢复，清空回收站后将永久删除")) return;
-
-fetch(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => refreshHome());
-
-}
-
-function startRenameProject(project) {
-
-setEditingProjectId(project.id);
-
-setEditingProjectName(project.name || "");
-
-}
-
-function cancelRenameProject() {
-
-setEditingProjectId(null);
-
-setEditingProjectName("");
-
-}
-
-function commitRenameProject(project) {
-
-const name = editingProjectName.trim();
-
-if (!project || editingProjectId !== project.id) return;
-
-if (!name || name === project.name) {
-
-cancelRenameProject();
-
-return;
-
-}
-
-fetch(`/api/projects/${project.id}`, {
-
-method: "PATCH",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ name }),
-
-})
-
-.then((r) => r.json().then((data) => {
-
-if (!r.ok) throw new Error(data.error || "重命名失");
-
-return data;
-
-}))
-
-.then((data) => {
-
-cancelRenameProject();
-
-refreshHome();
-
-if (activeProject?.id === project.id && data.project) setActiveProject(data.project);
-
-})
-
-.catch((err) => {
-
-setError(err.message);
-
-cancelRenameProject();
-
-});
-
-}
-
-function restoreProject(projectId) {
-
-fetch(`/api/projects/${projectId}/restore`, { method: "POST" }).then(() => refreshHome());
-
-}
-
-function restoreAllProjects() {
-
-if (!trashProjects.length) return;
-
-if (!window.confirm(`确定恢复回收站中的 ${trashProjects.length} 个项目吗？`)) return;
-
-Promise.all(trashProjects.map((project) => fetch(`/api/projects/${project.id}/restore`, { method: "POST" })))
-
-.then(() => refreshHome())
-
-.catch((err) => setError("恢复全部项目失败：" + err.message));
-
-}
-
-
-function deleteProjectPermanently(projectId) {
-
-if (!window.confirm("确定永久删除该项目及其子文件夹吗？该操作不可恢复")) return;
-
-fetch(`/api/projects/${projectId}/permanent`, { method: "DELETE" })
-
-.then((response) => response.json().catch(() => ({})).then((data) => {
-
-if (!response.ok) throw new Error(data.error || "永久删除项目失败");
-
-refreshHome();
-
-}))
-
-.catch((err) => setError(err.message || "永久删除项目失败"));
-
-}
-function emptyProjectTrash() {
-
-if (!trashProjects.length) return;
-
-if (!window.confirm(`确定清空项目回收站吗？将永久删除 ${trashProjects.length} 个项目及其不再被引用的数据。`)) return;
-
-fetch("/api/projects/trash/empty", { method: "DELETE" })
-
-.then(() => refreshHome())
-
-.catch((err) => setError("清空项目回收站失败：" + err.message));
-
-}
-
-function openProject(project) {
-
-setActiveProject(project);
-
-setCurrentFolderId(project.id);
-
-setView("workspace");
-
-setPage(1);
-
-setSelected(null);
-
-setItems([]);
-
-setSummary(null);
-
-setCheckedIds([]);
-
-setError(null);
-
-}
-
-function goUpFolder() {
-
-if (!activeProject?.parent_id) {
-
-goHome();
-
-return;
-
-}
-
-const parent = projectById.get(activeProject.parent_id);
-
-if (parent) openProject(parent);
-
-else goHome();
-
-}
-
-function openHomeFolder(project) {
-
-const hasChildren = Number(project?.child_count || 0) > 0;
-
-const hasAssets = Number(project?.image_count || 0) > 0 || Number(project?.video_count || 0) > 0;
-
-if (!hasChildren && hasAssets) {
-
-openProject(project);
-
-return;
-
-}
-
-setCurrentFolderId(project.id);
-
-}
-
-function cancelLatestImport() {
-
-if (!latestImport?.id) return;
-
-if (!window.confirm("确定取消当前导入任务吗？已经导入的文件会保留在本次导入记录中，可稍后删除本次导入")) return;
-
-fetch(`/api/imports/${latestImport.id}/cancel`, { method: "POST" })
-
-.then((r) => r.json())
-
-.then(() => setLatestImport({ ...latestImport, status: "cancel_requested", message: "正在取消导入" }))
-
-.catch((err) => setError("取消导入失败: " + err.message));
-
-}
-
-function deleteImport(importId) {
-
-if (!window.confirm("删除本次导入后会进入导入回收站，是否继续")) return;
-
-fetch(`/api/imports/${importId}`, { method: "DELETE" }).then(() => activeProject && loadWorkspace(activeProject.id));
-
-}
-
-function restoreImport(importId) {
-
-fetch(`/api/imports/${importId}/restore`, { method: "POST" }).then(() => activeProject && loadWorkspace(activeProject.id));
-
-}
-
-function emptyImportTrash() {
-
-if (!activeProject || !trashImports.length) return;
-
-if (!window.confirm(`确定清空导入回收站吗？将永久删除 ${trashImports.length} 条导入记录及其不再被引用的数据。`)) return;
-
-fetch(`/api/projects/${activeProject.id}/imports/trash/empty`, { method: "DELETE" })
-
-.then(() => loadWorkspace(activeProject.id))
-
-.catch((err) => setError("清空导入回收站失败：" + err.message));
-
-}
-
-function exportProject() {
-
-if (!activeProject) return;
-
-setError(null);
-
-fetch(`/api/projects/${activeProject.id}/export`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ format: exportFormat }),
-
-})
-
-.then((r) => r.json().then((data) => {
-
-if (!r.ok) throw new Error(data.error || "导出失败");
-
-return data;
-
-}))
-
-.catch((err) => setError("导出失败: " + err.message));
-
-}
-
-function openWorkspaceTrash() {
-
-const records = document.querySelector(".records-panel");
-
-if (records) {
-
-records.scrollIntoView({ behavior: "smooth", block: "start" });
-
-return;
-
-}
-
-setError("当前目录暂无导入回收站；项目回收站可在首页管理");
-
-}
-
-function deleteCheckedImages() {
-
-if (!activeProject || !checkedIds.length) return;
-
-if (!window.confirm(`确定删除选中的 ${checkedIds.length} 张图片吗？删除后不会物理删除对象存储中的原图，只会从当前项目预览中移除。`)) return;
-
-fetch(`/api/projects/${activeProject.id}/images/delete`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ ids: checkedIds }),
-
-})
-
-.then((r) => r.json())
-
-.then((d) => {
-
-setCheckedIds([]);
-
-setError(`已删除 ${d.deleted || 0} 张图片`);
-
-loadWorkspace(activeProject.id);
-
-})
-
-.catch((err) => setError("删除图片失败: " + err.message));
-
-}
-
-const goHome = () => {
-
-setView("home");
-
-setActiveProject(null);
-
-setCurrentFolderId(null);
-
-setError(null);
-
-refreshHome();
-
-};
-
 const datasetViewModel = {
 
 projects,
