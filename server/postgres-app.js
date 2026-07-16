@@ -40,6 +40,7 @@ const { createDatasetContentService } = require("./dataset/content-service");
 const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
 const { createTrashService } = require("./dataset/trash-service");
+const { createDatasetRoutes } = require("./routes/dataset-routes");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
@@ -106,6 +107,7 @@ let projectService;
 let datasetContentService;
 let baselineService;
 let importService;
+let datasetRoutes;
 let runtimeJobService;
 let trainingCatalogService;
 let runtimeQueueService;
@@ -174,14 +176,6 @@ function requestedScope(parsed, actor) {
 
 function scopedSql(table, alias, actor, scope, params = []) {
   return resourceAccess.scopeSql({ table, alias, actor, scope, params });
-}
-
-async function projectForImage(imageId) {
-  return (await query("SELECT project_id FROM project_images WHERE id=$1 AND deleted_at IS NULL", [imageId])).rows[0]?.project_id || null;
-}
-
-async function projectForImport(importId) {
-  return (await query("SELECT project_id FROM import_batches WHERE id=$1", [importId])).rows[0]?.project_id || null;
 }
 
 function readBody(req) {
@@ -457,26 +451,7 @@ async function route(req, res) {
       storageRoot,
     });
   }
-  if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await projectService.listProjects(false, actor, requestedScope(parsed, actor)) });
-  if (method === "GET" && parsed.pathname === "/api/projects/trash") return sendJson(res, { projects: await projectService.listProjects(true, actor, requestedScope(parsed, actor)) });
-  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") { accessControl.requireAdmin(actor); return sendJson(res, await trashService.emptyProjectTrash()); }
-  if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await projectService.createProject(await readBody(req), actor) });
-  const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
-  if (method === "PATCH" && deleteProject) { await resourceAccess.assertProjectWrite(actor, deleteProject[1]); return sendJson(res, { project: await projectService.renameProject(deleteProject[1], await readBody(req)) }); }
-  if (method === "DELETE" && deleteProject) {
-    await resourceAccess.assertProjectDelete(actor, deleteProject[1]);
-    await trashService.softDeleteProjectTree(deleteProject[1]);
-    return sendJson(res, { ok: true });
-  }
-  const permanentDeleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/permanent$/);
-  if (method === "DELETE" && permanentDeleteProject) { await resourceAccess.assertProjectDelete(actor, permanentDeleteProject[1]); return sendJson(res, await trashService.deleteProjectPermanently(permanentDeleteProject[1])); }
-  const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
-  if (method === "POST" && restoreProject) {
-    await resourceAccess.assertProjectWrite(actor, restoreProject[1]);
-    await trashService.restoreProjectTree(restoreProject[1]);
-    return sendJson(res, { ok: true });
-  }
-  if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importService.importPath(await readBody(req), actor));
+  if (await datasetRoutes.handle(req, res, parsed, actor)) return;
   if (method === "GET" && parsed.pathname === "/api/ml/models") return sendJson(res, { models: await modelService.listMlModels(actor, requestedScope(parsed, actor)) });
   if (method === "POST" && parsed.pathname === "/api/ml/models") return sendJson(res, { model: await modelService.createMlModel(await readBody(req), actor) });
   if (method === "GET" && parsed.pathname === "/api/ml/model-versions") return sendJson(res, { versions: await modelService.listModelVersions(parsed.query.modelId || parsed.query.model_id, actor, requestedScope(parsed, actor)) });
@@ -531,74 +506,11 @@ async function route(req, res) {
   if (method === "GET" && inferenceEvaluationMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceEvaluationMatch[1]); return sendJson(res, { evaluation: await getInferenceEvaluation(inferenceEvaluationMatch[1]) }); }
   const inferenceResultsMatch = parsed.pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/results$/);
   if (method === "GET" && inferenceResultsMatch) { await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]); return sendJson(res, { results: await listInferenceResults(inferenceResultsMatch[1]) }); }
-  if (method === "POST" && parsed.pathname === "/api/baselines/preview") { accessControl.requireAdmin(actor); return sendJson(res, await baselineService.createBaselinePreview(await readBody(req))); }
-  const baselineConflicts = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/conflicts$/);
-  if (method === "GET" && baselineConflicts) { accessControl.requireAdmin(actor); return sendJson(res, { conflicts: await baselineService.listBaselineConflicts(baselineConflicts[1]) }); }
-  if (method === "POST" && baselineConflicts) { accessControl.requireAdmin(actor); return sendJson(res, await baselineService.resolveBaselineConflicts(baselineConflicts[1], await readBody(req))); }
-  const applyBaseline = parsed.pathname.match(/^\/api\/baselines\/([^/]+)\/apply$/);
-  if (method === "POST" && applyBaseline) { accessControl.requireAdmin(actor); return sendJson(res, await baselineService.applyBaselineRun(applyBaseline[1], await readBody(req), actor)); }
-  const imports = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports$/);
-  if (method === "GET" && imports) { await resourceAccess.assertProjectRead(actor, imports[1]); return sendJson(res, { imports: await importService.listImports(imports[1], parsed.query.trash === "1") }); }
-  const emptyImportsTrash = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports\/trash\/empty$/);
-  if (method === "DELETE" && emptyImportsTrash) { await resourceAccess.assertProjectWrite(actor, emptyImportsTrash[1]); return sendJson(res, await trashService.emptyImportTrash(emptyImportsTrash[1])); }
-  const deleteImport = parsed.pathname.match(/^\/api\/imports\/([^/]+)$/);
-  if (method === "DELETE" && deleteImport) {
-    await resourceAccess.assertProjectWrite(actor, await projectForImport(deleteImport[1]));
-    await trashService.softDeleteImport(deleteImport[1]);
-    return sendJson(res, { ok: true });
-  }
-  const cancelImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/cancel$/);
-  if (method === "POST" && cancelImportMatch) {
-    await resourceAccess.assertProjectWrite(actor, await projectForImport(cancelImportMatch[1]));
-    await importService.cancelImport(cancelImportMatch[1]);
-    return sendJson(res, { ok: true });
-  }
-  const restoreImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/restore$/);
-  if (method === "POST" && restoreImportMatch) {
-    await resourceAccess.assertProjectWrite(actor, await projectForImport(restoreImportMatch[1]));
-    await trashService.restoreImport(restoreImportMatch[1]);
-    return sendJson(res, { ok: true });
-  }
-  const summary = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/summary$/);
-  if (method === "GET" && summary) { await resourceAccess.assertProjectRead(actor, summary[1]); return sendJson(res, { summary: await projectService.projectSummary(summary[1]) }); }
-  const imageList = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images$/);
-  if (method === "GET" && imageList) { await resourceAccess.assertProjectRead(actor, imageList[1]); return sendJson(res, await datasetContentService.listProjectImages(imageList[1], parsed.query)); }
-  const deleteImagesMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/images\/delete$/);
-  if (method === "POST" && deleteImagesMatch) {
-    await resourceAccess.assertProjectWrite(actor, deleteImagesMatch[1]);
-    return sendJson(res, await importService.softDeleteProjectImages(deleteImagesMatch[1], (await readBody(req)).ids));
-  }
-  const exportMatch = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/export$/);
-  if (method === "POST" && exportMatch) { await resourceAccess.assertProjectRead(actor, exportMatch[1]); return sendJson(res, await datasetContentService.exportProject(exportMatch[1], await readBody(req), actor)); }
-  const thumb = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/thumb$/);
-  if (method === "GET" && thumb) { await resourceAccess.assertProjectRead(actor, await projectForImage(thumb[1])); return datasetContentService.streamProjectImage(res, thumb[1], true); }
-  const full = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/full$/);
-  if (method === "GET" && full) { await resourceAccess.assertProjectRead(actor, await projectForImage(full[1])); return datasetContentService.streamProjectImage(res, full[1], false); }
-  const saveAnnotationsMatch = parsed.pathname.match(/^\/api\/project-images\/([^/]+)\/annotations\/save$/);
-  if (method === "POST" && saveAnnotationsMatch) { await resourceAccess.assertProjectWrite(actor, await projectForImage(saveAnnotationsMatch[1])); return sendJson(res, await datasetContentService.saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req), actor)); }
   if (method === "GET" && parsed.pathname === "/api/jobs") {
     const scoped = scopedSql("jobs", "j", actor, requestedScope(parsed, actor));
     const rows = await query(`SELECT j.* FROM jobs j WHERE ${scoped.sql} ORDER BY created_at DESC LIMIT 50`, scoped.params);
     return sendJson(res, { jobs: rows.rows });
   }
-  if (method === "GET" && parsed.pathname === "/api/imports/latest") {
-    const projectId = parsed.query.projectId || parsed.query.project_id;
-    if (!projectId) throw httpError(400, "projectId is required");
-    await resourceAccess.assertProjectRead(actor, projectId);
-    const params = [];
-    const where = ["deleted_at IS NULL"];
-    if (projectId) {
-      params.push(projectId);
-      where.push(`project_id=$${params.length}`);
-    }
-    const rows = await query(
-      `SELECT *, CASE WHEN total_files > 0 THEN round((processed_files::numeric / total_files::numeric) * 100)::int ELSE 0 END AS progress
-       FROM import_batches WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 1`,
-      params,
-    );
-    return sendJson(res, { importBatch: rows.rows[0] || null });
-  }
-
   if (staticHandler.handle(req, res, parsed)) return;
   sendError(res, 404, "not found");
 }
@@ -776,6 +688,20 @@ async function main() {
     cocoDocument,
     yoloDocuments,
     sendError,
+  });
+  datasetRoutes = createDatasetRoutes({
+    query,
+    readBody,
+    sendJson,
+    httpError,
+    requestedScope,
+    accessControl,
+    resourceAccess,
+    projectService,
+    trashService,
+    importService,
+    datasetContentService,
+    baselineService,
   });
   collaborationService = createCollaborationService({
     query,
