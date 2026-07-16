@@ -158,6 +158,7 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
        LEFT JOIN import_times it ON it.root_id = p.id
        WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
          AND p.id IN (SELECT id FROM scoped_projects)
+         AND ${trash ? "(p.parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM projects parent WHERE parent.id=p.parent_id AND parent.deleted_at IS NOT NULL))" : "TRUE"}
          AND NOT (p.parent_id IS NULL AND p.name='历史项目')
        ORDER BY p.created_at DESC`,
       scoped.params,

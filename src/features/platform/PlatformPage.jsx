@@ -232,7 +232,7 @@ export function PlatformPage({
             algorithms={algorithmAssets.length ? algorithmAssets : trainingTemplates}
             environments={pythonEnvs}
             onDetail={setActiveEvaluationTask}
-            onDelete={hideEvaluationTask}
+            onDelete={deleteInferenceJob}
             parseMaybeJson={parseMaybeJson}
             predictionItems={predictionItems}
             predictionBoxStyle={predictionBoxStyle}

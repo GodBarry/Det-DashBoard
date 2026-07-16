@@ -26,6 +26,7 @@ import {
 } from "../../shared/presentation.js";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 export function InferenceWorkspace({
 
 projects,
@@ -786,7 +787,7 @@ return (
           {(previewItems.length ? previewItems : Array.from({ length: 8 }, (_, index) => ({ id: `empty-${index}`, display_name: "等待结果" }))).map((item, index) => (
             <div className={`result-thumb thumb-${index}`} key={item.id || item.display_name || index}>
               <div className="result-thumb-media">
-                {item.thumb_url && <img src={item.thumb_url} alt={item.display_name || "推理结果"} loading="lazy" />}
+                {item.thumb_url && <AuthenticatedImage src={item.thumb_url} alt={item.display_name || "推理结果"} loading="lazy" />}
                 {predictionItems(item.predictions_json).map((prediction, predictionIndex) => {
                   const boxStyle = predictionBoxStyle(prediction, item);
                   if (!boxStyle) return null;

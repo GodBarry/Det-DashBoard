@@ -15,6 +15,7 @@ import {
   Search,
   SlidersHorizontal,
   Tags,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -30,13 +31,15 @@ import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { evaluationBarPalette, evaluationErrorBoxes } from "./evaluationPresentation.js";
 
-export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
+export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, onDelete, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
 
 const [searchText, setSearchText] = useState("");
 
 const [statusFilter, setStatusFilter] = useState("all");
 
 const [previewRows, setPreviewRows] = useState([]);
+
+const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
 
 const [evaluation, setEvaluation] = useState(null);
 
@@ -70,11 +73,21 @@ const selectedTask = tasks.find((task) => task.id === selectedTaskId) || filtere
 
 const selectedJob = selectedTask?.sourceJob || {};
 
+const selectedTasks = selectedTaskIds.size
+  ? tasks.filter((task) => selectedTaskIds.has(task.id))
+  : (selectedTask ? [selectedTask] : []);
+
+const selectedJobs = selectedTasks.map((task) => task.sourceJob).filter((job) => job?.id);
+
+const selectedJobKey = selectedJobs.map((job) => job.id).sort().join(",");
+
+const taskIdsKey = tasks.map((task) => task.id).sort().join(",");
+
 const storedMetrics = parseMaybeJson(selectedJob.metrics_json);
 
 useEffect(() => {
 
-if (!selectedJob.id) {
+if (!selectedJobs.length) {
 
 setPreviewRows([]);
 
@@ -86,19 +99,46 @@ return;
 
 let ignore = false;
 
-Promise.all([
-
-fetch("/api/ml/inference-jobs/" + selectedJob.id + "/results").then((response) => response.json()),
-
-fetch("/api/ml/inference-jobs/" + selectedJob.id + "/evaluation").then((response) => response.json()),
-
-]).then(([resultsData, evaluationData]) => {
+Promise.all(selectedJobs.map((job) => Promise.all([
+  fetch("/api/ml/inference-jobs/" + job.id + "/results").then((response) => response.json()),
+  fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
+]))).then((payloads) => {
 
 if (ignore) return;
 
-setPreviewRows(resultsData.results || []);
-
-setEvaluation(evaluationData.evaluation || null);
+const results = payloads.flatMap(([resultsData], jobIndex) => (resultsData.results || []).map((row) => ({ ...row, source_job_id: selectedJobs[jobIndex].id })));
+const evaluations = payloads.map(([, evaluationData]) => evaluationData.evaluation).filter(Boolean);
+const first = evaluations[0] || null;
+setPreviewRows(results);
+if (evaluations.length <= 1) {
+  setEvaluation(first);
+  return;
+}
+const summaries = evaluations.map((item) => item.summary || {});
+const sum = (key) => summaries.reduce((total, item) => total + Number(item[key] || 0), 0);
+const weighted = (key) => {
+  const pairs = summaries.map((item) => [Number(item[key]), Number(item.groundTruth || item.images || 1)]).filter(([value]) => Number.isFinite(value));
+  const weight = pairs.reduce((total, pair) => total + pair[1], 0);
+  return weight ? pairs.reduce((total, pair) => total + pair[0] * pair[1], 0) / weight : 0;
+};
+const tp = sum("tp");
+const fp = sum("fp");
+const fn = sum("fn");
+const precision = tp + fp ? tp / (tp + fp) : weighted("precision");
+const recall = tp + fn ? tp / (tp + fn) : weighted("recall");
+setEvaluation({
+  ...first,
+  evaluated: evaluations.some((item) => item.evaluated),
+  summary: {
+    ...(first?.summary || {}),
+    images: sum("images"), predictions: sum("predictions"), groundTruth: sum("groundTruth"),
+    tp, fp, fn, precision, recall, f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
+    map50: weighted("map50"), map: weighted("map"), avgIou: weighted("avgIou"),
+    inferenceImages: sum("inferenceImages"), skippedUnlabeledImages: sum("skippedUnlabeledImages"),
+  },
+  errors: evaluations.flatMap((item) => item.errors || []),
+  combinedJobCount: evaluations.length,
+});
 
 }).catch(() => {
 
@@ -112,7 +152,19 @@ setEvaluation(null);
 
 return () => { ignore = true; };
 
-}, [selectedJob.id]);
+}, [selectedJobKey]);
+
+useEffect(() => {
+  setSelectedTaskIds((current) => new Set(Array.from(current).filter((id) => tasks.some((task) => task.id === id))));
+}, [taskIdsKey]);
+
+const toggleTaskSelection = (taskId) => {
+  setSelectedTaskIds((current) => {
+    const next = new Set(current);
+    if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+    return next;
+  });
+};
 
 const metrics = { ...storedMetrics, ...(evaluation?.summary || {}), avg_iou: evaluation?.summary?.avgIou ?? storedMetrics.avg_iou };
 
@@ -211,6 +263,8 @@ return (
 
 <div className="evaluation-run-list">
 
+{selectedTaskIds.size > 0 && <div className="evaluation-selection-summary">已选择 {selectedTaskIds.size} 条记录，正在汇总展示</div>}
+
 {filteredTasks.map((task) => {
 
 const job = task.sourceJob || {};
@@ -223,9 +277,11 @@ const rowMetrics = parseMaybeJson(job.metrics_json);
 
 return (
 
-<button className={"evaluation-run-row " + (active ? "active" : "")} key={task.id} onClick={() => setSelectedTaskId(task.id)}>
+<div className={"evaluation-run-row " + (active ? "active " : "") + (selectedTaskIds.has(task.id) ? "selected" : "")} key={task.id} onClick={() => setSelectedTaskId(task.id)} role="button" tabIndex={0}>
 
-<span className="evaluation-run-check">{active ? <CheckCircle2 size={14} /> : <span />}</span>
+<button className="evaluation-run-check" type="button" title="选择记录进行汇总展示" onClick={(event) => { event.stopPropagation(); setSelectedTaskId(task.id); toggleTaskSelection(task.id); }}>{selectedTaskIds.has(task.id) ? <CheckCircle2 size={14} /> : <span />}</button>
+
+<button className="evaluation-run-delete" type="button" title="删除推理记录" onClick={(event) => { event.stopPropagation(); onDelete?.(job.id); }}><Trash2 size={13} /></button>
 
 <span className="evaluation-run-content">
 
@@ -239,7 +295,7 @@ return (
 
 <i className={done ? "done" : "failed"}>{done ? "已完" : runStatusLabel(job.status)}</i>
 
-</button>
+</div>
 
 );
 
