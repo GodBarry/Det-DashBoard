@@ -81,6 +81,7 @@ X,
 import { AuthDialog as AuthDialogView } from "./features/auth/AuthDialog.jsx";
 import { submitAuth, useAuthSessionController } from "./features/auth/useAuthSessionController.js";
 import { AssetManagementWorkspace } from "./features/assets/AssetManagementWorkspace.jsx";
+import { useAssetMutationController } from "./features/assets/useAssetMutationController.js";
 import { MainNav } from "./components/layout/MainNav.jsx";
 import { EvaluationDetailPage } from "./features/evaluation/EvaluationDetailPage.jsx";
 import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
@@ -184,8 +185,6 @@ const [lastCheckedId, setLastCheckedId] = useState(null);
 
 const [homeExpandedIds, setHomeExpandedIds] = useState(() => new Set());
 
-const [modelForm, setModelForm] = useState({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
-
 const [trainingForm, setTrainingForm] = useState(() => ({
 name: "",
 datasetProjectId: "",
@@ -279,10 +278,6 @@ fakeReferenceMode: false,
 
 }));
 
-const [versionForm, setVersionForm] = useState({ modelId: "", versionName: "", sourcePath: "", stage: "pretrained" });
-
-const [envForm, setEnvForm] = useState({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
-
 const [trainingLogs, setTrainingLogs] = useState([]);
 
 const importRefreshKeyRef = useRef("");
@@ -375,6 +370,29 @@ const {
   trainingJobs,
   trainingTemplates,
 } = useMlPlatformController({ assetScope, currentUser, refreshHome, view });
+
+const {
+  createModel,
+  createModelVersion,
+  createPythonEnv,
+  envForm,
+  modelForm,
+  renameModelVersion,
+  setEnvForm,
+  setModelForm,
+  setVersionForm,
+  versionForm,
+} = useAssetMutationController({
+  loadMlPlatform,
+  setError,
+  messages: {
+    createModel: "创建模型簇失",
+    createModelVersion: "登记模型版本失败",
+    createPythonEnv: "登记环境失败",
+    renameModelVersion: "重命名失",
+  },
+  promptForModelVersionName: (version) => window.prompt("请输入新的模型版本名", version.version_name),
+});
 
 useEffect(() => {
   persistUiState({ activeProject, selected, trainingForm, inferenceForm });
@@ -602,34 +620,6 @@ refreshHome();
 
 }
 
-function createModel() {
-
-fetch("/api/ml/models", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify(modelForm),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "创建模型簇失");
-
-setModelForm({ name: "", taskType: "detect", framework: "ultralytics", description: "" });
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
 function submitTrainingJob() {
 
 fetch("/api/ml/training-jobs", {
@@ -788,90 +778,6 @@ fetch(`/api/ml/training-jobs/${jobId}`, { method: "DELETE" })
 if (status >= 400) throw new Error(data.error || "删除训练任务失败");
 
 if (activeTrainingJobId === jobId) setActiveTrainingJobId(null);
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function createModelVersion() {
-
-fetch("/api/ml/model-versions", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify(versionForm),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "登记模型版本失败");
-
-setVersionForm({ modelId: versionForm.modelId, versionName: "", sourcePath: "", stage: "pretrained" });
-
-loadMlPlatform();
-
-})
-
-.catch((err) => setError(err.message));
-
-}
-
-function createPythonEnv() {
-
-const payload = envForm.sourceType === "server_managed" || envForm.sourceType === "server_python" ? { ...envForm, sourceType: "server_managed", preferCondaPack: false } : envForm;
-
-fetch("/api/ml/python-envs", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify(payload),
-
-}).then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "登记环境失败");
-
-setEnvForm({ name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" });
-
-loadMlPlatform();
-
-}).catch((err) => setError(err.message));
-
-}
-
-function renameModelVersion(version) {
-
-const next = window.prompt("请输入新的模型版本名", version.version_name);
-
-if (!next || next === version.version_name) return;
-
-fetch(`/api/ml/model-versions/${version.id}`, {
-
-method: "PATCH",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ versionName: next }),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "重命名失");
 
 loadMlPlatform();
 
