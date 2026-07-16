@@ -140,10 +140,17 @@ test("streamProjectImage preserves full and cached-thumbnail stream contracts", 
   await service.streamProjectImage(fullRes, "image-1", false);
   await service.streamProjectImage(thumbRes, "image-1", true);
 
-  assert.deepEqual(fullRes.head, { statusCode: 200, headers: { "content-type": "application/octet-stream" } });
+  assert.deepEqual(fullRes.head, {
+    statusCode: 200,
+    headers: { "content-type": "application/octet-stream", "cache-control": "private, max-age=3600" },
+  });
   assert.deepEqual(thumbRes.head, {
     statusCode: 200,
-    headers: { "content-type": "image/webp", "cache-control": "public, max-age=604800" },
+    headers: {
+      "content-type": "image/webp",
+      "cache-control": "private, max-age=604800, immutable",
+      "x-image-variant": "thumb-420",
+    },
   });
   assert.deepEqual(keys, [
     ["stream", "images/original.jpg"],

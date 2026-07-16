@@ -168,13 +168,19 @@ function createDatasetRoutes(deps) {
     const thumbnailMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/thumb$/);
     if (method === "GET" && thumbnailMatch) {
       await resourceAccess.assertProjectRead(actor, await projectForImage(thumbnailMatch[1]));
-      await datasetContentService.streamProjectImage(res, thumbnailMatch[1], true);
+      await datasetContentService.streamProjectImage(res, thumbnailMatch[1], "thumb");
+      return true;
+    }
+    const previewImageMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/preview$/);
+    if (method === "GET" && previewImageMatch) {
+      await resourceAccess.assertProjectRead(actor, await projectForImage(previewImageMatch[1]));
+      await datasetContentService.streamProjectImage(res, previewImageMatch[1], "preview", { size: parsed.query.size });
       return true;
     }
     const fullImageMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/full$/);
     if (method === "GET" && fullImageMatch) {
       await resourceAccess.assertProjectRead(actor, await projectForImage(fullImageMatch[1]));
-      await datasetContentService.streamProjectImage(res, fullImageMatch[1], false);
+      await datasetContentService.streamProjectImage(res, fullImageMatch[1], "full");
       return true;
     }
     const saveAnnotationsMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/annotations\/save$/);

@@ -55,6 +55,14 @@ test("buildWorkspaceSearchParams preserves filters and omits empty lists", async
   assert.equal(params.has("modalities"), false);
 });
 
+test("dataset pagination derives and clamps real total pages", async () => {
+  const { datasetTotalPages, clampDatasetPage } = await coreModulePromise;
+  assert.equal(datasetTotalPages(6501, 48), 136);
+  assert.equal(datasetTotalPages(0, 48), 1);
+  assert.equal(clampDatasetPage(200, 6501, 48), 136);
+  assert.equal(clampDatasetPage("3", 6501, 48), 3);
+});
+
 test("findRunningImport keeps current status priority and null fallback", async () => {
   const { findRunningImport } = await coreModulePromise;
   const rows = [

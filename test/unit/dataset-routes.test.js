@@ -106,7 +106,24 @@ test("thumbnail streaming resolves the owning project before access and output",
   assert.deepEqual(queryCalls[0][1], ["image-7"]);
   assert.deepEqual(calls, [
     ["projectRead", actor, "project-2"],
-    ["streamImage", "image-7", true],
+    ["streamImage", "image-7", "thumb"],
+  ]);
+});
+
+test("screen preview preserves image access and requested variant size", async () => {
+  const { routes, calls } = createHarness({
+    query: async () => ({ rows: [{ project_id: "project-2" }] }),
+  });
+  const actor = { id: "user-1" };
+  await routes.handle(
+    request("GET"),
+    { id: "response" },
+    parsed("/api/project-images/image-7/preview", { size: "1920" }),
+    actor,
+  );
+  assert.deepEqual(calls, [
+    ["projectRead", actor, "project-2"],
+    ["streamImage", "image-7", "preview", { size: "1920" }],
   ]);
 });
 

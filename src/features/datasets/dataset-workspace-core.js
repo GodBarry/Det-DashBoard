@@ -22,6 +22,14 @@ export function buildWorkspaceSearchParams(page, filters) {
   return params;
 }
 
+export function datasetTotalPages(totalItems, pageSize = DATASET_WORKSPACE_PAGE_SIZE) {
+  return Math.max(1, Math.ceil(Math.max(0, Number(totalItems) || 0) / Math.max(1, Number(pageSize) || 1)));
+}
+
+export function clampDatasetPage(page, totalItems, pageSize = DATASET_WORKSPACE_PAGE_SIZE) {
+  return Math.min(datasetTotalPages(totalItems, pageSize), Math.max(1, Math.trunc(Number(page) || 1)));
+}
+
 export function findRunningImport(imports) {
   return imports.find((row) => RUNNING_IMPORT_STATUSES.includes(row.status)) || null;
 }

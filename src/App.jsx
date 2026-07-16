@@ -116,6 +116,7 @@ const {
   filters,
   imports,
   items,
+  totalItems,
   jobs,
   lastCheckedId,
   latestImport,
@@ -432,6 +433,7 @@ restoreImport,
 emptyImportTrash,
 
 items,
+totalItems,
 
 selected,
 

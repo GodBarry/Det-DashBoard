@@ -20,6 +20,7 @@ export function useDatasetWorkspaceController({
 }) {
   const [summary, setSummary] = useState(null);
   const [items, setItems] = useState([]);
+  const [totalItems, setTotalItems] = useState(0);
   const [imports, setImports] = useState([]);
   const [trashImports, setTrashImports] = useState([]);
   const [latestImport, setLatestImport] = useState(null);
@@ -72,6 +73,7 @@ export function useDatasetWorkspaceController({
 
     request(`/api/projects/${projectId}/images?${params}`).then((response) => response.json()).then((data) => {
       setItems(data.items || []);
+      setTotalItems(Number(data.total) || 0);
 
       const restoredSelected = consumeRestoredSelected(data.items);
 
@@ -94,6 +96,7 @@ export function useDatasetWorkspaceController({
     setPage(1);
     setSelected(null);
     setItems([]);
+    setTotalItems(0);
     setSummary(null);
     setCheckedIds([]);
   }
@@ -202,6 +205,7 @@ export function useDatasetWorkspaceController({
     filters,
     imports,
     items,
+    totalItems,
     jobs,
     lastCheckedId,
     latestImport,

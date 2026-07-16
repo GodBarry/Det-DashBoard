@@ -4563,6 +4563,26 @@ button:disabled:hover {
   justify-content: space-between;
 }
 
+.pager-page {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pager-page input {
+  width: 44px;
+  height: 30px;
+  padding: 0 5px;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
 .fake-reference-switch {
   min-width: 54px;
   height: 32px;

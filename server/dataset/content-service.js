@@ -18,6 +18,8 @@ function createDatasetContentService({
   yoloDocuments,
   sendError,
 }) {
+  const imageVariantTasks = new Map();
+
   async function saveImageAnnotations(projectImageId, body = {}, actor) {
     const image = (await query(
       `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, p.active_label_version_id, p.id AS project_id
@@ -184,7 +186,57 @@ function createDatasetContentService({
     return { page, pageSize, total: count.rows[0].count, items: items.map((item) => ({ ...item, annotations: byImage.get(String(item.id)) || [] })) };
   }
 
-  async function streamProjectImage(res, projectImageId, thumb) {
+  async function writeStreamToFile(stream, target) {
+    await new Promise((resolve, reject) => {
+      const write = fs.createWriteStream(target);
+      stream.pipe(write);
+      write.on("finish", resolve);
+      write.on("error", reject);
+      stream.on?.("error", reject);
+    });
+  }
+
+  function normalizedImageVariant(variant, options = {}) {
+    if (variant === true || variant === "thumb") return { name: "thumb", width: 420, height: 236, quality: 72 };
+    if (variant === "preview") {
+      const requested = Number(options.size || 1920);
+      const width = [1280, 1920, 2560].includes(requested) ? requested : 1920;
+      return { name: "preview", width, height: null, quality: 82 };
+    }
+    return { name: "full" };
+  }
+
+  async function ensureImageVariant(row, config) {
+    const cacheKey = config.name === "thumb"
+      ? `cache/thumbs/images/${row.id}.webp`
+      : `cache/previews/images/${row.id}-${config.width}.webp`;
+    if (await store.objectExists(cacheKey)) return cacheKey;
+    if (imageVariantTasks.has(cacheKey)) return imageVariantTasks.get(cacheKey);
+
+    const task = (async () => {
+      const tempDir = path.join(storageRoot, "tmp", "image-variants");
+      fs.mkdirSync(tempDir, { recursive: true });
+      const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const src = path.join(tempDir, `${row.id}-${nonce}${row.original_ext || ".jpg"}`);
+      const out = path.join(tempDir, `${row.id}-${config.name}-${config.width}-${nonce}.webp`);
+      try {
+        await writeStreamToFile(await store.getStream(row.object_key), src);
+        const resize = config.height
+          ? { width: config.width, height: config.height, fit: "inside", withoutEnlargement: true }
+          : { width: config.width, fit: "inside", withoutEnlargement: true };
+        await sharp(src).rotate().resize(resize).webp({ quality: config.quality, effort: 4 }).toFile(out);
+        await store.putFile(cacheKey, out, { "content-type": "image/webp" });
+        return cacheKey;
+      } finally {
+        fs.rmSync(src, { force: true });
+        fs.rmSync(out, { force: true });
+      }
+    })().finally(() => imageVariantTasks.delete(cacheKey));
+    imageVariantTasks.set(cacheKey, task);
+    return task;
+  }
+
+  async function streamProjectImage(res, projectImageId, variant = "full", options = {}) {
     const result = await query(
       `SELECT pi.id AS project_image_id, ia.*
        FROM project_images pi JOIN image_assets ia ON ia.id=pi.image_asset_id
@@ -193,37 +245,20 @@ function createDatasetContentService({
     );
     const row = result.rows[0];
     if (!row) return sendError(res, 404, "image not found");
-    if (!thumb) {
+    const config = normalizedImageVariant(variant, options);
+    if (config.name === "full") {
       const stream = await store.getStream(row.object_key);
-      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.writeHead(200, { "content-type": "application/octet-stream", "cache-control": "private, max-age=3600" });
       stream.pipe(res);
       return;
     }
-    const thumbKey = `cache/thumbs/images/${row.id}.webp`;
-    if (!(await store.objectExists(thumbKey))) {
-      const tempDir = path.join(storageRoot, "tmp");
-      fs.mkdirSync(tempDir, { recursive: true });
-      const src = path.join(tempDir, `${row.id}${row.original_ext || ".jpg"}`);
-      const out = path.join(tempDir, `${row.id}.webp`);
-      await new Promise(async (resolve, reject) => {
-        const stream = await store.getStream(row.object_key);
-        const write = fs.createWriteStream(src);
-        stream.pipe(write);
-        write.on("finish", resolve);
-        write.on("error", reject);
-      });
-      await sharp(src).resize({ width: 420, height: 236, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toFile(out);
-      try {
-        await store.putFile(thumbKey, out);
-      } catch (error) {
-        if (error?.code !== "XMinioStorageFull") throw error;
-        res.writeHead(200, { "content-type": "image/webp", "cache-control": "no-store" });
-        fs.createReadStream(out).pipe(res);
-        return;
-      }
-    }
-    const stream = await store.getStream(thumbKey);
-    res.writeHead(200, { "content-type": "image/webp", "cache-control": "public, max-age=604800" });
+    const cacheKey = await ensureImageVariant(row, config);
+    const stream = await store.getStream(cacheKey);
+    res.writeHead(200, {
+      "content-type": "image/webp",
+      "cache-control": "private, max-age=604800, immutable",
+      "x-image-variant": `${config.name}-${config.width}`,
+    });
     stream.pipe(res);
   }
 

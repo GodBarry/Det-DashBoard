@@ -78,6 +78,7 @@ export function DatasetWorkspace({ mode, viewModel }) {
     restoreImport,
     emptyImportTrash,
     items,
+    totalItems,
     selected,
     setSelected,
     page,
@@ -464,6 +465,8 @@ projectLastImportAt={projectLastImportAt}
 <ImageGrid
 
 items={items}
+
+totalItems={totalItems}
 
 selected={selected}
 
@@ -1002,7 +1005,25 @@ return (
 
 }
 
-function ImageGrid({ items, selected, setSelected, page, setPage, openViewer, checkedIds, setCheckedIds, lastCheckedId, setLastCheckedId, deleteCheckedImages }) {
+function ImageGrid({ items, totalItems, selected, setSelected, page, setPage, openViewer, checkedIds, setCheckedIds, lastCheckedId, setLastCheckedId, deleteCheckedImages }) {
+
+const pageSize = 48;
+
+const totalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalItems) || 0) / pageSize));
+
+const [pageDraft, setPageDraft] = React.useState(String(page));
+
+React.useEffect(() => setPageDraft(String(page)), [page]);
+
+const commitPage = () => {
+
+const next = Math.min(totalPages, Math.max(1, Math.trunc(Number(pageDraft) || page)));
+
+setPageDraft(String(next));
+
+if (next !== page) setPage(next);
+
+};
 
 const allChecked = items.length > 0 && items.every((item) => checkedIds.includes(item.id));
 
@@ -1068,7 +1089,7 @@ return (
 
 <div className="asset-grid">
 
-{items.map((item) => (
+{items.map((item, itemIndex) => (
 
 <button className={`asset-card ${selected?.id === item.id ? "active" : ""}`} key={item.id} onClick={() => setSelected(item)} onDoubleClick={() => openViewer(item)}>
 
@@ -1076,7 +1097,7 @@ return (
 
 <div className="thumb-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}` }}>
 
-<AuthenticatedImage src={`/api/project-images/${item.id}/thumb`} loading="lazy" />
+<AuthenticatedImage src={`/api/project-images/${item.id}/thumb`} loading={itemIndex < 12 ? "eager" : "lazy"} fetchPriority={itemIndex < 6 ? "high" : "auto"} />
 
 <AnnotationOverlay item={item} compact />
 
@@ -1112,23 +1133,13 @@ return (
 
 <div className="pager">
 
-<span>共 {formatCount(items.length)} 项</span>
+<span>共 {formatCount(totalPages)} 页</span>
 
 <button disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronRight className="prev-icon" size={15} /></button>
 
-<b>{page}</b>
+<label className="pager-page">第 <input aria-label="页码" inputMode="numeric" value={pageDraft} onChange={(event) => setPageDraft(event.target.value.replace(/\D/g, ""))} onBlur={commitPage} onKeyDown={(event) => { if (event.key === "Enter") commitPage(); }} /> 页</label>
 
-<span>/ {Math.max(page, page + (items.length ? 1 : 0))}</span>
-
-<button onClick={() => setPage(page + 1)}><ChevronRight size={15} /></button>
-
-<select defaultValue="48">
-
-<option value="48">48 项</option>
-
-<option value="100">100 项</option>
-
-</select>
+<button disabled={page >= totalPages} onClick={() => setPage(Math.min(totalPages, page + 1))}><ChevronRight size={15} /></button>
 
 </div>
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { colors } from "../../shared/presentation.js";
-import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 function labelColor(label = "") {
 
 let hash = 0;
@@ -86,6 +86,34 @@ const [editDrag, setEditDrag] = useState(null);
 const [defaultLabel, setDefaultLabel] = useState("");
 
 const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
+
+const [loadedItemId, setLoadedItemId] = useState(null);
+
+useEffect(() => {
+
+if (!item?.id || loadedItemId !== item.id) return undefined;
+
+let cancelled = false;
+
+const preloadNeighbors = async () => {
+
+for (const offset of [1, -1, 2, -2]) {
+
+if (cancelled) return;
+
+const neighbor = items[index + offset];
+
+if (neighbor?.id) await preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
+
+}
+
+};
+
+preloadNeighbors();
+
+return () => { cancelled = true; };
+
+}, [index, item?.id, items, loadedItemId]);
 
 useEffect(() => {
 
@@ -321,7 +349,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<AuthenticatedImage src={`/api/project-images/${item.id}/full`} draggable="false" onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
+<AuthenticatedImage src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onSourceReady={() => setLoadedItemId(item.id)} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
 
 {editMode ? (
 
