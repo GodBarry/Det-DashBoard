@@ -12034,6 +12034,169 @@ button:disabled:hover {
 }
 
 /* Structured training configuration and selectable asset exports. */
+.legacy-training-dataset-controls {
+  display: none !important;
+}
+
+.training-dataset-tree-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-dataset-tree {
+  min-width: 0;
+  border: 1px solid var(--training-border, var(--line));
+  border-radius: 6px;
+  background: var(--training-surface, var(--panel));
+  overflow: hidden;
+}
+
+.training-dataset-tree.active {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.training-dataset-tree-head {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--training-border-soft, var(--line));
+  border-radius: 0;
+  background: var(--training-control, var(--panel-soft));
+}
+
+.training-dataset-tree-head > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.training-dataset-tree-head svg { color: var(--accent); }
+.training-dataset-tree-head b { font-size: 12px; }
+.training-dataset-tree-head small { color: var(--muted); font-size: 10px; font-weight: 500; }
+.training-dataset-tree-head em { color: var(--accent); font-size: 10px; font-style: normal; white-space: nowrap; }
+
+.training-dataset-tree-body {
+  height: 112px;
+  padding: 4px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.training-dataset-node {
+  min-width: 0;
+  height: 30px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  padding-left: calc(var(--tree-depth, 0) * 15px);
+  border-radius: 4px;
+}
+
+.training-dataset-node:hover { background: var(--training-control-hover, var(--panel-soft)); }
+.training-dataset-node.selected { background: var(--accent-soft); }
+
+.training-tree-toggle {
+  width: 22px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+.training-tree-toggle:disabled { opacity: 1; }
+.training-tree-toggle > span { width: 13px; }
+
+.training-tree-select {
+  min-width: 0;
+  height: 28px;
+  display: grid;
+  grid-template-columns: 15px 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+  text-align: left;
+}
+
+.training-tree-select > span:nth-of-type(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-tree-select svg { color: var(--muted); }
+.training-tree-select em { color: var(--muted); font-size: 10px; font-style: normal; }
+
+.tree-check {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 3px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.training-dataset-node.selected .tree-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.training-tree-empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.training-filter-bar {
+  display: grid;
+  grid-template-columns: 72px repeat(4, minmax(92px, .75fr)) minmax(130px, 1fr) 48px;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.training-filter-bar > b {
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.training-filter-bar select,
+.training-filter-bar input,
+.training-filter-bar button {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--training-border, var(--line));
+  border-radius: 5px;
+  color: var(--training-text, var(--text));
+  background: var(--training-control, var(--panel));
+  font-size: 11px;
+}
+
 .dataset-split-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -12046,7 +12209,7 @@ button:disabled:hover {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 3px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--training-border, var(--line));
   border-radius: 6px;
   background: var(--panel-soft, rgba(127, 146, 166, .07));
 }
@@ -12348,28 +12511,40 @@ button:disabled:hover {
 
 .parameter-group {
   min-width: 0;
-  border: 1px solid var(--training-border, var(--line));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--training-control, var(--panel)) 86%, transparent);
+  border: 0;
+  border-top: 1px solid var(--training-border, var(--line));
+  border-radius: 0;
+  background: transparent;
 }
 
 .parameter-group summary {
   min-height: 34px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 10px;
+  justify-content: flex-start;
+  padding: 0 4px;
   cursor: pointer;
   color: var(--training-strong, var(--text));
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
-.parameter-group summary small { color: var(--training-accent, var(--accent)); font-weight: 500; }
-.parameter-group fieldset { margin: 0; padding: 8px 10px 10px; border: 0; border-top: 1px solid var(--training-border-soft, var(--line)); display: grid; grid-template-columns: repeat(4, minmax(135px, 1fr)); gap: 9px; }
+.parameter-group summary::before { content: ""; width: 4px; height: 4px; margin-right: 7px; border-radius: 50%; background: var(--accent); }
+.parameter-group summary small { margin-left: auto; color: var(--training-accent, var(--accent)); font-weight: 500; }
+.parameter-group fieldset { margin: 0; padding: 8px 4px 10px; border: 0; display: grid; grid-template-columns: repeat(4, minmax(135px, 1fr)); gap: 9px 14px; }
 .parameter-group fieldset > label { display: grid; grid-template-columns: minmax(70px, .75fr) minmax(76px, 1fr); align-items: center; gap: 7px; }
 .parameter-group fieldset input,
-.parameter-group fieldset select { min-width: 0; width: 100%; }
+.parameter-group fieldset select {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--training-text, var(--text));
+  background: var(--training-control, var(--panel));
+  font-size: 11px;
+}
 .required-mark { margin-left: 2px; color: #dc2626; }
 
 .verified-panel { display: none !important; }
@@ -12442,5 +12617,8 @@ body.resizing-table-column {
 }
 
 @media (max-width: 1500px) {
+  .training-dataset-tree-grid { grid-template-columns: 1fr; }
+  .training-dataset-tree-body { height: 88px; }
+  .training-filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .parameter-group fieldset { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
 }

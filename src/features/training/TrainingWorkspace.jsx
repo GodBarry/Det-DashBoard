@@ -89,6 +89,7 @@ export function TrainingWorkspace({
 
   const [expandedGroups, setExpandedGroups] = useState(() => new Set(["数据集项目", "算法适配器", "模型簇", "Python 环境"]));
   const [activeDatasetSplit, setActiveDatasetSplit] = useState("trainProjectId");
+  const [expandedDatasetNodes, setExpandedDatasetNodes] = useState(() => new Set());
   const toggleGroup = (title) => setExpandedGroups((current) => {
     const next = new Set(current);
     if (next.has(title)) next.delete(title); else next.add(title);
@@ -124,6 +125,30 @@ export function TrainingWorkspace({
     }
   };
   appendDatasetRows();
+
+  const visibleDatasetRows = [];
+  const appendVisibleDatasetRows = (parentId = "root", depth = 0) => {
+    for (const project of childrenByParent.get(parentId) || []) {
+      const hasChildren = (childrenByParent.get(project.id) || []).length > 0;
+      visibleDatasetRows.push({ ...project, depth, hasChildren });
+      if (hasChildren && expandedDatasetNodes.has(project.id)) appendVisibleDatasetRows(project.id, depth + 1);
+    }
+  };
+  appendVisibleDatasetRows();
+
+  const toggleDatasetSelection = (splitKey, projectId) => {
+    const currentIds = splitIds[splitKey];
+    const nextIds = currentIds.includes(projectId) ? currentIds.filter((id) => id !== projectId) : [...currentIds, projectId];
+    const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" };
+    if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || "";
+    setTrainingForm(next);
+  };
+
+  const toggleDatasetNode = (projectId) => setExpandedDatasetNodes((current) => {
+    const next = new Set(current);
+    if (next.has(projectId)) next.delete(projectId); else next.add(projectId);
+    return next;
+  });
 
   const activeJob = trainingJobs.find((job) => job.id === activeTrainingJobId) || trainingJobs[0];
 
@@ -174,6 +199,14 @@ export function TrainingWorkspace({
     datasetFilters: {
       ...(trainingForm.datasetFilters || {}),
       [activeFilterSplit]: { ...activeDatasetFilter, [key]: values },
+    },
+  });
+  const setSingleDatasetFilter = (key, value) => setDatasetFilter(key, value ? [value] : []);
+  const clearActiveDatasetFilters = () => setTrainingForm({
+    ...trainingForm,
+    datasetFilters: {
+      ...(trainingForm.datasetFilters || {}),
+      [activeFilterSplit]: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
     },
   });
   const normalizeParameterSchema = (schema) => {
@@ -324,12 +357,54 @@ export function TrainingWorkspace({
 
           <section className="reference-section dataset-split-section">
             <h2>数据与标签</h2>
-            <div className="dataset-split-grid">
+            <div className="training-dataset-tree-grid">
+              {[
+                ["trainProjectId", "训练集", "train", trainProjectIds],
+                ["valProjectId", "验证集", "val", valProjectIds],
+                ["testProjectId", "测试集", "test", testProjectIds],
+              ].map(([splitKey, label, hint, selectedIds]) => (
+                <section className={`training-dataset-tree ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey}>
+                  <button className="training-dataset-tree-head" type="button" onClick={() => setActiveDatasetSplit(splitKey)}>
+                    <span><FolderOpen size={14} /><b>{label}</b><small>{hint}</small></span>
+                    <em>已选 {selectedIds.length} 项</em>
+                  </button>
+                  <div className="training-dataset-tree-body">
+                    {visibleDatasetRows.map((project) => {
+                      const checked = selectedIds.includes(project.id);
+                      return (
+                        <div className={`training-dataset-node ${checked ? "selected" : ""}`} style={{ "--tree-depth": project.depth }} key={`${splitKey}-${project.id}`}>
+                          <button className="training-tree-toggle" type="button" disabled={!project.hasChildren} title={project.hasChildren ? "展开或折叠" : "无下级项目"} onClick={() => project.hasChildren && toggleDatasetNode(project.id)}>
+                            {project.hasChildren ? (expandedDatasetNodes.has(project.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}
+                          </button>
+                          <button className="training-tree-select" type="button" onClick={() => { setActiveDatasetSplit(splitKey); toggleDatasetSelection(splitKey, project.id); }}>
+                            <span className="tree-check" aria-hidden="true">{checked ? "✓" : ""}</span>
+                            <Folder size={14} />
+                            <span title={project.name}>{project.name}</span>
+                            <em>{formatCount(project.image_count || 0)}</em>
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {!visibleDatasetRows.length && <div className="training-tree-empty">暂无可用数据集</div>}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <div className="training-filter-bar">
+              <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
+              <select aria-label="训练数据视角筛选" value={(activeDatasetFilter.views || [])[0] || ""} onChange={(event) => setSingleDatasetFilter("views", event.target.value)}><option value="">视角：全部</option>{trainingFilterOptions.views.map((value) => <option key={value} value={value}>{metadataLabel(value, "views")}</option>)}</select>
+              <select aria-label="训练数据场景筛选" value={(activeDatasetFilter.scenes || [])[0] || ""} onChange={(event) => setSingleDatasetFilter("scenes", event.target.value)}><option value="">场景：全部</option>{trainingFilterOptions.scenes.map((value) => <option key={value} value={value}>{metadataLabel(value, "scenes")}</option>)}</select>
+              <select aria-label="训练数据模态筛选" value={(activeDatasetFilter.modalities || [])[0] || ""} onChange={(event) => setSingleDatasetFilter("modalities", event.target.value)}><option value="">模态：全部</option>{trainingFilterOptions.modalities.map((value) => <option key={value} value={value}>{metadataLabel(value, "modalities")}</option>)}</select>
+              <select aria-label="训练数据标签筛选" value={(activeDatasetFilter.labels || [])[0] || ""} onChange={(event) => setSingleDatasetFilter("labels", event.target.value)}><option value="">标签：全部</option>{trainingFilterOptions.labels.map((value) => <option key={value} value={value}>{metadataLabel(value, "labels")}</option>)}</select>
+              <input aria-label="训练数据关键词筛选" value={(activeDatasetFilter.keywords || []).join(", ")} onChange={(event) => setDatasetFilter("keywords", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} placeholder="其他标签/关键词" />
+              <button type="button" onClick={clearActiveDatasetFilters}>清空</button>
+            </div>
+            <div className="dataset-split-grid legacy-training-dataset-controls">
               {[["trainProjectId", "训练集", "train", trainProjectIds], ["valProjectId", "验证集", "val", valProjectIds], ["testProjectId", "测试集", "test", testProjectIds]].map(([key, label, hint, selectedIds]) => (
                 <label className="training-multiselect" key={key}><span>{label}<small>{hint} · 可多选</small></span><select multiple value={selectedIds} size={Math.min(5, Math.max(3, projects.length))} onFocus={() => setActiveDatasetSplit(key)} onChange={(event) => { const nextIds = Array.from(event.target.selectedOptions, (option) => option.value); const next = { ...trainingForm, [splitArrayKey[key]]: nextIds, [key]: nextIds[0] || "" }; if (key === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {selectedIds.length} 个{label}</small></label>
               ))}
             </div>
-            <div className="dataset-filter-panel">
+            <div className="dataset-filter-panel legacy-training-dataset-controls">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
               {[["views", "视角"], ["scenes", "场景"], ["modalities", "模态"], ["labels", "目标标签"]].map(([key, label]) => <label key={key}><span>{label}</span><select multiple value={activeDatasetFilter[key] || []} onChange={(event) => setDatasetFilter(key, Array.from(event.target.selectedOptions, (option) => option.value))}>{trainingFilterOptions[key].map((value) => <option key={value} value={value}>{metadataLabel(value, key)}</option>)}</select></label>)}
               <label><span>其他标签/关键词</span><input value={(activeDatasetFilter.keywords || []).join(", ")} onChange={(event) => setDatasetFilter("keywords", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} placeholder="逗号分隔" /></label>
