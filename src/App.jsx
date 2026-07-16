@@ -89,6 +89,7 @@ import { SettingsDialog as SettingsDialogView } from "./features/settings/Settin
 import { InferenceWorkspace } from "./features/inference/InferenceWorkspace.jsx";
 import { TrainingWorkspace } from "./features/training/TrainingWorkspace.jsx";
 import { DatasetWorkspace } from "./features/datasets/DatasetWorkspace.jsx";
+import { useBaselineController } from "./features/datasets/useBaselineController.js";
 import { useDatasetImportController } from "./features/datasets/useDatasetImportController.js";
 
 import { readUiState, restorableViews, updateUiState } from "./app/ui-state.js";
@@ -176,24 +177,6 @@ const pageSize = 48;
 const [error, setError] = useState(null);
 
 const [appConfig, setAppConfig] = useState({ dataRoot: "/home/barry/图片", dataRootDisplay: "/home/barry/图片", browseRootDisplay: "/", browseAllDrives: false, hostDialogUrl: "", nativeDialogMode: "server" });
-
-const [showBaselineDialog, setShowBaselineDialog] = useState(false);
-
-const [baselineName, setBaselineName] = useState("");
-
-const [baselineSources, setBaselineSources] = useState([]);
-
-const [baselineParams, setBaselineParams] = useState({ iouSame: 0.9, iouLight: 0.75 });
-
-const [baselinePreview, setBaselinePreview] = useState(null);
-
-const [baselineConflicts, setBaselineConflicts] = useState([]);
-
-const [selectedConflictIds, setSelectedConflictIds] = useState([]);
-
-const [activeConflictId, setActiveConflictId] = useState(null);
-
-const [baselineBusy, setBaselineBusy] = useState(false);
 
 const [exportFormat, setExportFormat] = useState("labelme");
 
@@ -629,6 +612,11 @@ const datasetImportController = useDatasetImportController({
   loadWorkspace,
   setLatestImport,
   appConfig,
+  setError,
+});
+
+const baselineController = useBaselineController({
+  refreshHome,
   setError,
 });
 
@@ -1422,172 +1410,6 @@ refreshHome();
 
 }
 
-function openBaselineDialog() {
-
-setBaselineName(`baseline_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`);
-
-setBaselineSources([]);
-
-setBaselinePreview(null);
-
-setBaselineConflicts([]);
-
-setSelectedConflictIds([]);
-
-setActiveConflictId(null);
-
-setError(null);
-
-setShowBaselineDialog(true);
-
-}
-
-function toggleBaselineSource(projectId) {
-
-setBaselineSources((ids) => ids.includes(projectId) ? ids.filter((id) => id !== projectId) : [...ids, projectId]);
-
-}
-
-function previewBaseline() {
-
-if (!baselineSources.length) {
-
-setError("请选择至少一个来源项");
-
-return;
-
-}
-
-setBaselineBusy(true);
-
-setError(null);
-
-fetch("/api/baselines/preview", {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ name: baselineName, sourceProjectIds: baselineSources, sourcePriority: baselineSources, ...baselineParams }),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "基准预分析失");
-
-setBaselinePreview(data);
-
-setSelectedConflictIds([]);
-
-setActiveConflictId(null);
-
-if (data.summary?.conflicts) loadBaselineConflicts(data.runId);
-
-})
-
-.catch((err) => setError(err.message))
-
-.finally(() => setBaselineBusy(false));
-
-}
-
-function loadBaselineConflicts(runId = baselinePreview?.runId) {
-
-if (!runId) return;
-
-fetch(`/api/baselines/${runId}/conflicts`)
-
-.then((r) => r.json())
-
-.then((d) => {
-
-const rows = d.conflicts || [];
-
-setBaselineConflicts(rows);
-
-setActiveConflictId((id) => id || rows[0]?.id || null);
-
-})
-
-.catch((err) => setError("读取冲突列表失败: " + err.message));
-
-}
-
-function toggleConflict(id) {
-
-setSelectedConflictIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
-
-setActiveConflictId(id);
-
-}
-
-function resolveSelectedConflicts(resolution) {
-
-const ids = selectedConflictIds.length ? selectedConflictIds : activeConflictId ? [activeConflictId] : [];
-
-if (!ids.length || !baselinePreview?.runId) return;
-
-fetch(`/api/baselines/${baselinePreview.runId}/conflicts`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ conflictIds: ids, resolution }),
-
-})
-
-.then((r) => r.json())
-
-.then(() => loadBaselineConflicts())
-
-.catch((err) => setError("保存冲突决策失败: " + err.message));
-
-}
-
-function applyBaseline() {
-
-if (!baselinePreview?.runId) return;
-
-if (!window.confirm("确定按当前预分析结果生成基准数据集项目吗")) return;
-
-setBaselineBusy(true);
-
-fetch(`/api/baselines/${baselinePreview.runId}/apply`, {
-
-method: "POST",
-
-headers: { "content-type": "application/json" },
-
-body: JSON.stringify({ name: baselineName }),
-
-})
-
-.then((r) => Promise.all([r.status, r.json()]))
-
-.then(([status, data]) => {
-
-if (status >= 400) throw new Error(data.error || "应用基准失败");
-
-setShowBaselineDialog(false);
-
-setBaselinePreview(null);
-
-refreshHome();
-
-window.alert(`基准项目已生成：${data.project?.name || baselineName}，图像：${data.imageCount}，标注：${data.annotationCount}`);
-
-})
-
-.catch((err) => setError(err.message))
-
-.finally(() => setBaselineBusy(false));
-
-}
-
 function deleteProject(projectId) {
 
 if (!window.confirm("确定删除该项目或文件夹吗？其下级文件夹会一并进入回收站；可在回收站恢复，清空回收站后将永久删除")) return;
@@ -2054,41 +1876,7 @@ setLastCheckedId,
 
 deleteCheckedImages,
 
-showBaselineDialog,
-
-setShowBaselineDialog,
-
-baselineName,
-
-setBaselineName,
-
-baselineSources,
-
-toggleBaselineSource,
-
-baselineParams,
-
-setBaselineParams,
-
-baselineBusy,
-
-previewBaseline,
-
-baselinePreview,
-
-applyBaseline,
-
-baselineConflicts,
-
-activeConflictId,
-
-setActiveConflictId,
-
-selectedConflictIds,
-
-toggleConflict,
-
-resolveSelectedConflicts,
+...baselineController,
 
 setItems,
 
