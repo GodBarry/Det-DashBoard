@@ -35,6 +35,7 @@ const { createAuthService } = require("./auth-service");
 const { createSettingsService } = require("./settings-service");
 const { createPathService } = require("./platform/path-service");
 const { createProjectService } = require("./dataset/project-service");
+const { createTrashService } = require("./dataset/trash-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
 const {
   seededRandom,
@@ -93,6 +94,7 @@ const settingsService = createSettingsService({
   exportRootDisplay,
   minio,
 });
+const trashService = createTrashService({ query, transaction, store, httpError });
 const { getAppSettings, saveAppSettings } = settingsService;
 const pathService = createPathService({
   config: runtime.config,
@@ -1318,48 +1320,6 @@ async function upsertVideoAsset(client, filePath) {
   return inserted.rows[0];
 }
 
-async function softDeleteProjectTree(projectId) {
-  await query(
-    `WITH RECURSIVE descendants AS (
-       SELECT id FROM projects WHERE id=$1
-       UNION ALL
-       SELECT p.id
-       FROM projects p
-       JOIN descendants ON p.parent_id = descendants.id
-     )
-     UPDATE projects SET deleted_at=now()
-     WHERE id IN (SELECT id FROM descendants)`,
-    [projectId],
-  );
-}
-
-async function restoreProjectTree(projectId) {
-  await query(
-    `WITH RECURSIVE descendants AS (
-       SELECT id, parent_id FROM projects WHERE id=$1
-       UNION ALL
-       SELECT p.id, p.parent_id
-       FROM projects p
-       JOIN descendants ON p.parent_id = descendants.id
-     ),
-     ancestors AS (
-       SELECT id, parent_id FROM projects WHERE id=$1
-       UNION ALL
-       SELECT p.id, p.parent_id
-       FROM projects p
-       JOIN ancestors ON ancestors.parent_id = p.id
-     ),
-     affected AS (
-       SELECT id FROM descendants
-       UNION
-       SELECT id FROM ancestors
-     )
-     UPDATE projects SET deleted_at=NULL
-     WHERE id IN (SELECT id FROM affected)`,
-    [projectId],
-  );
-}
-
 async function importPath(body, actor) {
   const projectId = body.projectId;
   if (!projectId) throw new Error("projectId is required");
@@ -1650,133 +1610,6 @@ async function listImports(projectId, trash = false) {
     [projectId],
   );
   return result.rows;
-}
-
-async function softDeleteImport(importId) {
-  await transaction(async (client) => {
-    await client.query("UPDATE import_batches SET deleted_at=now(), status='deleted' WHERE id=$1", [importId]);
-    await client.query("UPDATE project_images SET deleted_at=now() WHERE import_batch_id=$1", [importId]);
-    await client.query("UPDATE project_videos SET deleted_at=now() WHERE import_batch_id=$1", [importId]);
-    await client.query("UPDATE label_versions SET deleted_at=now(), status='archived' WHERE import_batch_id=$1", [importId]);
-  });
-}
-
-async function restoreImport(importId) {
-  await transaction(async (client) => {
-    await client.query("UPDATE import_batches SET deleted_at=NULL, status='done' WHERE id=$1", [importId]);
-    await client.query("UPDATE project_images SET deleted_at=NULL WHERE import_batch_id=$1", [importId]);
-    await client.query("UPDATE project_videos SET deleted_at=NULL WHERE import_batch_id=$1", [importId]);
-    await client.query("UPDATE label_versions SET deleted_at=NULL, status='active' WHERE import_batch_id=$1", [importId]);
-  });
-}
-
-async function cleanupUnreferencedAssets(client) {
-  const images = await client.query(
-    `DELETE FROM image_assets ia
-     WHERE NOT EXISTS (SELECT 1 FROM project_images pi WHERE pi.image_asset_id=ia.id)
-       AND NOT EXISTS (SELECT 1 FROM extracted_frames ef WHERE ef.image_asset_id=ia.id)
-     RETURNING id, object_key`,
-  );
-  const videos = await client.query(
-    `DELETE FROM video_assets va
-     WHERE NOT EXISTS (SELECT 1 FROM project_videos pv WHERE pv.video_asset_id=va.id)
-     RETURNING id, object_key`,
-  );
-  for (const row of [...images.rows, ...videos.rows]) await store.removeObject(row.object_key);
-  return { image_assets: images.rowCount, video_assets: videos.rowCount };
-}
-
-async function emptyImportTrash(projectId) {
-  return transaction(async (client) => {
-    const batches = await client.query(
-      "SELECT id FROM import_batches WHERE project_id=$1 AND deleted_at IS NOT NULL",
-      [projectId],
-    );
-    const ids = batches.rows.map((row) => row.id);
-    if (!ids.length) return { imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
-
-    await client.query(
-      `UPDATE projects
-       SET active_label_version_id = (
-         SELECT lv.id
-         FROM label_versions lv
-         WHERE lv.project_id=$1
-           AND lv.deleted_at IS NULL
-           AND (lv.import_batch_id IS NULL OR NOT (lv.import_batch_id = ANY($2::uuid[])))
-         ORDER BY lv.created_at DESC
-         LIMIT 1
-       )
-       WHERE id=$1
-         AND active_label_version_id IN (
-           SELECT id FROM label_versions WHERE import_batch_id = ANY($2::uuid[])
-         )`,
-      [projectId, ids],
-    );
-    const labelVersions = await client.query(
-      "DELETE FROM label_versions WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
-      [ids],
-    );
-    const images = await client.query(
-      "DELETE FROM project_images WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
-      [ids],
-    );
-    const videos = await client.query(
-      "DELETE FROM project_videos WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
-      [ids],
-    );
-    const imports = await client.query(
-      "DELETE FROM import_batches WHERE id = ANY($1::uuid[]) RETURNING id",
-      [ids],
-    );
-    const assets = await cleanupUnreferencedAssets(client);
-    return { imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
-  });
-}
-
-
-async function deleteProjectPermanently(projectId) {
-  return transaction(async (client) => {
-    const root = (await client.query("SELECT id FROM projects WHERE id=$1 AND deleted_at IS NOT NULL", [projectId])).rows[0];
-    if (!root) throw httpError(404, "project is not in trash");
-    const rows = await client.query(
-      `WITH RECURSIVE descendants AS (
-         SELECT id FROM projects WHERE id=$1 AND deleted_at IS NOT NULL
-         UNION ALL
-         SELECT p.id
-         FROM projects p
-         JOIN descendants d ON p.parent_id = d.id
-         WHERE p.deleted_at IS NOT NULL
-       )
-       SELECT id FROM descendants`,
-      [projectId],
-    );
-    const ids = rows.rows.map((row) => row.id);
-    if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
-    await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
-    const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const deletedProjects = await client.query("DELETE FROM projects WHERE id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const assets = await cleanupUnreferencedAssets(client);
-    return { projects: deletedProjects.rowCount, imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
-  });
-}
-async function emptyProjectTrash() {
-  return transaction(async (client) => {
-    const projects = await client.query("SELECT id FROM projects WHERE deleted_at IS NOT NULL");
-    const ids = projects.rows.map((row) => row.id);
-    if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
-
-    await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
-    const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const deletedProjects = await client.query("DELETE FROM projects WHERE id = ANY($1::uuid[]) RETURNING id", [ids]);
-    const assets = await cleanupUnreferencedAssets(client);
-    return { projects: deletedProjects.rowCount, imports: imports.rowCount, project_images: images.rowCount, project_videos: videos.rowCount, label_versions: labelVersions.rowCount, ...assets };
-  });
 }
 
 async function softDeleteProjectImages(projectId, ids = []) {
@@ -5199,21 +5032,21 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/projects") return sendJson(res, { projects: await projectService.listProjects(false, actor, requestedScope(parsed, actor)) });
   if (method === "GET" && parsed.pathname === "/api/projects/trash") return sendJson(res, { projects: await projectService.listProjects(true, actor, requestedScope(parsed, actor)) });
-  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") { accessControl.requireAdmin(actor); return sendJson(res, await emptyProjectTrash()); }
+  if (method === "DELETE" && parsed.pathname === "/api/projects/trash/empty") { accessControl.requireAdmin(actor); return sendJson(res, await trashService.emptyProjectTrash()); }
   if (method === "POST" && parsed.pathname === "/api/projects") return sendJson(res, { project: await projectService.createProject(await readBody(req), actor) });
   const deleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (method === "PATCH" && deleteProject) { await resourceAccess.assertProjectWrite(actor, deleteProject[1]); return sendJson(res, { project: await projectService.renameProject(deleteProject[1], await readBody(req)) }); }
   if (method === "DELETE" && deleteProject) {
     await resourceAccess.assertProjectDelete(actor, deleteProject[1]);
-    await softDeleteProjectTree(deleteProject[1]);
+    await trashService.softDeleteProjectTree(deleteProject[1]);
     return sendJson(res, { ok: true });
   }
   const permanentDeleteProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/permanent$/);
-  if (method === "DELETE" && permanentDeleteProject) { await resourceAccess.assertProjectDelete(actor, permanentDeleteProject[1]); return sendJson(res, await deleteProjectPermanently(permanentDeleteProject[1])); }
+  if (method === "DELETE" && permanentDeleteProject) { await resourceAccess.assertProjectDelete(actor, permanentDeleteProject[1]); return sendJson(res, await trashService.deleteProjectPermanently(permanentDeleteProject[1])); }
   const restoreProject = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/restore$/);
   if (method === "POST" && restoreProject) {
     await resourceAccess.assertProjectWrite(actor, restoreProject[1]);
-    await restoreProjectTree(restoreProject[1]);
+    await trashService.restoreProjectTree(restoreProject[1]);
     return sendJson(res, { ok: true });
   }
   if (method === "POST" && parsed.pathname === "/api/imports") return sendJson(res, await importPath(await readBody(req), actor));
@@ -5280,11 +5113,11 @@ async function route(req, res) {
   const imports = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports$/);
   if (method === "GET" && imports) { await resourceAccess.assertProjectRead(actor, imports[1]); return sendJson(res, { imports: await listImports(imports[1], parsed.query.trash === "1") }); }
   const emptyImportsTrash = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/imports\/trash\/empty$/);
-  if (method === "DELETE" && emptyImportsTrash) { await resourceAccess.assertProjectWrite(actor, emptyImportsTrash[1]); return sendJson(res, await emptyImportTrash(emptyImportsTrash[1])); }
+  if (method === "DELETE" && emptyImportsTrash) { await resourceAccess.assertProjectWrite(actor, emptyImportsTrash[1]); return sendJson(res, await trashService.emptyImportTrash(emptyImportsTrash[1])); }
   const deleteImport = parsed.pathname.match(/^\/api\/imports\/([^/]+)$/);
   if (method === "DELETE" && deleteImport) {
     await resourceAccess.assertProjectWrite(actor, await projectForImport(deleteImport[1]));
-    await softDeleteImport(deleteImport[1]);
+    await trashService.softDeleteImport(deleteImport[1]);
     return sendJson(res, { ok: true });
   }
   const cancelImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/cancel$/);
@@ -5296,7 +5129,7 @@ async function route(req, res) {
   const restoreImportMatch = parsed.pathname.match(/^\/api\/imports\/([^/]+)\/restore$/);
   if (method === "POST" && restoreImportMatch) {
     await resourceAccess.assertProjectWrite(actor, await projectForImport(restoreImportMatch[1]));
-    await restoreImport(restoreImportMatch[1]);
+    await trashService.restoreImport(restoreImportMatch[1]);
     return sendJson(res, { ok: true });
   }
   const summary = parsed.pathname.match(/^\/api\/projects\/([^/]+)\/summary$/);
