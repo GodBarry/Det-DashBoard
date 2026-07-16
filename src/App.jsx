@@ -87,6 +87,7 @@ import { EvaluationPage } from "./features/evaluation/EvaluationPage.jsx";
 import { EvaluationReportPage } from "./features/evaluation/EvaluationReportPage.jsx";
 import { useEvaluationController } from "./features/evaluation/useEvaluationController.js";
 import { SettingsDialog as SettingsDialogView } from "./features/settings/SettingsDialog.jsx";
+import { useSettingsOverlayController } from "./features/settings/useSettingsOverlayController.js";
 import { InferenceWorkspace } from "./features/inference/InferenceWorkspace.jsx";
 import { TrainingWorkspace } from "./features/training/TrainingWorkspace.jsx";
 import { DatasetWorkspace } from "./features/datasets/DatasetWorkspace.jsx";
@@ -128,7 +129,7 @@ const [projectShareResource, setProjectShareResource] = useState(null);
 const [projectPublicResource, setProjectPublicResource] = useState(null);
 const [collaborationViewer, setCollaborationViewer] = useState(null);
 
-const [showSettings, setShowSettings] = useState(false);
+const { closeSettings, openSettings, showSettings } = useSettingsOverlayController();
 
 const [projects, setProjects] = useState([]);
 
@@ -1855,13 +1856,13 @@ return (
 
 <div className={`app-shell ${theme}`}>
 
-<MainNav view={view} goHome={openDatasetView} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={signOut} onSettings={() => setShowSettings(true)} />
+<MainNav view={view} goHome={openDatasetView} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={signOut} onSettings={openSettings} />
 
 <DatasetWorkspace mode="home" viewModel={datasetViewModel} />
 
 {authMode && <AuthDialog mode={authMode} setMode={setAuthMode} required={!currentUser} onClose={() => setAuthMode(null)} onSignedIn={setCurrentUser} />}
 
-{showSettings && <SettingsDialog config={appConfig} onClose={() => setShowSettings(false)} />}
+{showSettings && <SettingsDialog config={appConfig} onClose={closeSettings} />}
 
 </div>
 
@@ -1964,7 +1965,8 @@ currentUser={currentUser}
         setCurrentUser={setCurrentUser}
         onLogout={signOut}
         showSettings={showSettings}
-        setShowSettings={setShowSettings}
+        openSettings={openSettings}
+        closeSettings={closeSettings}
         appConfig={appConfig}
         error={error}
 
@@ -1988,13 +1990,13 @@ return (
 
 <div className={`app-shell ${theme}`}>
 
-<MainNav view="home" goHome={openDatasetView} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={signOut} onSettings={() => setShowSettings(true)} />
+<MainNav view="home" goHome={openDatasetView} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={signOut} onSettings={openSettings} />
 
 <DatasetWorkspace mode="workspace" viewModel={datasetViewModel} />
 
 {authMode && <AuthDialog mode={authMode} setMode={setAuthMode} required={!currentUser} onClose={() => setAuthMode(null)} onSignedIn={setCurrentUser} />}
 
-{showSettings && <SettingsDialog config={appConfig} onClose={() => setShowSettings(false)} />}
+{showSettings && <SettingsDialog config={appConfig} onClose={closeSettings} />}
 
 </div>
 
@@ -2105,7 +2107,8 @@ setTheme,
   setCurrentUser,
   onLogout,
   showSettings,
-  setShowSettings,
+  openSettings,
+  closeSettings,
   appConfig,
 }) {
 
@@ -2152,7 +2155,7 @@ return (
 
 <div className={`app-shell ${theme}`}>
 
-<MainNav view={view} goHome={openDatasetView || (() => { setView("home"); setError(null); })} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={onLogout} onSettings={() => setShowSettings(true)} />
+<MainNav view={view} goHome={openDatasetView || (() => { setView("home"); setError(null); })} openPlatform={openPlatform} theme={theme} setTheme={setTheme} user={currentUser} onLogin={() => setAuthMode("login")} onLogout={onLogout} onSettings={openSettings} />
 
 {view !== "training" && view !== "inference" && view !== "models" && view !== "evaluation" && <header className="app-header">
 
@@ -2399,7 +2402,7 @@ envTooltip={envTooltip}
 {view === "admin" && <AdminCenter />}
 
 {authMode && <AuthDialog mode={authMode} setMode={setAuthMode} required={!currentUser} onClose={() => setAuthMode(null)} onSignedIn={setCurrentUser} />}
-        {showSettings && <SettingsDialog config={appConfig} onClose={() => setShowSettings(false)} />}
+        {showSettings && <SettingsDialog config={appConfig} onClose={closeSettings} />}
         {activeInferenceResult && (
 
 <InferenceResultDialog
