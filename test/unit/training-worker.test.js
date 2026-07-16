@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { createTrainingWorker } = require("../../server/runtime-jobs/training-worker");
+const { walk, hashFile } = require("../../server/utils");
 
 function createClock() {
   const intervals = [];
@@ -65,6 +66,8 @@ function createFixture(overrides = {}) {
       ensureAlgorithmSourceArchiveExtracted(value) { return value; },
       findFileUnder() { return ""; },
     },
+    walk,
+    hashFile,
     async writeObjectToFile() {},
     async appendTrainingLog(...args) { calls.logs.push(args); },
     spawn: overrides.spawn || (() => { throw new Error("unexpected spawn"); }),

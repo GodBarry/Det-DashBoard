@@ -6,7 +6,7 @@ const {
   yoloClassLine,
   parseMetricLine,
 } = require("../training-format");
-const { walk, hashFile, exportBaseName, cleanName } = require("../utils");
+const { exportBaseName, cleanName } = require("../utils");
 
 function createTrainingWorker({
   query,
@@ -20,6 +20,8 @@ function createTrainingWorker({
   runtimeAssetLinkService,
   runtimeQueueService,
   algorithmRuntimeSource,
+  walk,
+  hashFile,
   writeObjectToFile,
   appendTrainingLog,
   spawn,
