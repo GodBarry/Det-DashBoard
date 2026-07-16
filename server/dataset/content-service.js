@@ -81,10 +81,7 @@ function createDatasetContentService({
     });
   }
 
-  async function listProjectImages(projectId, queryParams) {
-    const page = Math.max(1, Number(queryParams.page || 1));
-    const pageSize = Math.min(200, Math.max(12, Number(queryParams.pageSize || 48)));
-    const offset = (page - 1) * pageSize;
+  function projectImageFilter(projectId, queryParams = {}) {
     const params = [projectId];
     const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
 
@@ -133,6 +130,27 @@ function createDatasetContentService({
         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id AND a.label = ANY($${params.length})
       )`);
     }
+    return { params, where, labelValues };
+  }
+
+  async function countProjectImages(projectId, queryParams) {
+    const { params, where } = projectImageFilter(projectId, queryParams);
+    const result = await query(
+      `SELECT count(*)::int AS count
+       FROM project_images pi
+       JOIN projects p ON p.id = pi.project_id
+       LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+       WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)`,
+      params,
+    );
+    return { count: Number(result.rows[0]?.count || 0) };
+  }
+
+  async function listProjectImages(projectId, queryParams) {
+    const page = Math.max(1, Number(queryParams.page || 1));
+    const pageSize = Math.min(200, Math.max(12, Number(queryParams.pageSize || 48)));
+    const offset = (page - 1) * pageSize;
+    const { params, where, labelValues } = projectImageFilter(projectId, queryParams);
     params.push(pageSize, offset);
     const rows = await query(
       `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, ia.object_key,
@@ -376,7 +394,7 @@ function createDatasetContentService({
     return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
   }
 
-  return { saveImageAnnotations, listProjectImages, streamProjectImage, exportProject };
+  return { saveImageAnnotations, countProjectImages, listProjectImages, streamProjectImage, exportProject };
 }
 
 module.exports = { createDatasetContentService };

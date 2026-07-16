@@ -130,7 +130,7 @@ test("runInferenceJob records command failure output and the injected failure ti
   }, "worker-9");
 
   const failed = fixture.calls.queries.at(-1);
-  assert.equal(failed.sql, "UPDATE runtime_inference_jobs SET status='failed', message=$1, params_json=$2, finished_at=now() WHERE id=$3");
+  assert.equal(failed.sql, "UPDATE runtime_inference_jobs SET status='failed', process_pid=NULL, message=$1, params_json=$2, finished_at=now() WHERE id=$3");
   assert.equal(failed.params[0], "python failed");
   assert.equal(failed.params[2], "job-failure");
   assert.deepEqual(JSON.parse(failed.params[1]).output, {
@@ -161,7 +161,7 @@ test("startInferenceWorker prevents reentry and stop clears timers after the act
   assert.equal(fixture.calls.timeouts[0].delay, 250);
   const firstTick = fixture.calls.intervals[0].callback();
   const overlappingTick = fixture.calls.timeouts[0].callback();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(claimCount, 1);
   assert.deepEqual(fixture.calls.claims, ["local-infer-99"]);
 

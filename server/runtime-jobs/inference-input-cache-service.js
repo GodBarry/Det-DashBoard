@@ -96,7 +96,7 @@ function createInferenceInputCacheService({
      JOIN projects p ON p.id=pi.project_id
      LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
      WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
-     ORDER BY pi.created_at, pi.id
+     ORDER BY ${limit > 0 ? "random()" : "pi.created_at, pi.id"}
      ${limit > 0 ? `LIMIT $${sqlParams.length}` : ""}`,
       sqlParams,
     )).rows;

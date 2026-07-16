@@ -11469,7 +11469,46 @@ button:disabled:hover {
 }
 
 .dataset-source-row {
-  grid-template-columns: 88px auto minmax(420px, 1fr) !important;
+  grid-template-columns: 88px 82px minmax(420px, 1fr) !important;
+}
+
+.dataset-source-kind {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inference-workspace .filter-row {
+  grid-template-columns: 88px repeat(4, minmax(88px, .72fr)) minmax(112px, .9fr) 48px minmax(132px, .9fr) 124px !important;
+  gap: 8px !important;
+}
+
+.inference-sample-count {
+  min-width: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: auto minmax(52px, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.inference-sample-count input {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.inference-match-count {
+  min-width: 0;
+  color: var(--accent);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .inference-dataset-picker {

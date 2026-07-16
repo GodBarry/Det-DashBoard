@@ -515,7 +515,11 @@ function createInferenceWorker({
     ].join("\n");
     fs.writeFileSync(runnerPath, runner, "utf8");
     await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`正在执行 YOLO 推理：${env.python_path}`, job.id]);
-    const result = await runChildProcess(env.python_path, [runnerPath], { cwd: outputRoot, env: { ...processRef.env, PYTHONIOENCODING: "utf-8" } });
+    const result = await runChildProcess(env.python_path, [runnerPath], {
+      cwd: outputRoot,
+      env: { ...processRef.env, PYTHONIOENCODING: "utf-8" },
+      onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
+    });
     const summaryLine = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "{}";
     let summary = {};
     try { summary = JSON.parse(summaryLine); } catch { summary = {}; }
@@ -550,7 +554,7 @@ function createInferenceWorker({
         },
       };
       await client.query(
-        "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+        "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
         [JSON.stringify(nextParams), JSON.stringify(metrics), `YOLO 推理完成：${rows.length} 张图片，${predictionCount} 个预测框`, job.id],
       );
     });
@@ -680,6 +684,7 @@ function createInferenceWorker({
       result = await runChildProcess(env.python_path, commandArgs, {
         cwd: sourceRoot,
         env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [sourceRoot, cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+        onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
         onOutput: handleOutput,
       });
       for (const stream of ["stdout", "stderr"]) {
@@ -707,7 +712,7 @@ function createInferenceWorker({
       );
       const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: nowIso(), metrics, command: [env.python_path, ...commandArgs], stdout: result.stdout, stderr: result.stderr, executionLog: result.combined || `${result.stdout || ""}${result.stderr || ""}` } };
       await client.query(
-        "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+        "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
         [JSON.stringify(nextParams), JSON.stringify(metrics), `DINO inference completed: ${rows.length} images, ${predictionCount} boxes`, job.id],
       );
     });
@@ -761,7 +766,7 @@ function createInferenceWorker({
         },
       };
       await query(
-        "UPDATE runtime_inference_jobs SET status='failed', message=$1, params_json=$2, finished_at=now() WHERE id=$3",
+        "UPDATE runtime_inference_jobs SET status='failed', process_pid=NULL, message=$1, params_json=$2, finished_at=now() WHERE id=$3",
         [error.message || `推理 worker ${workerId} 执行失败`, JSON.stringify(nextParams), job.id],
       ).catch(() => {});
     }

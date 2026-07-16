@@ -119,6 +119,24 @@ test("listProjectImages preserves filter SQL ordering and annotated response sha
   assert.match(calls[2].sql, /ORDER BY a\.id/);
 });
 
+test("countProjectImages uses the same filters without loading image rows", async () => {
+  const calls = [];
+  const { service } = createFixture({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [{ count: 37 }] };
+    },
+  });
+
+  const result = await service.countProjectImages("project-1", { scenes: "city", modalities: "infrared", labels: "tank" });
+
+  assert.deepEqual(result, { count: 37 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].params, ["project-1", ["city"], ["infrared"], ["tank"]]);
+  assert.match(calls[0].sql, /SELECT count\(\*\)::int AS count/);
+  assert.match(calls[0].sql, /a\.label = ANY\(\$4\)/);
+});
+
 test("streamProjectImage preserves full and cached-thumbnail stream contracts", async () => {
   const keys = [];
   const piped = [];

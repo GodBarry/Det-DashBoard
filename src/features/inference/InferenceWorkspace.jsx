@@ -151,6 +151,8 @@ const [previewRows, setPreviewRows] = useState([]);
 
 const [liveLogs, setLiveLogs] = useState([]);
 
+const [matchingImageCount, setMatchingImageCount] = useState(null);
+
 const [evaluation, setEvaluation] = useState(null);
 
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
@@ -158,6 +160,31 @@ const [activeAnalysis, setActiveAnalysis] = useState("overview");
 const [errorFilter, setErrorFilter] = useState("false_negative");
   const [sampleOffset, setSampleOffset] = useState(0);
   const [sampleViewer, setSampleViewer] = useState(null);
+
+useEffect(() => {
+  if (!inferenceForm.datasetProjectId) {
+    setMatchingImageCount(null);
+    return undefined;
+  }
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => {
+    const query = new URLSearchParams();
+    if (inferenceForm.inputViews) query.set("views", inferenceForm.inputViews);
+    if (inferenceForm.inputScenes) query.set("scenes", inferenceForm.inputScenes);
+    if (inferenceForm.inputModalities) query.set("modalities", inferenceForm.inputModalities);
+    if (inferenceForm.inputLabels) query.set("labels", inferenceForm.inputLabels);
+    if (inferenceForm.inputQuery) query.set("q", inferenceForm.inputQuery);
+    fetch(`/api/projects/${inferenceForm.datasetProjectId}/images-count?${query}`, { signal: controller.signal })
+      .then((response) => response.json())
+      .then((data) => setMatchingImageCount(Number(data.count || 0)))
+      .catch((error) => { if (error.name !== "AbortError") setMatchingImageCount(null); });
+  }, 250);
+  return () => { window.clearTimeout(timer); controller.abort(); };
+}, [inferenceForm.datasetProjectId, inferenceForm.inputViews, inferenceForm.inputScenes, inferenceForm.inputModalities, inferenceForm.inputLabels, inferenceForm.inputQuery]);
+
+const effectiveInferenceImageCount = matchingImageCount == null
+  ? null
+  : (Number(inferenceForm.inputLimit || 0) > 0 ? Math.min(matchingImageCount, Number(inferenceForm.inputLimit)) : matchingImageCount);
 
 const [expandedGroups, setExpandedGroups] = useState(() => new Set(["算法适配", "Python 环境"]));
 
@@ -615,16 +642,12 @@ return (
             <input
               value={inferenceForm.name}
               onChange={(e) => setField("name", e.target.value)}
-              placeholder="请输入推理任务名称，留空则自动生成"
+              placeholder="可留空，将按 数据集_模型_时间 自动生成"
             />
           </div>
           <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
-            <div className="segmented">
-              <button type="button" className="active"><Database size={14} />数据集</button>
-              <button type="button"><Folder size={14} />文件目录</button>
-              <button type="button">文件列表</button>
-            </div>
+            <span className="dataset-source-kind"><Database size={14} />数据集</span>
             <div className="inference-dataset-picker">
               <label className="path-select dataset-root-select">
                 <FolderOpen size={15} />
@@ -656,6 +679,8 @@ return (
             <select value={inferenceForm.inputLabels} onChange={(e) => setField("inputLabels", e.target.value)}><option value="">标签：全部</option>{inferenceFilterOptions.labels.map((value) => <option key={value} value={value}>{value}</option>)}</select>
             <input value={inferenceForm.inputQuery} onChange={(e) => setField("inputQuery", e.target.value)} placeholder="其他标签/关键词" />
             <button type="button" onClick={() => setInferenceForm({ ...inferenceForm, inputViews: "", inputScenes: "", inputModalities: "", inputLabels: "", inputQuery: "" })}>清空</button>
+            <label className="inference-sample-count" title="留空表示使用全部筛选结果"><span>随机数量</span><input type="number" min="1" step="1" value={inferenceForm.inputLimit || ""} onChange={(e) => setField("inputLimit", e.target.value)} placeholder="全部" /></label>
+            <strong className="inference-match-count">{effectiveInferenceImageCount == null ? "等待统计" : `已选 ${formatCount(effectiveInferenceImageCount)} / ${formatCount(matchingImageCount)} 张`}</strong>
           </div>
         </div>
 

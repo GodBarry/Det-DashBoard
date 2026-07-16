@@ -156,6 +156,7 @@ test("prepareInferenceInputCache preserves filters, job-copy cache, manifests, a
   assert.match(select.sql, /pi\.import_batch_id = ANY\(\$5::uuid\[\]\)/);
   assert.match(select.sql, /pi\.display_name ILIKE \$6/);
   assert.match(select.sql, /a\.label = ANY\(\$7\)/);
+  assert.match(select.sql, /ORDER BY random\(\)/);
   assert.match(select.sql, /LIMIT \$8/);
   assert.deepEqual(select.params, [
     "project-1",
@@ -189,7 +190,11 @@ test("prepareInferenceInputCache preserves filters, job-copy cache, manifests, a
   });
   assert.equal(written["source_filters.json"].cachePolicy, "job_copy");
 
-  const update = calls.queries[1];
+  const preparingUpdate = calls.queries[1];
+  assert.equal(preparingUpdate.sql, "UPDATE runtime_inference_jobs SET progress=2, params_json=$1, message=$2 WHERE id=$3");
+  assert.equal(JSON.parse(preparingUpdate.params[0]).input.imageCount, 1);
+
+  const update = calls.queries[2];
   assert.equal(update.sql, "UPDATE runtime_inference_jobs SET status='pending', progress=5, params_json=$1, message=$2 WHERE id=$3");
   assert.equal(update.params[1], "推理输入缓存已准备：1 张图片");
   assert.equal(update.params[2], "job-1");

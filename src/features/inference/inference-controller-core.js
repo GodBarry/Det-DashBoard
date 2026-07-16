@@ -86,7 +86,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
       input: {
         sourceType: "project_images",
         scope: inferenceForm.inputScope,
-        filters: inferenceForm.inputScope === "project" ? {} : {
+        filters: {
           scenes: splitCommaSeparated(inferenceForm.inputScenes),
           views: splitCommaSeparated(inferenceForm.inputViews),
           modalities: splitCommaSeparated(inferenceForm.inputModalities),
@@ -94,7 +94,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
           labels: splitCommaSeparated(inferenceForm.inputLabels),
           q: inferenceForm.inputQuery,
         },
-        limit: 0,
+        limit: Math.max(0, Number(inferenceForm.inputLimit || 0)),
         cachePolicy: "reuse_asset_cache",
       },
       output: {

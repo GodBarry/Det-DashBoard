@@ -152,6 +152,12 @@ function createDatasetRoutes(deps) {
       sendJson(res, await datasetContentService.listProjectImages(imageListMatch[1], parsed.query));
       return true;
     }
+    const imageCountMatch = pathname.match(/^\/api\/projects\/([^/]+)\/images-count$/);
+    if (method === "GET" && imageCountMatch) {
+      await resourceAccess.assertProjectRead(actor, imageCountMatch[1]);
+      sendJson(res, await datasetContentService.countProjectImages(imageCountMatch[1], parsed.query));
+      return true;
+    }
     const deleteImagesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/images\/delete$/);
     if (method === "POST" && deleteImagesMatch) {
       await resourceAccess.assertProjectWrite(actor, deleteImagesMatch[1]);

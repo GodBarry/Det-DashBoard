@@ -452,18 +452,29 @@ test("requeueInferenceJob preserves params and resets the persisted queue state"
   assert.deepEqual(result.params_json, originalParams);
 });
 
-test("deleteInferenceJob uses a returning delete and reports the deleted id", async () => {
+test("deleteInferenceJob stops its process, deletes the row, and removes its output", async () => {
   const calls = [];
+  const stopped = [];
+  const removed = [];
   const service = createService(async (sql, params) => {
     calls.push({ sql, params });
+    if (sql.startsWith("SELECT *")) {
+      return { rows: [{ id: "job-1", process_pid: 314, output_root: "/storage/runtime/inference/job-1" }] };
+    }
     return { rows: [{ id: "job-1" }] };
+  }, {
+    storageRoot: "/storage",
+    path: require("node:path").posix,
+    fs: { mkdirSync() {}, rmSync: (...args) => removed.push(args) },
+    stopProcess: (pid) => { stopped.push(pid); return true; },
   });
 
   const result = await service.deleteInferenceJob("job-1");
 
-  assert.deepEqual(calls, [{
-    sql: "DELETE FROM runtime_inference_jobs WHERE id=$1 RETURNING id",
-    params: ["job-1"],
-  }]);
-  assert.deepEqual(result, { deleted: true, id: "job-1" });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /^SELECT \*/);
+  assert.match(calls[1].sql, /^DELETE FROM runtime_inference_jobs/);
+  assert.deepEqual(stopped, [314]);
+  assert.deepEqual(removed, [["/storage/runtime/inference/job-1", { recursive: true, force: true }]]);
+  assert.deepEqual(result, { deleted: true, id: "job-1", processStopped: true, outputRemoved: true });
 });

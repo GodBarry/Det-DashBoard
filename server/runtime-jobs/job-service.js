@@ -333,9 +333,19 @@ function createRuntimeJobService({
   }
 
   async function deleteInferenceJob(jobId) {
+    const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
+    if (!job) throw new Error("Inference job does not exist");
+    const processStopped = stopProcess(job.process_pid);
     const deleted = await query("DELETE FROM runtime_inference_jobs WHERE id=$1 RETURNING id", [jobId]);
     if (!deleted.rows[0]) throw new Error("推理任务不存在");
-    return { deleted: true, id: deleted.rows[0].id };
+    let outputRemoved = false;
+    const inferenceRoot = path.resolve(storageRoot, "runtime", "inference");
+    const outputRoot = job.output_root ? path.resolve(job.output_root) : "";
+    if (outputRoot && outputRoot !== inferenceRoot && outputRoot.startsWith(`${inferenceRoot}${path.sep}`)) {
+      fs.rmSync(outputRoot, { recursive: true, force: true });
+      outputRemoved = true;
+    }
+    return { deleted: true, id: deleted.rows[0].id, processStopped, outputRemoved };
   }
 
   async function requeueInferenceJob(jobId) {
@@ -345,7 +355,7 @@ function createRuntimeJobService({
     const updated = (await query(
       `UPDATE runtime_inference_jobs
        SET status='pending', progress=0, metrics_json='{}'::jsonb, message=$1,
-           started_at=NULL, finished_at=NULL,
+           process_pid=NULL, started_at=NULL, finished_at=NULL,
            created_at=now(), priority=(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)
        WHERE id=$2 RETURNING *`,
       ["推理任务已重新排队，等待 worker 接管", jobId],

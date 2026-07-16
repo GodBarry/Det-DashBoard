@@ -158,6 +158,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       progress INT NOT NULL DEFAULT 0,
+      process_pid INT,
       output_root TEXT NOT NULL DEFAULT '',
       message TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -214,6 +215,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     )`,
     "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
     "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
     "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     `CREATE TABLE IF NOT EXISTS runtime_envs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -411,6 +413,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
+        process_pid INT,
         output_root TEXT NOT NULL DEFAULT '',
         message TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -419,6 +422,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       )`,
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
@@ -576,6 +580,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
+        process_pid INT,
         output_root TEXT NOT NULL DEFAULT '',
         message TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -584,6 +589,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       )`,
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
