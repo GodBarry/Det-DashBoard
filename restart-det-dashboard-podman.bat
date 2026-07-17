@@ -11,6 +11,7 @@ if "%DET_DASHBOARD_RUNTIME%"=="" (
 )
 set "ENV_FILE=%ROOT%\.env"
 set "PODMAN=C:\Users\14226\AppData\Local\Programs\Podman\podman.exe"
+set "SYSTEM_NPM=D:\Program Files\nodejs\npm.cmd"
 set "NPM=%RUNTIME_ROOT%\node\npm.cmd"
 set "PATH=%RUNTIME_ROOT%\node;%PATH%"
 set "POSTGRES_CONTAINER=det-dashboard-postgres"
@@ -18,7 +19,7 @@ set "MINIO_CONTAINER=det-dashboard-minio"
 set "POSTGRES_DB=det_dashboard"
 set "POSTGRES_USER=det"
 set "POSTGRES_PASSWORD=det_password"
-set "POSTGRES_PORT=55432"
+set "POSTGRES_PORT=15432"
 set "MINIO_PORT=9000"
 set "MINIO_CONSOLE_PORT=9001"
 set "MINIO_ACCESS_KEY=minioadmin"
@@ -30,14 +31,27 @@ set "VITE_PORT=5173"
 if exist "%ENV_FILE%" (
   for /f "usebackq tokens=1,* delims==" %%A in (`findstr /r /v "^[ ]*$ ^[ ]*#" "%ENV_FILE%"`) do set "%%A=%%B"
 )
+rem 55432 is commonly reserved by Windows/WSL dynamic port exclusions.
+if "%POSTGRES_PORT%"=="55432" set "POSTGRES_PORT=15432"
 
 if not exist "%PODMAN%" set "PODMAN=podman"
-if exist "%RUNTIME_ROOT%\node\npm.cmd" set "NPM=%RUNTIME_ROOT%\node\npm.cmd"
-set "PATH=%RUNTIME_ROOT%\node;%PATH%"
-if not exist "%NPM%" (
-  echo Missing runtime node: %NPM%
-  if not "%NO_PAUSE%"=="1" pause
-  exit /b 1
+if exist "%RUNTIME_ROOT%\node\npm.cmd" (
+  set "NPM=%RUNTIME_ROOT%\node\npm.cmd"
+  set "PATH=%RUNTIME_ROOT%\node;%PATH%"
+) else (
+  if exist "%SYSTEM_NPM%" (
+    set "NPM=%SYSTEM_NPM%"
+    set "PATH=D:\Program Files\nodejs;%PATH%"
+    echo Runtime Node not found. Using %SYSTEM_NPM%.
+  ) else (
+    where npm.cmd >nul 2>nul
+    if errorlevel 1 (
+      echo Missing Node.js runtime. Expected %RUNTIME_ROOT%\node\npm.cmd or %SYSTEM_NPM%.
+      if not "%NO_PAUSE%"=="1" pause
+      exit /b 1
+    )
+    set "NPM=npm.cmd"
+  )
 )
 
 if not exist "%RUNTIME_ROOT%" mkdir "%RUNTIME_ROOT%"
@@ -107,7 +121,7 @@ if errorlevel 1 (
     -e POSTGRES_USER=%POSTGRES_USER% ^
     -e POSTGRES_PASSWORD=%POSTGRES_PASSWORD% ^
     -p %POSTGRES_PORT%:5432 ^
-    -v "%POSTGRES_DATA_DIR%:/var/lib/postgresql/data:Z,U" ^
+    -v "%POSTGRES_DATA_DIR%:/var/lib/postgresql/data:Z" ^
     -v "%ROOT%\db\schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro,Z" ^
     docker.io/library/postgres:16
 ) else (
@@ -128,7 +142,7 @@ if errorlevel 1 (
     -e MINIO_ROOT_PASSWORD=%MINIO_SECRET_KEY% ^
     -p %MINIO_PORT%:9000 ^
     -p %MINIO_CONSOLE_PORT%:9001 ^
-    -v "%MINIO_DATA_DIR%:/data:Z,U" ^
+    -v "%MINIO_DATA_DIR%:/data:Z" ^
     docker.io/minio/minio:latest server /data --console-address ":9001"
 ) else (
   "%PODMAN%" start %MINIO_CONTAINER% >nul
@@ -226,8 +240,23 @@ if "%PODMAN_SSH_PORT%"=="" (
   if not "%NO_PAUSE%"=="1" pause
   exit /b 1
 )
+for /f "delims=" %%A in ('%PODMAN% inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" %POSTGRES_CONTAINER%') do set "POSTGRES_CONTAINER_IP=%%A"
+for /f "delims=" %%A in ('%PODMAN% inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" %MINIO_CONTAINER%') do set "MINIO_CONTAINER_IP=%%A"
+if "%POSTGRES_CONTAINER_IP%"=="" (
+  echo Failed to read PostgreSQL container IP.
+  if not "%NO_PAUSE%"=="1" pause
+  exit /b 1
+)
+if "%MINIO_CONTAINER_IP%"=="" (
+  echo Failed to read MinIO container IP.
+  if not "%NO_PAUSE%"=="1" pause
+  exit /b 1
+)
 echo Establish SSH tunnel: Windows %POSTGRES_PORT%/%MINIO_PORT%/%MINIO_CONSOLE_PORT% -^> Podman machine %PODMAN_SSH_PORT% ...
-start "det-dashboard-podman-tunnel" /min cmd /c ""ssh.exe" -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i "%PODMAN_SSH_KEY%" -p %PODMAN_SSH_PORT% -N -L %POSTGRES_PORT%:127.0.0.1:%POSTGRES_PORT% -L %MINIO_PORT%:127.0.0.1:%MINIO_PORT% -L %MINIO_CONSOLE_PORT%:127.0.0.1:%MINIO_CONSOLE_PORT% %PODMAN_SSH_USER%@127.0.0.1"
+echo   PostgreSQL target: %POSTGRES_CONTAINER_IP%:5432
+echo   MinIO target     : %MINIO_CONTAINER_IP%:9000/9001
+break > "%TUNNEL_LOG%"
+start "det-dashboard-podman-tunnel" /min cmd /c ""ssh.exe" -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i "%PODMAN_SSH_KEY%" -p %PODMAN_SSH_PORT% -N -L 127.0.0.1:%POSTGRES_PORT%:%POSTGRES_CONTAINER_IP%:5432 -L 127.0.0.1:%MINIO_PORT%:%MINIO_CONTAINER_IP%:9000 -L 127.0.0.1:%MINIO_CONSOLE_PORT%:%MINIO_CONTAINER_IP%:9001 %PODMAN_SSH_USER%@127.0.0.1 > "%TUNNEL_LOG%" 2>&1"
 call :sleep 2
 exit /b 0
 
