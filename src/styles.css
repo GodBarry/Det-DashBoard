@@ -12810,6 +12810,7 @@ body.resizing-table-column {
 .dataset-image-dialog .viewer-topbar { width: min(92vw,1320px); height: 48px; margin: 12px auto 0; border: 1px solid rgba(151,174,188,.25); border-radius: 7px; background: rgba(10,24,34,.96); box-shadow: 0 12px 36px rgba(0,0,0,.25); }
 .dataset-image-dialog.viewer-light .viewer-topbar { background: rgba(250,253,254,.98); color: #14242d; }
 .dataset-image-dialog.viewer-light .viewer-file-identity code,.dataset-image-dialog.viewer-light .viewer-topbar span { color: #657985; }
+.dataset-image-dialog .viewer-file-identity code { display: none; }
 .dataset-image-dialog.viewer-light .viewer-topbar button { border-color: #cedae0; background: #f5f9fb; color: #27414f; }
 .dataset-image-dialog .viewer-image-wrap { width: min(88vw,1320px,calc((100vh - 110px) * var(--image-ratio))); max-width: none; max-height: none; overflow: hidden; border: 1px solid rgba(151,174,188,.22); border-radius: 7px; box-shadow: 0 20px 60px rgba(0,0,0,.38); }
 .dataset-image-dialog .viewer-image-wrap img { object-fit: fill; }
@@ -12817,7 +12818,7 @@ body.resizing-table-column {
 .dataset-image-dialog .viewer-nav.prev { left: 18px; }
 .dataset-image-dialog .viewer-nav.next { right: 298px; }
 .viewer-inspector-panel { position: fixed; z-index: 5; top: 82px; right: 18px; bottom: 18px; width: 250px; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.2); }
-.dataset-image-dialog .viewer-stage, .inference-result-dialog .shared-image-viewport, .evaluation-sample-dialog .viewer-stage { padding-right: 320px; }
+.dataset-image-dialog .viewer-stage, .inference-result-dialog .shared-image-viewport, .evaluation-sample-dialog .viewer-stage { padding-right: 68px; }
 .viewer-inspector-panel h3 { margin: 0 0 10px; font-size: 13px; }
 .viewer-inspector-panel h3:not(:first-child) { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
 .viewer-inspector-panel > div { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb,var(--line) 70%,transparent); font-size: 11px; }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Sun, X } from "lucide-react";
 
 import { colors } from "../../shared/presentation.js";
+import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 function labelColor(label = "") {
 
@@ -400,6 +401,10 @@ pointFromEvent={pointFromEvent}
 </div>
 
 <aside className="viewer-inspector-panel">
+<div><span>{'\u6a21\u6001'}</span><b>{modalityLabel(item.modality)}</b></div>
+<div><span>{'\u573a\u666f'}</span><b>{sceneLabel(item.scene)}</b></div>
+<div><span>{'\u89c6\u89d2'}</span><b>{viewLabel(item.view)}</b></div>
+<div><span>{'\u5176\u4ed6\u6807\u7b7e'}</span><b>{item.keyword || item.keywords || "--"}</b></div>
 <h3>图片信息</h3>
 <div><span>文件</span><b>{item.display_name}</b></div>
 <div><span>尺寸</span><b>{item.image_width || "--"} × {item.image_height || "--"}</b></div>
