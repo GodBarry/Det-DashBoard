@@ -337,11 +337,11 @@ export function TrainingWorkspace({
 
         <div className="training-toolbar inference-toolbar">
 
-          <div className="platform-breadcrumb"><Folder size={16} /><b>训练</b><ChevronRight size={14} /><b>新建训练任务</b></div>
+          <div className="platform-breadcrumb"><Folder size={16} /><b>训练</b><ChevronRight size={14} /><b>新建任务</b></div>
 
           <div className="inference-commandbar">
 
-            <button onClick={submitTrainingJob}><span>+</span> 新建训练任务</button>
+            <button onClick={submitTrainingJob}><Play size={15} /> 开始训练</button>
 
             <button><Copy size={15} /> 批量训练</button>
 
@@ -356,7 +356,7 @@ export function TrainingWorkspace({
         <div className="training-builder reference-builder">
 
           <section className="reference-section dataset-split-section">
-            <h2>数据与标签</h2>
+            <h2>数据来源</h2>
             <div className="training-dataset-tree-grid">
               {[
                 ["trainProjectId", "训练集", "train", trainProjectIds],
@@ -413,14 +413,14 @@ export function TrainingWorkspace({
           </section>
 
           <section className="reference-section model-init-section">
-            <h2>算法与初始化</h2>
+            <h2>模型与算法</h2>
             <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : !version.training_job_id || version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
             <div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">选择 Python 环境</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '--'} · {selectedEnv.torch_version || '--'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div>
           </section>
 
           <section className="reference-section algorithm-params-section"><h2>训练参数{selectedAlgorithm.name ? ` · ${selectedAlgorithm.name}` : ''}</h2>{!trainingForm.templateId ? <div className="parameter-placeholder">尚未选择算法，训练参数为空。</div> : parameterGroups.length ? <div className="parameter-groups schema-parameter-groups">{parameterGroups.map((group) => { const advanced = /advanced|高级/i.test(`${group.key || ''} ${group.label || ''}`); return <details className="parameter-group" key={group.key || group.label} open={!advanced}><summary>{group.label}{advanced ? <small>展开</small> : null}</summary><fieldset>{(group.fields || []).map((field) => <label key={field.key} title={field.description || ''}><span>{field.label || field.key}{field.required ? <b className="required-mark">*</b> : null}</span>{field.type === 'boolean' ? <span className="switch-control"><input type="checkbox" checked={Boolean(algorithmFieldValue(field))} onChange={() => setAlgorithmField(field, !Boolean(algorithmFieldValue(field)))} /><i /></span> : (field.type === 'select' || field.options) ? <select value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)}>{(field.options || []).map((option) => { const value = typeof option === 'object' ? option.value : option; const label = typeof option === 'object' ? option.label : option; return <option key={String(value)} value={value}>{label}</option>; })}</select> : <input type={['number', 'integer'].includes(field.type) ? 'number' : 'text'} min={field.min} max={field.max} step={field.step || (field.type === 'integer' ? 1 : undefined)} value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)} />}</label>)}</fieldset></details>; })}</div> : <div className="parameter-placeholder">该算法未在 capabilities_json.parameterSchema 中声明训练参数。</div>}</section>
 
-          <section className="reference-section"><h2>输出与版本</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
+          <section className="reference-section"><h2>输出选项</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
 
         </div>
 

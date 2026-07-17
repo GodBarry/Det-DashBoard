@@ -114,6 +114,10 @@ function createMlRoutes(deps) {
     if (method === "PATCH" && trainingPriorityMatch) {
       await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]);
       const body = await readBody(req);
+      if (Array.isArray(body.orderedIds)) {
+        sendJson(res, { orderedIds: await runtimeQueueService.reorderRuntimeJobs("runtime_training_jobs", body.orderedIds, actor) });
+        return true;
+      }
       sendJson(res, {
         job: await runtimeQueueService.moveRuntimeJobPriority(
           "runtime_training_jobs",
@@ -181,6 +185,10 @@ function createMlRoutes(deps) {
     if (method === "PATCH" && inferencePriorityMatch) {
       await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]);
       const body = await readBody(req);
+      if (Array.isArray(body.orderedIds)) {
+        sendJson(res, { orderedIds: await runtimeQueueService.reorderRuntimeJobs("runtime_inference_jobs", body.orderedIds, actor) });
+        return true;
+      }
       sendJson(res, {
         job: await runtimeQueueService.moveRuntimeJobPriority(
           "runtime_inference_jobs",

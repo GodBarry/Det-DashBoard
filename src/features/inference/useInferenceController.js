@@ -18,6 +18,8 @@ export function useInferenceController({
   setError,
   request = requestWithFetch,
   confirmDelete = confirmWithWindow,
+  addInferenceJob,
+  refreshInferenceJobs,
 }) {
   const [inferenceForm, setInferenceForm] = useState(
     () => createDefaultInferenceForm(restoredInferenceForm),
@@ -45,8 +47,9 @@ export function useInferenceController({
       .then(([status, data]) => {
         if (status >= 400) throw new Error(data.error || "提交推理失败");
 
+        addInferenceJob?.(data.job);
         setInferenceForm({ ...inferenceForm, name: "" });
-        loadMlPlatform();
+        (refreshInferenceJobs || loadMlPlatform)();
       })
       .catch((error) => setError(error.message));
   }

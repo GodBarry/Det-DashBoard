@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  ArrowDown,
-  ArrowUp,
   Boxes,
   ChevronDown,
   ChevronRight,
@@ -12,6 +10,7 @@ import {
   Eye,
   Folder,
   FolderOpen,
+  GripVertical,
   Play,
   RefreshCw,
   RotateCcw,
@@ -140,6 +139,22 @@ const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), view
   const selectedAlgorithm = visibleInferenceAlgorithms.find((algorithm) => algorithm.id === inferenceForm.templateId);
 
 const sortedInferenceJobs = sortRuntimeJobsByTime(inferenceJobs);
+const [queueOrder, setQueueOrder] = useState(() => sortedInferenceJobs.map((job) => job.id));
+const queueOrderRef = useRef(queueOrder);
+const [draggedJobId, setDraggedJobId] = useState("");
+const [dragOverJobId, setDragOverJobId] = useState("");
+
+useEffect(() => {
+  const incomingIds = sortedInferenceJobs.map((job) => job.id);
+  setQueueOrder((current) => {
+    const incomingSet = new Set(incomingIds);
+    const retained = current.filter((id) => incomingSet.has(id));
+    const added = incomingIds.filter((id) => !retained.includes(id));
+    const next = [...added, ...retained];
+    queueOrderRef.current = next;
+    return next;
+  });
+}, [inferenceJobs]);
 
 const latestJob = sortedInferenceJobs[0];
 
@@ -492,7 +507,37 @@ onClick: () => setField("pythonEnvId", env.id),
 
 ].filter((group) => group.rows.length);
 
-const displayJobs = sortedInferenceJobs;
+const jobById = new Map(sortedInferenceJobs.map((job) => [job.id, job]));
+const displayJobs = queueOrder.map((id) => jobById.get(id)).filter(Boolean);
+const beginJobDrag = (event, jobId) => {
+  event.preventDefault();
+  setDraggedJobId(jobId);
+  setDragOverJobId(jobId);
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+};
+const moveDraggedJob = (event, explicitTargetId) => {
+  if (!draggedJobId) return;
+  event.preventDefault();
+  const targetId = explicitTargetId || document.elementFromPoint(event.clientX, event.clientY)?.closest(".inference-table-row")?.dataset.jobId;
+  if (!draggedJobId || draggedJobId === targetId) return;
+  setDragOverJobId(targetId);
+  setQueueOrder((current) => {
+    const sourceIndex = current.indexOf(draggedJobId);
+    const targetIndex = current.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return current;
+    const next = [...current];
+    next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, draggedJobId);
+    queueOrderRef.current = next;
+    return next;
+  });
+};
+const finishJobDrag = (event) => {
+  if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  if (draggedJobId) moveRuntimeQueueJob?.("inference", draggedJobId, queueOrderRef.current);
+  setDraggedJobId("");
+  setDragOverJobId("");
+};
 const [selectedInferenceJobIds, setSelectedInferenceJobIds] = useState(() => new Set());
 
 const selectedInferenceCount = selectedInferenceJobIds.size;
@@ -760,7 +805,7 @@ return (
             const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
             const progress = Math.max(0, Math.min(100, Number(job.progress ?? (done ? 100 : 0)) || 0));
             return (
-              <div className="inference-table-row" key={job.id}>
+              <div data-job-id={job.id} className={`inference-table-row${draggedJobId === job.id ? " is-dragging" : ""}${dragOverJobId === job.id ? " is-drag-over" : ""}`} key={job.id}>
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
@@ -777,10 +822,7 @@ return (
                     <button className="restart-action" type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RotateCcw size={15} strokeWidth={2.2} /></button>
                     <button className="danger-icon" type="button" title="删除任务" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
                   </span>
-                  <span className="queue-priority">
-                    <button type="button" title="优先级上移" onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("inference", job.id, "up"); }}><ArrowUp size={13} /></button>
-                    <button type="button" title="优先级下移" onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("inference", job.id, "down"); }}><ArrowDown size={13} /></button>
-                  </span>
+                  <button className="queue-drag-handle" type="button" title="按住拖动任务排序" aria-label="拖动任务排序" onPointerDown={(event) => beginJobDrag(event, job.id)} onPointerMove={moveDraggedJob} onPointerUp={finishJobDrag} onPointerCancel={finishJobDrag}><GripVertical size={15} /></button>
                 </div>
               </div>
             );

@@ -183,12 +183,14 @@ const {
   algorithmAssets,
   assetLinks,
   inferenceJobs,
+  addInferenceJob,
   loadMlPlatform,
   mlModels,
   modelVersions,
   pythonEnvs,
   trainingJobs,
   trainingTemplates,
+  refreshInferenceJobs,
 } = useMlPlatformController({ assetScope, currentUser, refreshHome, view });
 
 const {
@@ -221,8 +223,10 @@ const {
   viewInferenceResults,
 } = useInferenceController({
   algorithmAssets,
+  addInferenceJob,
   confirmDelete: (message) => window.confirm(message),
   loadMlPlatform,
+  refreshInferenceJobs,
   restoredInferenceForm,
   setError,
 });
@@ -281,7 +285,7 @@ loadMlPlatform();
 
 }
 
-function moveRuntimeQueueJob(kind, jobId, direction) {
+function moveRuntimeQueueJob(kind, jobId, directionOrOrderedIds) {
 
 const path = kind === "training" ? "training-jobs" : "inference-jobs";
 
@@ -291,7 +295,7 @@ method: "PATCH",
 
 headers: { "content-type": "application/json" },
 
-body: JSON.stringify({ direction }),
+body: JSON.stringify(Array.isArray(directionOrOrderedIds) ? { orderedIds: directionOrOrderedIds } : { direction: directionOrOrderedIds }),
 
 })
 

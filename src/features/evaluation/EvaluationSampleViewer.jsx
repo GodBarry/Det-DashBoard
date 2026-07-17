@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, Image as ImageIcon, Sun, X } from "lucide-react";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 
 export function EvaluationSampleViewer({
   rows = [],
@@ -50,9 +51,10 @@ export function EvaluationSampleViewer({
           {imageSrc && !imageFailed ? <AuthenticatedImage src={imageSrc} draggable="false" alt={row.display_name || "错误样本"} onError={() => setImageFailed(true)} /> : <div className="evaluation-sample-load-error"><ImageIcon size={34} /><b>图片加载失败</b><span>{imageId ? `图片索引：${imageId}` : "该记录没有关联图片索引"}</span></div>}
           {boxes.map((box, boxIndex) => {
             const style = getBoxStyle(box.item, row);
-            return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null;
+            return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small></i> : null;
           })}
         </div>
+        <EvaluationErrorLegend filter={filter} />
       </div>
       <button className="viewer-page-button viewer-page-next" disabled={index >= rows.length - 1} onClick={() => move(1)} title="下一"><ChevronRight size={28} /></button>
     </div>

@@ -30,6 +30,7 @@ import { EvaluationCurve } from "./EvaluationCurve.jsx";
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { evaluationBarPalette, evaluationErrorBoxes } from "./evaluationPresentation.js";
+import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 
 export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, onDelete, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
 
@@ -234,9 +235,8 @@ class_error: result.class_error + Number(row.counts?.class_error || 0),
 
 const errorRows = (evaluation?.errors || []).filter((row) => Number(row.counts?.[errorFilter] || 0) > 0);
 
-const samples = (errorRows.length ? errorRows : previewRows).slice(0, 5);
-
-const visibleSampleRows = errorRows.length ? errorRows : previewRows;
+const visibleSampleRows = evaluation?.evaluated ? errorRows : previewRows;
+const samples = visibleSampleRows.slice(0, 5);
   const sampleWindow = visibleSampleRows.slice(sampleOffset, sampleOffset + 5);
   const shiftSamples = (delta) => setSampleOffset((value) => Math.max(0, Math.min(Math.max(0, visibleSampleRows.length - 5), value + delta)));
   const errorTabs = [["false_negative", "漏检"], ["false_positive", "误检"], ["localization", "定位偏差"], ["class_error", "类别错误"]];
@@ -385,11 +385,13 @@ return (
 
 <div className="evaluation-sample-grid">
 
-<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}<span>{row.display_name || "图片结果"}</span>{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null; })}</article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
+<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}<span>{row.display_name || "图片结果"}</span>{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small></i> : null; })}</article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
 
 {!samples.length && <div className="empty-state">当前类型没有错误样本</div>}
 
 </div>
+
+<EvaluationErrorLegend filter={errorFilter} />
 
 </section>
 
