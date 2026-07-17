@@ -399,6 +399,16 @@ pointFromEvent={pointFromEvent}
 
 </div>
 
+<aside className="viewer-inspector-panel">
+<h3>图片信息</h3>
+<div><span>文件</span><b>{item.display_name}</b></div>
+<div><span>尺寸</span><b>{item.image_width || "--"} × {item.image_height || "--"}</b></div>
+<div><span>场景</span><b>{item.scene || "--"}</b></div>
+<div><span>视角</span><b>{item.view || "--"}</b></div>
+<h3>标签（{annotations.length}）</h3>
+{annotations.length ? Array.from(new Set(annotations.map((annotation) => annotation.label).filter(Boolean))).map((label) => <div className="viewer-tag-row" key={label}><i style={{ background: labelColor(label) }} />{label}</div>) : <p className="muted">暂无标签</p>}
+</aside>
+
 {editMode && selectedAnn && (
 
 <div className="edit-sidecar">

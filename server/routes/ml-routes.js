@@ -78,7 +78,7 @@ function createMlRoutes(deps) {
     const pythonEnvDownloadMatch = pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
     if (method === "GET" && pythonEnvDownloadMatch) {
       await resourceAccess.assertIndependentAccess("runtime_envs", pythonEnvDownloadMatch[1], actor, "read");
-      await pythonEnvService.streamPythonEnvArtifact(res, pythonEnvDownloadMatch[1]);
+      await pythonEnvService.streamPythonEnvArtifact(res, pythonEnvDownloadMatch[1], parsed.query.format || "tar.gz");
       return true;
     }
     const modelVersionMatch = pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
@@ -94,6 +94,7 @@ function createMlRoutes(deps) {
         res,
         modelVersionDownloadMatch[1],
         parsed.query.artifactId || parsed.query.artifact_id,
+        parsed.query.format || "original",
       );
       return true;
     }

@@ -174,13 +174,18 @@ function createPythonEnvService({
     return (await query(`SELECT e.* FROM runtime_envs e WHERE ${scoped.sql} ORDER BY os_type, arch, accelerator DESC, status='ready' DESC, created_at DESC`, scoped.params)).rows;
   }
 
-  async function streamPythonEnvArtifact(res, envId) {
+  async function streamPythonEnvArtifact(res, envId, format = "tar.gz") {
     const env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
     if (!env) return sendError(res, 404, "Python environment not found");
     if (env.source_type !== "conda_pack" || !env.artifact_key) return sendError(res, 409, "This environment has no downloadable conda-pack archive");
-    const fileName = `${cleanName(env.name, "python-env")}.tar.gz`;
+    const requested = String(format || "tar.gz").toLowerCase().replace(/^\./, "");
+    if (!["tar", "tar.gz"].includes(requested)) return sendError(res, 400, "Python 环境仅支持 tar 或 tar.gz 导出");
+    const sourceName = String(env.artifact_name || env.artifact_key).toLowerCase();
+    const sourceFormat = sourceName.endsWith(".tar.gz") ? "tar.gz" : sourceName.endsWith(".tar") ? "tar" : "tar.gz";
+    if (requested !== sourceFormat) return sendError(res, 409, `当前环境归档为 ${sourceFormat}，暂未配置 ${requested} 转换器`);
+    const fileName = `${cleanName(env.name, "python-env")}.${requested}`;
     const headers = {
-      "content-type": "application/gzip",
+      "content-type": requested === "tar" ? "application/x-tar" : "application/gzip",
       "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
       "cache-control": "no-store",
     };

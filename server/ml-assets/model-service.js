@@ -196,7 +196,7 @@ function createModelService({
     return cached;
   }
 
-  async function streamModelArtifact(res, modelVersionId, artifactId) {
+  async function streamModelArtifact(res, modelVersionId, artifactId, format = "original") {
     const params = [modelVersionId];
     let where = "ma.model_version_id=$1";
     if (artifactId) {
@@ -225,7 +225,12 @@ function createModelService({
     const artifact = rows.rows[0];
     if (!artifact) return sendError(res, 404, "model artifact not found");
     const meta = artifact.metadata_json || {};
-    const ext = path.extname(artifact.path || "") || ".bin";
+    const sourceExt = path.extname(artifact.path || "").toLowerCase() || ".bin";
+    const requestedFormat = String(format || "original").toLowerCase();
+    const requestedExt = requestedFormat === "original" ? sourceExt : (requestedFormat.startsWith(".") ? requestedFormat : `.${requestedFormat}`);
+    if (![".pt", ".pth", ".onnx", ".bin"].includes(requestedExt)) return sendError(res, 400, "unsupported model export format");
+    if (requestedExt !== sourceExt) return sendError(res, 409, `当前算法适配器未提供 ${sourceExt} 到 ${requestedExt} 的转换器，请导出原始文件`);
+    const ext = sourceExt;
     const sourceStem = path.basename(artifact.path || `artifact${ext}`, ext);
     const epochValue = Number(meta.epoch ?? meta.checkpointEpoch ?? artifact.training_current_epoch ?? 0) || 0;
     const weightRole = meta.weightRole || (/best/i.test(sourceStem) ? "best" : /last/i.test(sourceStem) ? "last" : sourceStem);

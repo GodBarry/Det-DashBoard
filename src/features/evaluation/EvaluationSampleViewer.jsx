@@ -56,7 +56,7 @@ export function EvaluationSampleViewer({
         </div>
         <EvaluationErrorLegend filter={filter} />
       </div>
-      <button className="viewer-page-button viewer-page-next" disabled={index >= rows.length - 1} onClick={() => move(1)} title="下一"><ChevronRight size={28} /></button>
+      <aside className="viewer-inspector-panel"><h3>图片信息</h3><div><span>文件</span><b>{row.display_name || "--"}</b></div><div><span>尺寸</span><b>{row.image_width || "--"} × {row.image_height || "--"}</b></div><h3>标签（{boxes.length}）</h3>{Array.from(new Set(boxes.map((box) => box.label).filter(Boolean))).map((label) => <div className="viewer-tag-row" key={label}><i />{label}</div>)}</aside><button className="viewer-page-button viewer-page-next" disabled={index >= rows.length - 1} onClick={() => move(1)} title="下一"><ChevronRight size={28} /></button>
     </div>
   );
 }

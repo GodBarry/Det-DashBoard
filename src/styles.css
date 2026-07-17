@@ -12766,11 +12766,11 @@ body.resizing-table-column {
 .workspace-keepalive { display: contents; }
 .workspace-keepalive[hidden] { display: none !important; }
 
-.tree-project-picker { position: relative; min-width: 0; width: 100%; display: grid; gap: 5px; }
-.tree-project-selection,.tree-project-empty { min-width: 0; min-height: 32px; display: grid; grid-template-columns: 16px minmax(0,1fr) 28px; align-items: center; gap: 7px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
+.tree-project-picker { position: relative; min-width: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.tree-project-selection,.tree-project-empty { min-width: 150px; max-width: 100%; flex: 1 1 220px; min-height: 32px; display: grid; grid-template-columns: 16px minmax(0,1fr) 28px; align-items: center; gap: 7px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
 .tree-project-selection > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
 .tree-project-selection > button { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; }
-.tree-project-empty { width: 100%; grid-template-columns: 16px minmax(0,1fr) 16px; color: var(--muted); text-align: left; }
+.tree-project-empty { width: auto; grid-template-columns: 16px minmax(0,1fr) 16px; color: var(--muted); text-align: left; }
 .tree-project-popover { position: absolute; z-index: 40; top: 100%; left: 0; right: 0; max-height: 280px; margin-top: 4px; padding: 5px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 14px 32px rgba(0,0,0,.18); }
 .tree-project-option { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); padding-left: calc(var(--tree-depth) * 17px); }
 .tree-project-toggle { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; }
@@ -12780,6 +12780,8 @@ body.resizing-table-column {
 .tree-project-option.selected .tree-project-name { color: var(--accent); background: color-mix(in srgb,var(--accent) 8%,transparent); }
 .resource-tree-row { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); padding-left: calc((var(--depth) + 0) * 15px); }
 .resource-tree-row.active { background: color-mix(in srgb,var(--accent) 10%,transparent); color: var(--accent); }
+.resource-tree-row.active .resource-node-select { background: color-mix(in srgb,var(--accent) 14%,transparent); color: var(--accent); }
+.resource-tree-row.active .resource-node-select > em { color: var(--accent); }
 .resource-node-toggle { width: 24px !important; min-width: 24px !important; height: 29px !important; padding: 0 !important; display: grid !important; place-items: center !important; border: 0 !important; background: transparent !important; color: inherit !important; }
 .resource-node-toggle:disabled { opacity: 1 !important; }
 .resource-node-select { min-width: 0; width: 100%; height: 29px; padding: 0 6px; display: grid; grid-template-columns: 16px minmax(0,1fr) auto auto; align-items: center; gap: 6px; border: 0; background: transparent; color: inherit; text-align: left; }
@@ -12811,6 +12813,26 @@ body.resizing-table-column {
 .dataset-image-dialog.viewer-light .viewer-topbar button { border-color: #cedae0; background: #f5f9fb; color: #27414f; }
 .dataset-image-dialog .viewer-image-wrap { width: min(88vw,1320px,calc((100vh - 110px) * var(--image-ratio))); max-width: none; max-height: none; overflow: hidden; border: 1px solid rgba(151,174,188,.22); border-radius: 7px; box-shadow: 0 20px 60px rgba(0,0,0,.38); }
 .dataset-image-dialog .viewer-image-wrap img { object-fit: fill; }
+.dataset-image-dialog .viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 4; border-radius: 6px; }
+.dataset-image-dialog .viewer-nav.prev { left: 18px; }
+.dataset-image-dialog .viewer-nav.next { right: 298px; }
+.viewer-inspector-panel { position: fixed; z-index: 5; top: 82px; right: 18px; bottom: 18px; width: 250px; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.2); }
+.dataset-image-dialog .viewer-stage, .inference-result-dialog .shared-image-viewport, .evaluation-sample-dialog .viewer-stage { padding-right: 320px; }
+.viewer-inspector-panel h3 { margin: 0 0 10px; font-size: 13px; }
+.viewer-inspector-panel h3:not(:first-child) { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.viewer-inspector-panel > div { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb,var(--line) 70%,transparent); font-size: 11px; }
+.viewer-inspector-panel span { color: var(--muted); }
+.viewer-inspector-panel b { min-width: 0; overflow-wrap: anywhere; }
+.viewer-tag-row { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 8px !important; }
+.viewer-tag-row i { width: 8px; height: 8px; border-radius: 2px; }
+.asset-export-dialog-overlay { z-index: 100; display: grid; place-items: center; }
+.asset-export-dialog { width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: 0 24px 80px rgba(0,0,0,.32); }
+.asset-export-dialog label { display: grid; gap: 7px; margin-top: 16px; font-size: 12px; font-weight: 700; }
+.asset-export-dialog select { height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--input); color: var(--text); }
+.asset-export-note { margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
+.asset-export-dialog .dialog-actions { justify-content: flex-end; margin-top: 20px; }
+@media (max-width: 1100px) { .viewer-inspector-panel { width: 210px; } .dataset-image-dialog .viewer-nav.next { right: 238px; } }
+@media (max-width: 780px) { .viewer-inspector-panel { display: none; } .dataset-image-dialog .viewer-nav.next { right: 18px; } }
 
 @media (max-width: 1500px) {
   .training-dataset-tree-grid { grid-template-columns: 1fr; }

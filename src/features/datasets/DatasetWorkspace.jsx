@@ -1365,7 +1365,7 @@ return (
 
 <section className="annotation-list">
 
-<h3>标签（{annotations.length}</h3>
+<h3>标签（{annotations.length}）</h3>
 
 <div className="annotation-table-head"><span>类别</span><span>数量</span><span>操作</span></div>
 

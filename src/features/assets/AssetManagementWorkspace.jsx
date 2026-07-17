@@ -88,16 +88,32 @@ envTooltip,
 
 const algorithms = algorithmAssets.length ? algorithmAssets : trainingTemplates;
 const [selectedExportAsset, setSelectedExportAsset] = useState(null);
+const [exportDialog, setExportDialog] = useState(null);
 const [shareResource, setShareResource] = useState(null);
 const [publicResource, setPublicResource] = useState(null);
-const exportSelectedAsset = () => {
-  if (!selectedExportAsset?.href) return;
-  const anchor = document.createElement("a");
-  anchor.href = selectedExportAsset.href;
-  anchor.download = "";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+const openAssetExport = (asset) => {
+  if (!asset?.href) return;
+  setSelectedExportAsset(asset);
+  setExportDialog({ ...asset, format: asset.type === "Python 环境" ? "tar.gz" : (asset.originalFormat || "original") });
+};
+const exportSelectedAsset = async () => {
+  if (!exportDialog?.href) return;
+  const separator = exportDialog.href.includes("?") ? "&" : "?";
+  try {
+    const response = await fetch(`${exportDialog.href}${separator}format=${encodeURIComponent(exportDialog.format || "original")}`, { credentials: "include" });
+    if (!response.ok) throw new Error(await response.text() || `导出失败（${response.status}）`);
+    const blob = await response.blob();
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = exportDialog.name || "asset-export";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(anchor.href);
+    setExportDialog(null);
+  } catch (error) {
+    window.alert(error.message || "导出失败");
+  }
 };
 
 const familyRows = Array.from(new Set(mlModels.map((model) => modelFamilyLabel(model.name)))).map((family) => {
@@ -109,6 +125,8 @@ const versions = modelVersions.filter((version) => models.some((model) => model.
 return { family, models, versions };
 
 });
+
+const exportDialogView = exportDialog ? <div className="overlay asset-export-dialog-overlay" onClick={() => setExportDialog(null)}><section className="asset-export-dialog" onClick={(event) => event.stopPropagation()}><div className="section-title-row"><div><h2>导出资产</h2><p className="muted">{exportDialog.name}</p></div><button type="button" onClick={() => setExportDialog(null)}>×</button></div><label>导出格式<select value={exportDialog.format} onChange={(event) => setExportDialog({ ...exportDialog, format: event.target.value })}>{(exportDialog.type === "Python 环境" ? ["tar", "tar.gz"] : ["original", "pt", "pth", "onnx"]).map((format) => <option key={format} value={format}>{format === "original" ? "原始文件" : format}</option>)}</select></label><p className="muted asset-export-note">模型格式转换由算法适配器提供；没有对应转换器时将提示并保留原始文件。</p><div className="dialog-actions"><button type="button" onClick={() => setExportDialog(null)}>取消</button><button type="button" className="primary" onClick={exportSelectedAsset}><Download size={14} />开始导出</button></div></section></div> : null;
 
 const stats = [
 
@@ -137,6 +155,7 @@ algorithms[0] ? ["导入算法适配", algorithms[0].name, formatDateTime(algori
 return (
 
 <div className={`asset-workspace ${drawerMode ? "drawer-open" : ""}`}>
+{exportDialogView}
 
 <aside className="asset-sidebar">
 
@@ -152,13 +171,13 @@ return (
 
 </AssetResourceGroup>
 
-<AssetModelFamilyTree families={familyRows} onSelect={setSelectedExportAsset} />
+<AssetModelFamilyTree families={familyRows} onSelect={openAssetExport} />
 
 <AssetResourceGroup title="预训练模型" icon={Download} count={modelVersions.filter((version) => version.stage === "pretrained").length} defaultOpen={false}>
 
 {modelVersions.filter((version) => version.stage === "pretrained").map((version) => (
 
-<button className={selectedExportAsset?.key === `model-${version.id}` ? "active" : ""} key={version.id} onClick={() => setSelectedExportAsset({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` })} onContextMenu={(event) => { event.preventDefault(); const anchor = document.createElement("a"); anchor.href = `/api/ml/model-versions/${encodeURIComponent(version.id)}/download`; anchor.click(); }}><Brain size={14} /><span>{version.model_name} / {version.version_name}</span><Download size={13} /></button>
+<button className={selectedExportAsset?.key === `model-${version.id}` ? "active" : ""} key={version.id} onClick={() => openAssetExport({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` })} onContextMenu={(event) => { event.preventDefault(); openAssetExport({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` }); }}><Brain size={14} /><span>{version.model_name} / {version.version_name}</span><Download size={13} /></button>
 
 ))}
 
@@ -168,7 +187,7 @@ return (
 
 {pythonEnvs.map((env) => (
 
-<button className={selectedExportAsset?.key === `env-${env.id}` ? "active" : ""} key={env.id} onClick={() => setSelectedExportAsset({ key: `env-${env.id}`, type: "Python 环境", name: env.name, href: env.source_type === "conda_pack" && env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : "" })} onContextMenu={(event) => { event.preventDefault(); if (!env.artifact_key) return; const anchor = document.createElement("a"); anchor.href = `/api/ml/python-envs/${encodeURIComponent(env.id)}/download`; anchor.click(); }} title={env.artifact_key ? "左键选择，右键快捷导出 tar" : "此环境没有可导出的 conda-pack 资产"}><Cpu size={14} /><span>{env.name}</span><em>{env.artifact_key ? env.status : "不可导出"}</em></button>
+<button className={selectedExportAsset?.key === `env-${env.id}` ? "active" : ""} key={env.id} onClick={() => openAssetExport({ key: `env-${env.id}`, type: "Python 环境", name: env.name, href: env.source_type === "conda_pack" && env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : "" })} onContextMenu={(event) => { event.preventDefault(); if (env.artifact_key) openAssetExport({ key: `env-${env.id}`, type: "Python 环境", name: env.name, href: `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` }); }} title={env.artifact_key ? "打开导出格式" : "此环境没有可导出的 conda-pack 资产"}><Cpu size={14} /><span>{env.name}</span><em>{env.artifact_key ? env.status : "不可导出"}</em></button>
 
 ))}
 
@@ -294,7 +313,7 @@ return (
 
 <span>{version.model_name || family.family}</span><span>{version.dataset_project_name || "未绑定数据集"}</span><span>{formatDateTime(version.created_at)}</span><em>正常</em><span>{version.artifact_root || `minio://models/${family.family.toLowerCase()}/`}</span>
 
-<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="下载模型" onClick={() => { const anchor = document.createElement("a"); anchor.href = `/api/ml/model-versions/${encodeURIComponent(version.id)}/download`; anchor.click(); }}><Download size={13} /></button><button title="分享" onClick={() => setShareResource({ ...version, name: version.version_name, resourceType: "model_revision" })}><Share2 size={13} /></button><button title="申请公开" onClick={() => setPublicResource({ id: version.model_id, name: version.model_name, resourceType: "model" })}><Globe2 size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button></div>
+<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="下载模型" onClick={() => openAssetExport({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name || family.family} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` })}><Download size={13} /></button><button title="分享" onClick={() => setShareResource({ ...version, name: version.version_name, resourceType: "model_revision" })}><Share2 size={13} /></button><button title="申请公开" onClick={() => setPublicResource({ id: version.model_id, name: version.model_name, resourceType: "model" })}><Globe2 size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button></div>
 
 </div>
 
@@ -320,7 +339,7 @@ return (
 
 <div className="asset-table-row" key={env.id} title={envTooltip(env)}>
 
-<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons resource={{ ...env, resourceType: "runtime_env" }} onShare={setShareResource} onPublic={setPublicResource} downloadHref={env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : ""} />
+<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons resource={{ ...env, resourceType: "runtime_env" }} onShare={setShareResource} onPublic={setPublicResource} downloadHref={env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : ""} onDownload={() => openAssetExport({ key: `env-${env.id}`, type: "Python 环境", name: env.name, href: `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` })} />
 
 </div>
 
