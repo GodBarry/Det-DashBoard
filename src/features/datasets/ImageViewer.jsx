@@ -14,6 +14,28 @@ return colors[hash % colors.length];
 
 }
 
+function imageMetadata(item, annotations) {
+  const keyword = String(item.keyword || item.keywords || "").trim();
+  const captureMatch = keyword.match(/(?:多?拍摄日期|拍摄时间|capture(?:d)?(?:At|Time)?)[：:]\s*([^,，;；]+)/i);
+  const captureTime = item.capture_time || item.captured_at || item.shooting_time || captureMatch?.[1]?.trim() || "--";
+  const remainingKeyword = captureMatch ? keyword.replace(captureMatch[0], "").replace(/^[、,，;；\s]+|[、,，;；\s]+$/g, "") : keyword;
+  const ignored = new Set(["source_format", "source_file", "filename", "line", "difficult"]);
+  const attributes = [];
+  for (const annotation of annotations || []) {
+    const raw = annotation.attributes_json || annotation.attributes;
+    let values = raw;
+    if (typeof raw === "string") {
+      try { values = JSON.parse(raw); } catch { values = null; }
+    }
+    if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+    for (const [key, value] of Object.entries(values)) {
+      if (ignored.has(key) || value == null || value === "") continue;
+      attributes.push(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`);
+    }
+  }
+  return { captureTime, otherTags: [...new Set([remainingKeyword, ...attributes].filter(Boolean))] };
+}
+
 function AnnotationOverlay({ item, compact = false }) {
 
 const width = Number(item?.image_width || 1);
@@ -134,6 +156,7 @@ setSelectedAnnId(null);
 setDefaultLabel((item?.annotations || [])[0]?.label || "");
 
 setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.image_height || 1) });
+setLoadedItemId(null);
 
 }, [item?.id]);
 
@@ -180,6 +203,12 @@ const width = Number(item.image_width || naturalSize.width || 1);
 const height = Number(item.image_height || naturalSize.height || 1);
 
 const shownAnnotations = editMode ? draft : item.annotations || [];
+const annotationCounts = shownAnnotations.reduce((rows, annotation) => {
+  const label = String(annotation.label || "未分类");
+  rows.set(label, (rows.get(label) || 0) + 1);
+  return rows;
+}, new Map());
+const metadata = imageMetadata(item, shownAnnotations);
 
 const selectedAnn = draft.find((ann) => ann.id === selectedAnnId);
 
@@ -354,9 +383,9 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ "--image-ratio": Number(item.image_width || 16) / Number(item.image_height || 9), aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<AuthenticatedImage src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onSourceReady={() => setLoadedItemId(item.id)} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
+<AuthenticatedImage src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onLoad={(event) => { setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 }); setLoadedItemId(item.id); }} />
 
-{editMode ? (
+{loadedItemId === item.id && (editMode ? (
 
 <EditableAnnotationLayer
 
@@ -394,24 +423,23 @@ pointFromEvent={pointFromEvent}
 
 <AnnotationOverlay item={{ ...item, annotations: shownAnnotations }} />
 
-)}
+))}
 
 </div>
 
 </div>
 
 <aside className="viewer-inspector-panel">
-<div><span>{'\u6a21\u6001'}</span><b>{modalityLabel(item.modality)}</b></div>
-<div><span>{'\u573a\u666f'}</span><b>{sceneLabel(item.scene)}</b></div>
-<div><span>{'\u89c6\u89d2'}</span><b>{viewLabel(item.view)}</b></div>
-<div><span>{'\u5176\u4ed6\u6807\u7b7e'}</span><b>{item.keyword || item.keywords || "--"}</b></div>
 <h3>图片信息</h3>
 <div><span>文件</span><b>{item.display_name}</b></div>
 <div><span>尺寸</span><b>{item.image_width || "--"} × {item.image_height || "--"}</b></div>
-<div><span>场景</span><b>{item.scene || "--"}</b></div>
-<div><span>视角</span><b>{item.view || "--"}</b></div>
-<h3>标签（{annotations.length}）</h3>
-{annotations.length ? Array.from(new Set(annotations.map((annotation) => annotation.label).filter(Boolean))).map((label) => <div className="viewer-tag-row" key={label}><i style={{ background: labelColor(label) }} />{label}</div>) : <p className="muted">暂无标签</p>}
+<div><span>模态</span><b>{modalityLabel(item.modality)}</b></div>
+<div><span>视角</span><b>{viewLabel(item.view)}</b></div>
+<div><span>场景</span><b>{sceneLabel(item.scene)}</b></div>
+<div><span>拍摄时间</span><b>{metadata.captureTime}</b></div>
+<div><span>其他标签</span><b>{metadata.otherTags.length ? metadata.otherTags.join("、") : "--"}</b></div>
+<h3>标签（{shownAnnotations.length}）</h3>
+{annotationCounts.size ? Array.from(annotationCounts).map(([label, count]) => <div className="viewer-tag-row" key={label}><i style={{ background: labelColor(label) }} /><span>{label}</span><b>{count}</b></div>) : <p className="muted">暂无标签</p>}
 </aside>
 
 {editMode && selectedAnn && (

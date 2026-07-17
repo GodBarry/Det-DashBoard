@@ -12767,10 +12767,12 @@ body.resizing-table-column {
 .workspace-keepalive[hidden] { display: none !important; }
 
 .tree-project-picker { position: relative; min-width: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-.tree-project-selection,.tree-project-empty { min-width: 150px; max-width: 100%; flex: 1 1 220px; min-height: 32px; display: grid; grid-template-columns: 16px minmax(0,1fr) 28px; align-items: center; gap: 7px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
+.tree-project-selection,.tree-project-empty { min-width: 150px; max-width: 100%; min-height: 32px; display: grid; align-items: center; gap: 7px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
+.tree-project-selection { width: fit-content; flex: 0 1 auto; grid-template-columns: 16px minmax(0,auto) 26px; }
+.tree-project-selection > span { max-width: 280px; }
 .tree-project-selection > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
 .tree-project-selection > button { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; }
-.tree-project-empty { width: auto; grid-template-columns: 16px minmax(0,1fr) 16px; color: var(--muted); text-align: left; }
+.tree-project-empty { width: auto; flex: 0 1 210px; grid-template-columns: 16px minmax(0,1fr) 16px; color: var(--muted); text-align: left; }
 .tree-project-popover { position: absolute; z-index: 40; top: 100%; left: 0; right: 0; max-height: 280px; margin-top: 4px; padding: 5px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 14px 32px rgba(0,0,0,.18); }
 .tree-project-option { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); padding-left: calc(var(--tree-depth) * 17px); }
 .tree-project-toggle { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; }
@@ -12779,7 +12781,7 @@ body.resizing-table-column {
 .tree-project-name em { color: var(--muted); font-size: 10px; font-style: normal; }
 .tree-project-option.selected .tree-project-name { color: var(--accent); background: color-mix(in srgb,var(--accent) 8%,transparent); }
 .resource-tree-row { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); padding-left: calc((var(--depth) + 0) * 15px); }
-.resource-tree-row.active { background: color-mix(in srgb,var(--accent) 10%,transparent); color: var(--accent); }
+.resource-tree-row.active { background: transparent; color: var(--text); }
 .resource-tree-row.active .resource-node-select { background: color-mix(in srgb,var(--accent) 14%,transparent); color: var(--accent); }
 .resource-tree-row.active .resource-node-select > em { color: var(--accent); }
 .resource-node-toggle { width: 24px !important; min-width: 24px !important; height: 29px !important; padding: 0 !important; display: grid !important; place-items: center !important; border: 0 !important; background: transparent !important; color: inherit !important; }
@@ -12788,15 +12790,21 @@ body.resizing-table-column {
 .resource-node-select > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resource-node-select > em { color: var(--muted); font-size: 10px; font-style: normal; }
 
-.dataset-operation-log { min-height: 180px; }
-.dataset-log-list { max-height: 280px; overflow: auto; display: grid; align-content: start; gap: 1px; }
-.dataset-log-row { display: grid; grid-template-columns: 56px 48px minmax(0,1fr); gap: 6px; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 10px; line-height: 1.45; }
-.dataset-log-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
-.dataset-log-row b { color: var(--accent); }
-.dataset-log-row.level-error b,.dataset-log-row.level-error span { color: #dc4555; }
-.dataset-log-row details { grid-column: 2 / -1; }
-.dataset-log-row summary { cursor: pointer; color: var(--muted); }
+.dataset-operation-log { min-height: 190px; }
+.dataset-log-list { max-height: 300px; padding: 7px; overflow: auto; display: grid; align-content: start; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb,var(--panel) 78%,var(--input)); }
+.dataset-log-row { position: relative; display: grid; gap: 5px; padding: 8px 9px 8px 12px; border: 1px solid color-mix(in srgb,var(--line) 82%,transparent); border-radius: 5px; background: var(--panel); font-size: 11px; line-height: 1.45; }
+.dataset-log-row::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--accent); }
+.dataset-log-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dataset-log-row time { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.dataset-log-row b { padding: 2px 6px; border-radius: 3px; background: color-mix(in srgb,var(--accent) 10%,transparent); color: var(--accent); font-size: 10px; }
+.dataset-log-message { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.dataset-log-row.level-error::before { background: #dc4555; }
+.dataset-log-row.level-error b { background: color-mix(in srgb,#dc4555 10%,transparent); }
+.dataset-log-row.level-error b,.dataset-log-row.level-error .dataset-log-message { color: #dc4555; }
+.dataset-log-row details { min-width: 0; }
+.dataset-log-row summary { cursor: pointer; color: var(--muted); font-size: 10px; }
 .dataset-log-row pre { max-height: 120px; margin: 4px 0 0; padding: 6px; overflow: auto; border-radius: 4px; background: color-mix(in srgb,var(--text) 5%,transparent); white-space: pre-wrap; word-break: break-all; }
+.dataset-log-empty { padding: 28px 8px; text-align: center; }
 
 .shared-image-viewport { padding: 82px 70px 24px !important; }
 .shared-image-canvas { position: relative; width: min(100%, 1320px, calc((100vh - 112px) * var(--image-ratio))); transform-origin: center center; background: #07121a; box-shadow: 0 20px 60px rgba(0,0,0,.36); }
@@ -12812,6 +12820,8 @@ body.resizing-table-column {
 .dataset-image-dialog.viewer-light .viewer-file-identity code,.dataset-image-dialog.viewer-light .viewer-topbar span { color: #657985; }
 .dataset-image-dialog .viewer-file-identity code { display: none; }
 .dataset-image-dialog.viewer-light .viewer-topbar button { border-color: #cedae0; background: #f5f9fb; color: #27414f; }
+.dataset-image-dialog.viewer-light .viewer-nav { border-color: #cbd8de; background: rgba(255,255,255,.94); color: #27414f; box-shadow: 0 8px 24px rgba(31,55,68,.14); }
+.dataset-image-dialog.viewer-light .viewer-nav:hover { background: #fff; color: var(--accent); }
 .dataset-image-dialog .viewer-image-wrap { width: min(88vw,1320px,calc((100vh - 110px) * var(--image-ratio))); max-width: none; max-height: none; overflow: hidden; border: 1px solid rgba(151,174,188,.22); border-radius: 7px; box-shadow: 0 20px 60px rgba(0,0,0,.38); }
 .dataset-image-dialog .viewer-image-wrap img { object-fit: fill; }
 .dataset-image-dialog .viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 4; border-radius: 6px; }
@@ -12824,7 +12834,7 @@ body.resizing-table-column {
 .viewer-inspector-panel > div { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 8px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb,var(--line) 70%,transparent); font-size: 11px; }
 .viewer-inspector-panel span { color: var(--muted); }
 .viewer-inspector-panel b { min-width: 0; overflow-wrap: anywhere; }
-.viewer-tag-row { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 8px !important; }
+.viewer-tag-row { display: grid !important; grid-template-columns: 8px minmax(0,1fr) auto !important; align-items: center; gap: 8px !important; }
 .viewer-tag-row i { width: 8px; height: 8px; border-radius: 2px; }
 .asset-export-dialog-overlay { z-index: 100; display: grid; place-items: center; }
 .asset-export-dialog { width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); box-shadow: 0 24px 80px rgba(0,0,0,.32); }
@@ -12834,6 +12844,26 @@ body.resizing-table-column {
 .asset-export-dialog .dialog-actions { justify-content: flex-end; margin-top: 20px; }
 @media (max-width: 1100px) { .viewer-inspector-panel { width: 210px; } .dataset-image-dialog .viewer-nav.next { right: 238px; } }
 @media (max-width: 780px) { .viewer-inspector-panel { display: none; } .dataset-image-dialog .viewer-nav.next { right: 18px; } }
+
+/* The evaluation image and every error box share one transform, just like inference. */
+.evaluation-sample-dialog .viewer-toolbar { grid-template-columns: minmax(0,1fr) auto auto auto 34px 34px !important; }
+.evaluation-sample-dialog .shared-image-viewport { padding: 82px 68px 72px !important; overflow: hidden; }
+.evaluation-sample-dialog .shared-image-canvas.evaluation-sample-large { position: relative !important; width: min(100%,1320px,calc((100vh - 154px) * var(--image-ratio))) !important; height: auto !important; max-height: none !important; aspect-ratio: var(--image-ratio) !important; display: block !important; overflow: visible !important; transform-origin: center center; }
+.evaluation-sample-dialog .shared-image-canvas.evaluation-sample-large > img { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; object-fit: fill !important; }
+.evaluation-sample-dialog .shared-image-canvas .sample-box { z-index: 2; }
+.evaluation-sample-dialog .evaluation-box-legend { position: fixed; z-index: 6; left: 50%; bottom: 14px; width: min(72vw,1040px); margin: 0; transform: translateX(-50%); }
+.evaluation-sample-dialog.viewer-dark .evaluation-box-legend { border-color: rgba(151,174,188,.24); background: rgba(10,24,34,.94); color: #b6c8d0; }
+.evaluation-sample-dialog.viewer-light .evaluation-box-legend { border-color: #ccd8de; background: rgba(255,255,255,.96); color: #526873; }
+
+/* Folder actions: sharing/public/rename stay in the top row; trash remains isolated. */
+.home-project-grid .project-folder .project-folder-body,
+.workspace-folder-grid .project-folder .project-folder-body { padding-right: 112px !important; }
+.home-project-grid .project-actions,
+.workspace-folder-grid .project-actions { position: absolute !important; inset: 10px 10px 10px auto !important; width: 101px !important; display: grid !important; grid-template-columns: repeat(3,27px) !important; grid-template-rows: 27px 1fr 27px !important; justify-content: end !important; gap: 6px !important; pointer-events: none; }
+.home-project-grid .project-actions button,
+.workspace-folder-grid .project-actions button { position: static !important; pointer-events: auto; }
+.home-project-grid .project-actions button[title="删除项目"],
+.workspace-folder-grid .project-actions button[title="删除项目"] { grid-column: 3 !important; grid-row: 3 !important; }
 
 @media (max-width: 1500px) {
   .training-dataset-tree-grid { grid-template-columns: 1fr; }
