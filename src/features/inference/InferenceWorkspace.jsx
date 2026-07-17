@@ -29,6 +29,7 @@ import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWork
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
+import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
 
 projects,
@@ -181,7 +182,8 @@ const [errorFilter, setErrorFilter] = useState("false_negative");
   const [sampleViewer, setSampleViewer] = useState(null);
 
 useEffect(() => {
-  if (!inferenceForm.datasetProjectId) {
+  const countProjectIds = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean);
+  if (!countProjectIds.length) {
     setMatchingImageCount(null);
     return undefined;
   }
@@ -193,19 +195,19 @@ useEffect(() => {
     if (inferenceForm.inputModalities) query.set("modalities", inferenceForm.inputModalities);
     if (inferenceForm.inputLabels) query.set("labels", inferenceForm.inputLabels);
     if (inferenceForm.inputQuery) query.set("q", inferenceForm.inputQuery);
-    fetch(`/api/projects/${inferenceForm.datasetProjectId}/images-count?${query}`, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data) => setMatchingImageCount(Number(data.count || 0)))
+    Promise.all(countProjectIds.map((projectId) => fetch(`/api/projects/${projectId}/images-count?${query}`, { signal: controller.signal }).then((response) => response.json())))
+      .then((rows) => setMatchingImageCount(rows.reduce((sum, data) => sum + Number(data.count || 0), 0)))
       .catch((error) => { if (error.name !== "AbortError") setMatchingImageCount(null); });
   }, 250);
   return () => { window.clearTimeout(timer); controller.abort(); };
-}, [inferenceForm.datasetProjectId, inferenceForm.inputViews, inferenceForm.inputScenes, inferenceForm.inputModalities, inferenceForm.inputLabels, inferenceForm.inputQuery]);
+}, [inferenceForm.datasetProjectId, JSON.stringify(inferenceForm.datasetProjectIds || []), inferenceForm.inputViews, inferenceForm.inputScenes, inferenceForm.inputModalities, inferenceForm.inputLabels, inferenceForm.inputQuery]);
 
 const effectiveInferenceImageCount = matchingImageCount == null
   ? null
   : (Number(inferenceForm.inputLimit || 0) > 0 ? Math.min(matchingImageCount, Number(inferenceForm.inputLimit)) : matchingImageCount);
 
-const [expandedGroups, setExpandedGroups] = useState(() => new Set(["算法适配", "Python 环境"]));
+const [expandedGroups, setExpandedGroups] = usePersistentSet("det-dashboard.inference-resource-groups", ["算法适配", "Python 环境"]);
+const [expandedDataNodes, setExpandedDataNodes] = usePersistentSet("det-dashboard.inference-data-nodes", []);
 
 const setField = (key, value) => setInferenceForm({ ...inferenceForm, [key]: value });
 
@@ -353,7 +355,7 @@ setInferenceForm({ ...inferenceForm, modelId: modelIds[0] || "", modelVersionId:
 
 };
 
-const datasetRows = projectTreeRows(projects).slice(0, 14);
+const datasetRows = projectTreeRows(projects).filter((project) => { let parentId = project.parent_id; while (parentId) { if (!expandedDataNodes.has(parentId)) return false; parentId = inferenceProjectById.get(parentId)?.parent_id; } return true; }).slice(0, 40);
 
 const modelTreeRows = familyRows.flatMap((family) => [
 
@@ -423,11 +425,14 @@ depth: project.depth,
 
 icon: project.hasChildren ? FolderOpen : Folder,
 
-active: project.id === inferenceForm.datasetProjectId,
+active: (inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId]).includes(project.id),
+hasChildren: project.hasChildren,
+expanded: expandedDataNodes.has(project.id),
+onToggle: () => setExpandedDataNodes((current) => { const next = new Set(current); if (next.has(project.id)) next.delete(project.id); else next.add(project.id); return next; }),
 
 title: `${project.name}\n图片：${project.image_count || 0}\n视频：${project.video_count || 0}`,
 
-onClick: () => setField("datasetProjectId", project.id),
+onClick: () => { const current = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean); const next = current.includes(project.id) ? current.filter((id) => id !== project.id) : [...current, project.id]; setInferenceForm({ ...inferenceForm, datasetProjectIds: next, datasetProjectId: next[0] || "" }); },
 
 })),
 
@@ -638,19 +643,15 @@ return (
               {isOpen && group.rows.map((row) => {
                 const RowIcon = row.icon;
                 return (
-                  <button
-                    className={`${row.active ? "active" : ""} depth-${row.depth || 0}`}
+                  <div
+                    className={`resource-tree-row ${row.active ? "active" : ""} depth-${row.depth || 0}`}
                     key={`${group.title}-${row.id}`}
                     title={row.title}
-                    onClick={row.onClick}
                     style={{ "--depth": row.depth || 0 }}
-                    type="button"
                   >
-                    <RowIcon size={14} />
-                    <span>{row.name}</span>
-                    {row.badge && <i>{row.badge}</i>}
-                    <em>{row.right}</em>
-                  </button>
+                    <button className="resource-node-toggle" type="button" disabled={!row.hasChildren} onClick={row.onToggle}>{row.hasChildren ? (row.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}</button>
+                    <button className="resource-node-select" type="button" onClick={row.onClick}><RowIcon size={14} /><span>{row.name}</span>{row.badge && <i>{row.badge}</i>}<em>{row.right}</em></button>
+                  </div>
                 );
               })}
               {isOpen && !group.rows.length && <p className="resource-empty">暂无资源</p>}
@@ -697,7 +698,7 @@ return (
           <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
             <span className="dataset-source-kind"><Database size={14} />数据集</span>
-            <CascadingProjectPicker projects={projects} value={inferenceForm.datasetProjectId} onChange={(projectId) => setField("datasetProjectId", projectId)} ariaLabel="推理数据集层级选择" />
+            <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={(projectIds) => setInferenceForm({ ...inferenceForm, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" })} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>

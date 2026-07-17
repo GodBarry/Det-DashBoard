@@ -23,6 +23,7 @@ import {
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function TrainingWorkspace({
 
   projects,
@@ -87,9 +88,10 @@ export function TrainingWorkspace({
 
   const selectedAlgorithm = algorithms.find((item) => (item.id || item.template_key) === trainingForm.templateId) || {};
 
-  const [expandedGroups, setExpandedGroups] = useState(() => new Set(["数据集项目", "算法适配器", "模型簇", "Python 环境"]));
-  const [activeDatasetSplit, setActiveDatasetSplit] = useState("trainProjectId");
-  const [expandedDatasetNodes, setExpandedDatasetNodes] = useState(() => new Set());
+  const [expandedGroups, setExpandedGroups] = usePersistentSet("det-dashboard.training-resource-groups-v2", ["数据", "算法适配", "模型", "Python 环境"]);
+  const [activeDatasetSplit, setActiveDatasetSplitState] = useState(() => localStorage.getItem("det-dashboard.training-active-split") || "trainProjectId");
+  const setActiveDatasetSplit = (value) => { localStorage.setItem("det-dashboard.training-active-split", value); setActiveDatasetSplitState(value); };
+  const [expandedDatasetNodes, setExpandedDatasetNodes] = usePersistentSet("det-dashboard.training-dataset-tree", []);
   const toggleGroup = (title) => setExpandedGroups((current) => {
     const next = new Set(current);
     if (next.has(title)) next.delete(title); else next.add(title);
@@ -174,9 +176,9 @@ export function TrainingWorkspace({
   ];
 
   const resourceGroups = [
-    { title: '数据集项目', icon: FolderOpen, rows: datasetRows },
-    { title: '算法适配器', icon: Boxes, rows: algorithms.map((algorithm) => ({ id: algorithm.id || algorithm.template_key, name: algorithm.name, right: algorithm.version || algorithm.algorithm_key || '', active: (algorithm.id || algorithm.template_key) === trainingForm.templateId, onClick: () => selectTrainingAlgorithm(algorithm.id || algorithm.template_key) })) },
-    { title: '模型簇', icon: Database, rows: mlModels.map((model) => ({ id: model.id, name: model.name, right: modelVersions.filter((version) => version.model_id === model.id).length, active: model.id === selectedModel.id, onClick: () => setTrainingForm({ ...trainingForm, modelId: model.id }) })) },
+    { title: '数据', icon: FolderOpen, rows: datasetRows },
+    { title: '算法适配', icon: Boxes, rows: algorithms.map((algorithm) => ({ id: algorithm.id || algorithm.template_key, name: algorithm.name, right: algorithm.version || algorithm.algorithm_key || '', active: (algorithm.id || algorithm.template_key) === trainingForm.templateId, onClick: () => selectTrainingAlgorithm(algorithm.id || algorithm.template_key) })) },
+    { title: '模型', icon: Database, rows: mlModels.map((model) => ({ id: model.id, name: model.name, right: modelVersions.filter((version) => version.model_id === model.id).length, active: model.id === selectedModel.id, onClick: () => setTrainingForm({ ...trainingForm, modelId: model.id }) })) },
     { title: 'Python 环境', icon: Cpu, rows: pythonEnvs.map((env) => ({ id: env.id, name: env.name, right: env.status, active: env.id === selectedEnv.id, onClick: () => setTrainingForm({ ...trainingForm, pythonEnvId: env.id, python: env.python_path || trainingForm.python }) })) },
   ].filter((group) => group.rows.length).map((group) => ({ ...group, count: group.rows.length }));
 
@@ -328,7 +330,7 @@ export function TrainingWorkspace({
         <h2>训练资源</h2>
 
         <div className="split-target-control" aria-label="选择左侧数据集要写入的划分">
-          {[['trainProjectId', '训练'], ['valProjectId', '验证'], ['testProjectId', '测试']].map(([key, label]) => <button type="button" className={activeDatasetSplit === key ? 'active' : ''} key={key} onClick={() => setActiveDatasetSplit(key)}>{label}</button>)}
+          {[['trainProjectId', '训练'], ['valProjectId', '验证']].map(([key, label]) => <button type="button" className={activeDatasetSplit === key ? 'active' : ''} key={key} onClick={() => setActiveDatasetSplit(key)}>{label}</button>)}
         </div>
 
         <div className="resource-tree">
@@ -349,21 +351,7 @@ export function TrainingWorkspace({
 
               </button>
 
-              {expandedGroups.has(group.title) && group.rows.map((row) => (
-
-                <button className={`${row.active ? 'active' : ''} depth-${row.depth || 0}`} style={{ "--depth": row.depth || 0 }} onClick={row.onClick} key={group.title + '-' + row.id} type="button">
-
-                  <group.icon size={14} />
-
-                  <span>{row.name}</span>
-
-                  {row.badge && <strong>{row.badge}</strong>}
-
-                  <em>{row.right}</em>
-
-                </button>
-
-              ))}
+              {expandedGroups.has(group.title) && group.rows.filter((row) => { let parentId = projects.find((project) => project.id === row.id)?.parent_id; while (parentId) { if (!expandedDatasetNodes.has(parentId)) return false; parentId = projects.find((project) => project.id === parentId)?.parent_id; } return true; }).map((row) => { const project = projects.find((item) => item.id === row.id); const hasChildren = Boolean((childrenByParent.get(row.id) || []).length); return <div className={`resource-tree-row ${row.active ? 'active' : ''} depth-${row.depth || 0}`} style={{ "--depth": row.depth || 0 }} key={group.title + '-' + row.id}><button className="resource-node-toggle" type="button" disabled={!hasChildren} onClick={() => hasChildren && toggleDatasetNode(row.id)}>{hasChildren ? (expandedDatasetNodes.has(row.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}</button><button className="resource-node-select" type="button" onClick={row.onClick}><group.icon size={14} /><span>{row.name}</span>{row.badge && <strong>{row.badge}</strong>}<em>{row.right}</em></button></div>; })}
 
             </section>
 
@@ -403,7 +391,7 @@ export function TrainingWorkspace({
             <h2>数据来源</h2>
             <div className="config-row training-task-name-row"><span className="row-label">任务名称</span><input value={trainingForm.name || ""} onChange={(event) => setField("name", event.target.value)} placeholder="可留空，将按 数据集_算法_时间 自动生成" /></div>
             <div className="training-cascading-splits">
-              {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} ariaLabel={`${label}层级选择`} /></div>)}
+              {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} storageKey={`training-${splitKey}`} ariaLabel={`${label}树形选择`} /></div>)}
             </div>
             <div className="training-filter-bar">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
@@ -435,7 +423,7 @@ export function TrainingWorkspace({
 
           <section className="reference-section algorithm-params-section"><h2>训练参数{selectedAlgorithm.name ? ` · ${selectedAlgorithm.name}` : ''}</h2>{!trainingForm.templateId ? <div className="parameter-placeholder">尚未选择算法，训练参数为空。</div> : parameterGroups.length ? <div className="parameter-groups schema-parameter-groups">{parameterGroups.map((group) => { const advanced = /advanced|高级/i.test(`${group.key || ''} ${group.label || ''}`); return <details className="parameter-group" key={group.key || group.label} open={!advanced}><summary>{group.label}{advanced ? <small>展开</small> : null}</summary><fieldset>{(group.fields || []).map((field) => <label key={field.key} title={field.description || ''}><span>{field.label || field.key}{field.required ? <b className="required-mark">*</b> : null}</span>{field.type === 'boolean' ? <span className="switch-control"><input type="checkbox" checked={Boolean(algorithmFieldValue(field))} onChange={() => setAlgorithmField(field, !Boolean(algorithmFieldValue(field)))} /><i /></span> : (field.type === 'select' || field.options) ? <select value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)}>{(field.options || []).map((option) => { const value = typeof option === 'object' ? option.value : option; const label = typeof option === 'object' ? option.label : option; return <option key={String(value)} value={value}>{label}</option>; })}</select> : <input type={['number', 'integer'].includes(field.type) ? 'number' : 'text'} min={field.min} max={field.max} step={field.step || (field.type === 'integer' ? 1 : undefined)} value={algorithmFieldValue(field)} onChange={(e) => setAlgorithmField(field, e.target.value)} />}</label>)}</fieldset></details>; })}</div> : <div className="parameter-placeholder">该算法未在 capabilities_json.parameterSchema 中声明训练参数。</div>}</section>
 
-          <section className="reference-section"><h2>输出选项</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label><label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
+          <section className="reference-section"><h2>输出选项</h2><div className="config-row output-row"><label className="switch-option">保存 best / last<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><label className="switch-option">保存中间 Epoch<span className="switch-control"><input type="checkbox" checked={Number(trainingForm.savePeriod || 0) > 0} onChange={(e) => setField('savePeriod', e.target.checked ? 10 : 0)} /><i /></span></label>{Number(trainingForm.savePeriod || 0) > 0 && <label>间隔 Epoch<input className="save-period-input" type="number" min="1" value={trainingForm.savePeriod} onChange={(e) => setField('savePeriod', e.target.value)} /></label>}<label className="switch-option">创建模型版本<span className="switch-control"><input type="checkbox" defaultChecked /><i /></span></label><div className="path-select"><Folder size={14} /><input value="/training/outputs" readOnly /><Download size={14} /></div></div></section>
 
         </div>
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { recordDatasetActivity } from "./datasetActivityLog.js";
 
 export function useDatasetImportController({
   activeProject,
@@ -127,10 +128,12 @@ export function useDatasetImportController({
       .then((r) => Promise.all([r.status, r.json()]))
       .then(([status, d]) => {
         if (status >= 400) throw new Error(d.error || "导入失败，请检查路径是否正");
+        recordDatasetActivity("导入", `已提交导入：${activeProject.name}`, "info", paths.join("; "));
         setLatestImport(d.batch || null);
         loadWorkspace(activeProject.id);
       })
       .catch((err) => {
+        recordDatasetActivity("导入", `导入失败：${activeProject.name}`, "error", `${paths.join("; ")}\n${err.message}`);
         setError(err.message);
         setLatestImport(null);
       });

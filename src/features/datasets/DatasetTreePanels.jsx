@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { formatCount } from "../../shared/presentation.js";
+import { readDatasetActivityLogs, subscribeDatasetActivity } from "./datasetActivityLog.js";
 
 export function HomeSidebar({ projects, currentFolder, currentFolderId, setCurrentFolderId, expandedIds, setExpandedIds, openProject, openHomeFolder, createProject, stats }) {
 
@@ -206,6 +207,9 @@ depth={depth + 1}
 
 export function HomeInspector({ stats, trashProjects, restoreProject, restoreAllProjects, emptyProjectTrash, deleteProjectPermanently }) {
 
+const [activityLogs, setActivityLogs] = useState(readDatasetActivityLogs);
+useEffect(() => subscribeDatasetActivity(() => setActivityLogs(readDatasetActivityLogs())), []);
+
 return (
 
 <aside className="inspector-panel home-inspector">
@@ -278,6 +282,11 @@ return (
 
 </div>
 
+</section>
+
+<section className="home-inspector-block dataset-operation-log">
+<div className="section-title-row compact-title"><h2>操作日志</h2><span>最近 {Math.min(activityLogs.length, 30)} 条</span></div>
+<div className="dataset-log-list">{activityLogs.slice(0, 30).map((row) => <article className={`dataset-log-row level-${row.level}`} key={row.id}><time>{new Date(row.createdAt).toLocaleTimeString()}</time><b>{row.action}</b><span>{row.message}</span>{row.details && <details><summary>详情</summary><pre>{row.details}</pre></details>}</article>)}{!activityLogs.length && <div className="muted">暂无数据操作日志</div>}</div>
 </section>
 
 </aside>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Sun, X } from "lucide-react";
 
 import { colors } from "../../shared/presentation.js";
 import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
@@ -88,6 +88,7 @@ const [defaultLabel, setDefaultLabel] = useState("");
 const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
 
 const [loadedItemId, setLoadedItemId] = useState(null);
+const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
 
 useEffect(() => {
 
@@ -271,7 +272,7 @@ setEditMode(false);
 
 return (
 
-<div className="viewer-overlay" onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
+<div className={`viewer-overlay dataset-image-dialog viewer-${viewerTheme}`} onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
 
 <div className="viewer-topbar">
 
@@ -311,6 +312,8 @@ return (
 
 <button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}>重置</button>
 
+<button onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换明暗模式"><Sun size={16} /></button>
+
 <button onClick={onClose}><X size={16} /></button>
 
 </div>
@@ -325,6 +328,7 @@ className="viewer-stage"
 
 onWheel={(event) => {
 
+if (!event.ctrlKey) return;
 event.preventDefault();
 
 zoom(event.deltaY < 0 ? 0.2 : -0.2);
@@ -347,7 +351,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 >
 
-<div className="viewer-image-wrap" style={{ aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
+<div className="viewer-image-wrap" style={{ "--image-ratio": Number(item.image_width || 16) / Number(item.image_height || 9), aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
 <AuthenticatedImage src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onSourceReady={() => setLoadedItemId(item.id)} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
 

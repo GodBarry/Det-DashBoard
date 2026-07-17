@@ -7,6 +7,7 @@ import {
   buildProjectLastImportAt,
   getCreateProjectContext,
 } from "./project-catalog-core.js";
+import { recordDatasetActivity } from "./datasetActivityLog.js";
 
 export function useProjectCatalogController({
   fetch: fetchRequest,
@@ -103,15 +104,17 @@ export function useProjectCatalogController({
         return data;
       }))
       .then((data) => {
+        recordDatasetActivity("新建", `已新建项目：${data.project?.name || name}`);
         if (!context.isWorkspace && data.project?.parent_id) setCurrentFolderId(data.project.parent_id);
         refreshHome();
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => { recordDatasetActivity("新建", `新建项目失败：${name}`, "error", err.message); setError(err.message); });
   }
 
   function deleteProject(projectId) {
     if (!confirm("确定删除该项目或文件夹吗？其下级文件夹会一并进入回收站；可在回收站恢复，清空回收站后将永久删除")) return;
-    fetchRequest(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => refreshHome());
+    const projectName = projectById.get(projectId)?.name || projectId;
+    fetchRequest(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => { recordDatasetActivity("删除", `项目已移入回收站：${projectName}`); refreshHome(); }).catch((err) => { recordDatasetActivity("删除", `删除项目失败：${projectName}`, "error", err.message); setError(err.message); });
   }
 
   function startRenameProject(project) {
@@ -143,18 +146,20 @@ export function useProjectCatalogController({
         return data;
       }))
       .then((data) => {
+        recordDatasetActivity("重命名", `${project.name} → ${data.project?.name || name}`);
         cancelRenameProject();
         refreshHome();
         if (activeProject?.id === project.id && data.project) setActiveProject(data.project);
       })
       .catch((err) => {
+        recordDatasetActivity("重命名", `重命名失败：${project.name}`, "error", err.message);
         setError(err.message);
         cancelRenameProject();
       });
   }
 
   function restoreProject(projectId) {
-    fetchRequest(`/api/projects/${projectId}/restore`, { method: "POST" }).then(() => refreshHome());
+    fetchRequest(`/api/projects/${projectId}/restore`, { method: "POST" }).then(() => { recordDatasetActivity("恢复", `已恢复项目：${projectId}`); refreshHome(); }).catch((err) => recordDatasetActivity("恢复", `恢复项目失败：${projectId}`, "error", err.message));
   }
 
   function restoreAllProjects() {
@@ -173,8 +178,9 @@ export function useProjectCatalogController({
       .then((response) => response.json().catch(() => ({})).then((data) => {
         if (!response.ok) throw new Error(data.error || "永久删除项目失败");
         refreshHome();
+        recordDatasetActivity("永久删除", `已永久删除项目：${projectId}`);
       }))
-      .catch((err) => setError(err.message || "永久删除项目失败"));
+      .catch((err) => { recordDatasetActivity("永久删除", `永久删除失败：${projectId}`, "error", err.message); setError(err.message || "永久删除项目失败"); });
   }
 
   function emptyProjectTrash() {

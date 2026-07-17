@@ -8,6 +8,7 @@ import {
   DATASET_WORKSPACE_POLL_INTERVAL,
   findRunningImport,
 } from "./dataset-workspace-core.js";
+import { recordDatasetActivity } from "./datasetActivityLog.js";
 
 const requestWithFetch = (...args) => fetch(...args);
 
@@ -33,6 +34,7 @@ export function useDatasetWorkspaceController({
   const [checkedIds, setCheckedIds] = useState([]);
   const [lastCheckedId, setLastCheckedId] = useState(null);
   const importRefreshKeyRef = useRef("");
+  const loggedJobStatesRef = useRef(null);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -65,8 +67,24 @@ export function useDatasetWorkspaceController({
     if (!refreshKey || importRefreshKeyRef.current === refreshKey) return;
 
     importRefreshKeyRef.current = refreshKey;
+    const terminal = imports.find((row) => ["completed", "failed", "cancelled", "canceled"].includes(String(row.status || "").toLowerCase()));
+    if (terminal) recordDatasetActivity("导入", terminal.status === "completed" ? `导入完成：${activeProject.name}` : `导入${terminal.status === "failed" ? "失败" : "已取消"}：${activeProject.name}`, terminal.status === "failed" ? "error" : "info", terminal.error_message || terminal.message || "");
     loadWorkspace(activeProject.id);
   }, [activeProject, imports]);
+
+  useEffect(() => {
+    if (loggedJobStatesRef.current == null) {
+      loggedJobStatesRef.current = new Set(jobs.map((job) => `${job.id}:${job.status}`));
+      return;
+    }
+    for (const job of jobs) {
+      if (!['done', 'completed', 'failed'].includes(String(job.status || '').toLowerCase())) continue;
+      const key = `${job.id}:${job.status}`;
+      if (loggedJobStatesRef.current.has(key)) continue;
+      loggedJobStatesRef.current.add(key);
+      if (job.type === 'export') recordDatasetActivity('导出', String(job.status).toLowerCase() === 'failed' ? '导出任务失败' : '导出任务完成', String(job.status).toLowerCase() === 'failed' ? 'error' : 'info', job.error || job.message || '');
+    }
+  }, [jobs]);
 
   function loadWorkspace(projectId) {
     const params = buildWorkspaceSearchParams(page, filters);
@@ -159,9 +177,10 @@ export function useDatasetWorkspaceController({
     })
       .then((response) => response.json().then((data) => {
         if (!response.ok) throw new Error(data.error || "导出失败");
+        recordDatasetActivity("导出", `已创建导出任务：${activeProject.name}（${exportFormat}）`);
         return data;
       }))
-      .catch((error) => setError("导出失败: " + error.message));
+      .catch((error) => { recordDatasetActivity("导出", `导出失败：${activeProject.name}`, "error", error.message); setError("导出失败: " + error.message); });
   }
 
   function openWorkspaceTrash() {

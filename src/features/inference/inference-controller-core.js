@@ -2,6 +2,7 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
   return {
     name: "",
     datasetProjectId: "",
+    datasetProjectIds: [],
     modelId: "",
     modelVersionId: "",
     templateId: "",
@@ -49,7 +50,7 @@ export function resolveInferenceAlgorithm(inferenceForm, algorithmAssets) {
 }
 
 export function validateInferenceSubmission(inferenceForm, algorithmResolution) {
-  if (!inferenceForm.datasetProjectId) return "请选择数据集项目";
+  if (!(inferenceForm.datasetProjectIds?.length || inferenceForm.datasetProjectId)) return "请选择数据集项目";
   if (!algorithmResolution.selectedAlgorithm) return "请选择算法名称";
 
   if (!algorithmResolution.isBuiltInNoEnvAlgorithm) {
@@ -68,6 +69,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
   return {
     name: inferenceForm.name,
     datasetProjectId: inferenceForm.datasetProjectId,
+    datasetProjectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),
     modelVersionId: inferenceForm.fakeReferenceMode
       ? null
       : (inferenceForm.modelVersionId || null),
@@ -84,6 +86,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
       batch: Number(inferenceForm.batch),
       device: inferenceForm.device,
       input: {
+        projectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),
         sourceType: "project_images",
         scope: inferenceForm.inputScope,
         filters: {

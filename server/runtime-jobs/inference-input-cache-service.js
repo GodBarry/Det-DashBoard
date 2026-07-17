@@ -45,8 +45,10 @@ function createInferenceInputCacheService({
     const paramsJson = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
     const input = paramsJson.input || {};
     const filters = input.filters || {};
-    const sqlParams = [job.dataset_project_id];
-    const where = ["pi.project_id=$1", "pi.deleted_at IS NULL", "p.deleted_at IS NULL"];
+    const projectIds = inferenceListParam(input, "projectIds", "project_ids");
+    if (!projectIds.length && job.dataset_project_id) projectIds.push(String(job.dataset_project_id));
+    const sqlParams = [projectIds];
+    const where = ["pi.project_id=ANY($1::uuid[])", "pi.deleted_at IS NULL", "p.deleted_at IS NULL"];
 
     const sceneValues = inferenceListParam(filters, "scenes", "scene");
     const viewValues = inferenceListParam(filters, "views", "view");

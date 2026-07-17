@@ -138,13 +138,13 @@ function createInferenceWorker({
   async function loadFakeReferenceGroundTruth(job, images) {
     const imageIds = images.map((image) => image.projectImageId).filter(Boolean);
     if (!imageIds.length) throw new Error("Fake GT inference requires project image ids in the input manifest.");
-    const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
-    if (!project?.active_label_version_id) throw new Error("Fake GT inference requires an active label version with ground truth.");
     const gtRows = (await query(
-      `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
-       FROM image_annotations
-       WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
-      [project.active_label_version_id, imageIds],
+      `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id
+       JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
+       WHERE a.project_image_id = ANY($1::uuid[])`,
+      [imageIds],
     )).rows;
     if (!gtRows.length) throw new Error("Fake GT inference did not find ground-truth boxes for the selected images.");
     const gtByImage = new Map();
@@ -327,13 +327,13 @@ function createInferenceWorker({
   async function computeDetectionMetrics(job, predictionRows) {
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     if (!imageIds.length) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "没有可评估的图片 ID" };
-    const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
-    if (!project?.active_label_version_id) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "项目没有 active_label_version_id" };
     const gtRows = (await query(
-      `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
-       FROM image_annotations
-       WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
-      [project.active_label_version_id, imageIds],
+      `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id
+       JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
+       WHERE a.project_image_id = ANY($1::uuid[])`,
+      [imageIds],
     )).rows.map((row) => ({
       ...row,
       metricLabel: metricLabel(row),

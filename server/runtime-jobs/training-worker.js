@@ -182,7 +182,7 @@ function createTrainingWorker({
       "test_dataloader.dataset.ann_file=annotations/test.json",
       "test_dataloader.dataset.data_prefix.img=images/test/",
       `optim_wrapper.optimizer.lr=${Number(params.base_lr || params.learning_rate || params.lr0 || 0.0001)}`,
-      `default_hooks.checkpoint.interval=${Math.max(1, Number(params.save_period || 1))}`,
+      `default_hooks.checkpoint.interval=${Number(params.save_period || 0) > 0 ? Math.max(1, Number(params.save_period)) : Math.max(2, Number(params.epochs || job.total_epochs || 1) + 1)}`,
     ];
     if (params.amp === true) cfgOptions.push("optim_wrapper.type=AmpOptimWrapper");
     if (params.auto_scale_lr != null) cfgOptions.push(`auto_scale_lr.enable=${Boolean(params.auto_scale_lr)}`);
@@ -215,7 +215,7 @@ function createTrainingWorker({
       "name=run",
       "exist_ok=True",
     ];
-    args.push(`save_period=${Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1}`);
+    args.push(`save_period=${Number(params.save_period || 0) > 0 ? Number(params.save_period) : -1}`);
     if (params.optimizer) args.push(`optimizer=${params.optimizer}`);
     if (params.lr0 != null) args.push(`lr0=${Number(params.lr0)}`);
     if (params.resume && params.resolvedWeights) args.push("resume=True");
@@ -228,7 +228,7 @@ function createTrainingWorker({
       const trainOptions = {
         data: path.join(snapshot.path, "data.yaml"), epochs: Number(params.epochs || job.total_epochs || 100),
         imgsz: Number(params.imgsz || 640), batch: Number(params.batch || 16), project: job.output_root,
-        name: "run", exist_ok: true, save_period: Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1,
+        name: "run", exist_ok: true, save_period: Number(params.save_period || 0) > 0 ? Number(params.save_period) : -1,
       };
       if (params.device !== "" && params.device != null) trainOptions.device = params.device;
       if (params.optimizer) trainOptions.optimizer = params.optimizer;

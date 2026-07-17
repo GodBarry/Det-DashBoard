@@ -1,64 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronRight, FolderOpen, Plus, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Plus, X } from "lucide-react";
 
-function projectPath(projectId, byId) {
-  const path = [];
+function pathFor(id, byId) {
+  const rows = [];
   const seen = new Set();
-  let cursor = byId.get(projectId);
-  while (cursor && !seen.has(cursor.id)) {
-    path.unshift(cursor);
-    seen.add(cursor.id);
-    cursor = cursor.parent_id ? byId.get(cursor.parent_id) : null;
-  }
-  return path;
+  let cursor = byId.get(id);
+  while (cursor && !seen.has(cursor.id)) { rows.unshift(cursor); seen.add(cursor.id); cursor = cursor.parent_id ? byId.get(cursor.parent_id) : null; }
+  return rows;
 }
 
-export function CascadingProjectPicker({ projects = [], value = "", values = [], multiple = false, onChange, ariaLabel = "选择数据集" }) {
-  const byId = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-  const children = useMemo(() => {
-    const map = new Map();
-    projects.forEach((project) => {
-      const parent = project.parent_id || "root";
-      if (!map.has(parent)) map.set(parent, []);
-      map.get(parent).push(project);
-    });
-    return map;
-  }, [projects]);
-  const initialId = value || values[values.length - 1] || "";
-  const [activePath, setActivePath] = useState(() => projectPath(initialId, byId));
-  useEffect(() => {
-    if (initialId) setActivePath(projectPath(initialId, byId));
-  }, [initialId, byId]);
+export function CascadingProjectPicker({ projects = [], value = "", values = [], multiple = false, onChange, ariaLabel = "选择数据集", storageKey = "dataset-picker" }) {
   const selectedIds = multiple ? values : [value].filter(Boolean);
-  const columns = [];
-  let parent = "root";
-  for (let depth = 0; depth < Math.max(1, activePath.length + 1); depth += 1) {
-    const options = children.get(parent) || [];
-    if (!options.length) break;
-    columns.push({ depth, parent, options, selected: activePath[depth]?.id || "" });
-    parent = activePath[depth]?.id;
-    if (!parent) break;
-  }
-  const choose = (depth, id) => {
-    const nextPath = [...activePath.slice(0, depth), byId.get(id)].filter(Boolean);
-    setActivePath(nextPath);
-    if (!multiple && !(children.get(id) || []).length) onChange?.(id);
-  };
-  const toggleCurrent = () => {
-    const id = activePath[activePath.length - 1]?.id;
-    if (!id) return;
-    onChange?.(selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
-  };
-  return (
-    <div className="cascading-project-picker" aria-label={ariaLabel}>
-      <div className="cascading-project-levels">
-        {columns.map((column, index) => <div className="cascading-project-level" key={`${column.parent}-${column.depth}`}>
-          {index > 0 && <ChevronRight size={14} />}
-          <label className="path-select"><FolderOpen size={14} /><select value={column.selected} onChange={(event) => choose(column.depth, event.target.value)}><option value="">选择第 {column.depth + 1} 级</option>{column.options.map((project) => <option key={project.id} value={project.id}>{project.name} · {Number(project.image_count || 0)} 图像</option>)}</select></label>
-        </div>)}
-        {multiple && <button className="cascading-project-add" type="button" disabled={!activePath.length} onClick={toggleCurrent} title="添加或取消当前数据集">{selectedIds.includes(activePath[activePath.length - 1]?.id) ? <Check size={14} /> : <Plus size={14} />}</button>}
-      </div>
-      {multiple && selectedIds.length > 0 && <div className="cascading-project-tags">{selectedIds.map((id) => <button type="button" key={id} onClick={() => onChange?.(selectedIds.filter((item) => item !== id))} title="取消选择"><span>{projectPath(id, byId).map((item) => item.name).join(" / ")}</span><X size={12} /></button>)}</div>}
-    </div>
-  );
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem(`det-dashboard.${storageKey}.expanded`) || "[]")); } catch { return new Set(); } });
+  const byId = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const children = useMemo(() => { const map = new Map(); projects.forEach((project) => { const key = project.parent_id || "root"; if (!map.has(key)) map.set(key, []); map.get(key).push(project); }); return map; }, [projects]);
+  const visible = [];
+  const append = (parent = "root", depth = 0) => (children.get(parent) || []).forEach((project) => { const hasChildren = (children.get(project.id) || []).length > 0; visible.push({ ...project, depth, hasChildren }); if (hasChildren && expanded.has(project.id)) append(project.id, depth + 1); });
+  append();
+  const toggleExpanded = (id) => setExpanded((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); localStorage.setItem(`det-dashboard.${storageKey}.expanded`, JSON.stringify([...next])); return next; });
+  const select = (id) => { if (multiple) onChange?.(selectedIds.includes(id) ? selectedIds : [...selectedIds, id]); else onChange?.(id); setOpen(false); };
+  const remove = (id) => { if (multiple) onChange?.(selectedIds.filter((item) => item !== id)); else onChange?.(""); };
+  return <div className="tree-project-picker" aria-label={ariaLabel}>
+    {selectedIds.map((id) => <div className="tree-project-selection" key={id}><FolderOpen size={14} /><span title={pathFor(id, byId).map((item) => item.name).join(" > ")}>{pathFor(id, byId).map((item) => item.name).join(" > ")}</span><button type="button" title="取消选择" onClick={() => remove(id)}><X size={13} /></button></div>)}
+    {(multiple || !selectedIds.length) && <button className="tree-project-empty" type="button" onClick={() => setOpen((current) => !current)}><Plus size={14} /><span>{selectedIds.length ? "继续选择数据集" : "选择数据集"}</span><ChevronDown size={14} /></button>}
+    {open && <div className="tree-project-popover">{visible.map((project) => <div className={`tree-project-option ${selectedIds.includes(project.id) ? "selected" : ""}`} style={{ "--tree-depth": project.depth }} key={project.id}><button className="tree-project-toggle" type="button" disabled={!project.hasChildren} onClick={() => project.hasChildren && toggleExpanded(project.id)}>{project.hasChildren ? (expanded.has(project.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}</button><button className="tree-project-name" type="button" onClick={() => select(project.id)}><Folder size={14} /><span>{project.name}</span><em>{Number(project.image_count || 0)}</em>{selectedIds.includes(project.id) && <Check size={13} />}</button></div>)}{!visible.length && <div className="muted">暂无数据集项目</div>}</div>}
+  </div>;
 }

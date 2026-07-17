@@ -136,7 +136,7 @@ function createRuntimeJobService({
     params.trainProjectIds = datasetSplits.trainProjectIds;
     params.valProjectIds = datasetSplits.valProjectIds;
     params.testProjectIds = datasetSplits.testProjectIds;
-    params.save_period = Number(body.savePeriod ?? body.save_period ?? params.save_period ?? -1);
+    params.save_period = Number(body.savePeriod ?? body.save_period ?? params.save_period ?? 0);
     const totalEpochs = Number(params.max_epochs || params.epochs || body.totalEpochs || 0) || 0;
     const name = String(body.name || `${project.name}_train_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).trim();
     const template = String(body.template || "ultralytics_yolo_detect");

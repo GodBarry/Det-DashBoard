@@ -3,7 +3,9 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 export function AssetResourceGroup({ title, icon: Icon, count, defaultOpen = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const storageKey = `det-dashboard.asset-group.${title}`;
+  const [open, setOpenState] = useState(() => { const stored = localStorage.getItem(storageKey); return stored == null ? defaultOpen : stored === "1"; });
+  const setOpen = (next) => { localStorage.setItem(storageKey, next ? "1" : "0"); setOpenState(next); };
 
   return (
     <section className="asset-tree-group">

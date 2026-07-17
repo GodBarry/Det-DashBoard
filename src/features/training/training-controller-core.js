@@ -1,4 +1,6 @@
 export function createDefaultTrainingForm(restoredTrainingForm) {
+  const legacySavePeriod = localStorage.getItem("det-dashboard.save-period-default-v2") !== "1";
+  if (legacySavePeriod) localStorage.setItem("det-dashboard.save-period-default-v2", "1");
   return {
     name: "",
     datasetProjectId: "",
@@ -27,13 +29,14 @@ export function createDefaultTrainingForm(restoredTrainingForm) {
     batch: 16,
     learningRate: 0.0032,
     optimizer: "SGD",
-    savePeriod: 10,
+    savePeriod: 0,
     earlyStop: true,
     amp: true,
     freezeBackbone: false,
     device: "0",
     algorithmParams: {},
     ...(restoredTrainingForm || {}),
+    savePeriod: legacySavePeriod ? 0 : Number(restoredTrainingForm?.savePeriod || 0),
   };
 }
 
