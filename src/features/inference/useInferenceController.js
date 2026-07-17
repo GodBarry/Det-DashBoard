@@ -84,6 +84,16 @@ export function useInferenceController({
       .catch((error) => setError(error.message || "重新开始推理任务失败"));
   }
 
+  function updateInferenceJobState(jobId, action) {
+    request(`/api/ml/inference-jobs/${jobId}/${action}`, { method: "POST", headers: { "content-type": "application/json" } })
+      .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "推理任务状态更新失败");
+        (refreshInferenceJobs || loadMlPlatform)();
+      })
+      .catch((error) => setError(error.message || "推理任务状态更新失败"));
+  }
+
   function deleteInferenceJobs(jobIds) {
     const ids = normalizeInferenceJobIds(jobIds);
 
@@ -138,6 +148,7 @@ export function useInferenceController({
     deleteInferenceJobs,
     inferenceForm,
     requeueInferenceJob,
+    updateInferenceJobState,
     setActiveInferenceResult,
     setInferenceForm,
     submitInferenceJob,

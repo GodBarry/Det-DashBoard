@@ -12,6 +12,7 @@ import {
   FolderOpen,
   GripVertical,
   Play,
+  Pause,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -26,6 +27,8 @@ import {
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
 export function InferenceWorkspace({
 
 projects,
@@ -61,6 +64,7 @@ deleteInferenceJob,
 deleteInferenceJobs,
 
 requeueInferenceJob,
+updateInferenceJobState,
 
 moveRuntimeQueueJob,
 
@@ -693,28 +697,7 @@ return (
           <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
             <span className="dataset-source-kind"><Database size={14} />数据集</span>
-            <div className="inference-dataset-picker">
-              <label className="path-select dataset-root-select">
-                <FolderOpen size={15} />
-                <select value={selectedRootProjectId} onChange={(e) => selectDatasetRoot(e.target.value)}>
-                  <option value="">选择一级项目</option>
-                  {topLevelDatasetProjects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="path-select dataset-child-select">
-                <Folder size={15} />
-                <select value={inferenceForm.datasetProjectId} onChange={(e) => setField("datasetProjectId", e.target.value)} disabled={!selectedRootProjectId}>
-                  <option value="">{selectedRootProjectId ? "选择二级数据集" : "先选择一级项目"}</option>
-                  {secondLevelDatasetOptions.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.datasetOptionLabel || project.name} · {formatCount(project.image_count || 0)} 图像
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <CascadingProjectPicker projects={projects} value={inferenceForm.datasetProjectId} onChange={(projectId) => setField("datasetProjectId", projectId)} ariaLabel="推理数据集层级选择" />
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
@@ -818,7 +801,8 @@ return (
                 <span>{formatMetric(metrics.map50)}</span>
                 <div className="queue-actions">
                   <span className="queue-action-row">
-                    <button type="button" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
+                    <button type="button" title="查看详情" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
+                    <button type="button" title={job.status === "paused" ? "继续任务" : "暂停任务"} disabled={done} onClick={() => updateInferenceJobState?.(job.id, job.status === "paused" ? "resume" : "pause")}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>
                     <button className="restart-action" type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RotateCcw size={15} strokeWidth={2.2} /></button>
                     <button className="danger-icon" type="button" title="删除任务" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
                   </span>
@@ -849,10 +833,10 @@ return (
         <div><span>mAP50-95</span><b>{formatMetric(latestMetrics.map)}</b></div>
       </div>
       <div className="result-preview-strip reference-preview">
-        <h3>结果预览 <span>（最近 12 张）</span><button type="button">查看全部</button></h3>
+        <h3>结果预览 <span>（最近 12 张）</span><button type="button" disabled={!previewRows.length} onClick={() => setSampleViewer(0)}>查看全部</button></h3>
         <div className="reference-preview-grid">
           {(previewItems.length ? previewItems : Array.from({ length: 8 }, (_, index) => ({ id: `empty-${index}`, display_name: "等待结果" }))).map((item, index) => (
-            <div className={`result-thumb thumb-${index}`} key={item.id || item.display_name || index}>
+            <button className={`result-thumb thumb-${index}`} type="button" disabled={!item.thumb_url && !item.image_url && !item.project_image_id} onDoubleClick={() => setSampleViewer(index)} key={item.id || item.display_name || index}>
               <div className="result-thumb-media">
                 {item.thumb_url && <AuthenticatedImage src={item.thumb_url} alt={item.display_name || "推理结果"} loading="lazy" />}
                 {predictionItems(item.predictions_json).map((prediction, predictionIndex) => {
@@ -870,7 +854,7 @@ return (
                   );
                 })}
               </div>
-            </div>
+            </button>
           ))}
         </div>
         <div className="bbox-legend-row">
@@ -884,6 +868,7 @@ return (
         <pre>{executionLog}</pre>
       </div>
     </aside>
+    {sampleViewer != null && <InferenceResultViewer rows={previewRows} initialIndex={sampleViewer} onClose={() => setSampleViewer(null)} predictionItems={predictionItems} predictionBoxStyle={predictionBoxStyle} predictionColor={predictionColor} />}
   </div>
 );
 }

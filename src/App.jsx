@@ -217,6 +217,7 @@ const {
   deleteInferenceJobs,
   inferenceForm,
   requeueInferenceJob,
+  updateInferenceJobState,
   setActiveInferenceResult,
   setInferenceForm,
   submitInferenceJob,
@@ -561,6 +562,7 @@ deleteInferenceJob={deleteInferenceJob}
 deleteInferenceJobs={deleteInferenceJobs}
 
 requeueInferenceJob={requeueInferenceJob}
+updateInferenceJobState={updateInferenceJobState}
 
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 

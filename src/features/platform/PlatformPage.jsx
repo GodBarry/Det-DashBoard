@@ -71,6 +71,7 @@ export function PlatformPage({
   deleteInferenceJob,
   deleteInferenceJobs,
   requeueInferenceJob,
+  updateInferenceJobState,
   moveRuntimeQueueJob,
   activeInferenceResult,
   setActiveInferenceResult,
@@ -199,6 +200,7 @@ export function PlatformPage({
             deleteInferenceJob={deleteInferenceJob}
             deleteInferenceJobs={deleteInferenceJobs}
             requeueInferenceJob={requeueInferenceJob}
+            updateInferenceJobState={updateInferenceJobState}
             moveRuntimeQueueJob={moveRuntimeQueueJob}
             helpers={{ bestAssetLink, envTooltip, formatMetric, modelFamilyLabel, parseMaybeJson, predictionBoxStyle, predictionColor, predictionItems, predictionLegend, projectTreeRows, versionTooltip }}
           />

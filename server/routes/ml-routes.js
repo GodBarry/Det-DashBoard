@@ -205,6 +205,18 @@ function createMlRoutes(deps) {
       sendJson(res, { job: await runtimeJobService.requeueInferenceJob(requeueInferenceMatch[1]) });
       return true;
     }
+    const pauseInferenceMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/pause$/);
+    if (method === "POST" && pauseInferenceMatch) {
+      await resourceAccess.assertInferenceJobWrite(actor, pauseInferenceMatch[1]);
+      sendJson(res, { job: await runtimeJobService.pauseInferenceJob(pauseInferenceMatch[1]) });
+      return true;
+    }
+    const resumeInferenceMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/resume$/);
+    if (method === "POST" && resumeInferenceMatch) {
+      await resourceAccess.assertInferenceJobWrite(actor, resumeInferenceMatch[1]);
+      sendJson(res, { job: await runtimeJobService.resumeInferenceJob(resumeInferenceMatch[1]) });
+      return true;
+    }
     const inferenceJobMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
     if (method === "DELETE" && inferenceJobMatch) {
       await resourceAccess.assertInferenceJobWrite(actor, inferenceJobMatch[1]);

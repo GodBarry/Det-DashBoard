@@ -363,6 +363,32 @@ function createRuntimeJobService({
     return { ...updated, params_json: params };
   }
 
+  async function pauseInferenceJob(jobId) {
+    const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
+    if (!job) throw new Error("推理任务不存在");
+    if (["done", "failed", "cancelled"].includes(job.status)) throw new Error("已结束的推理任务不能暂停");
+    if (job.status === "paused") return job;
+    const stopped = stopProcess(job.process_pid);
+    const updated = (await query(
+      `UPDATE runtime_inference_jobs SET status='paused', process_pid=NULL, message=$1 WHERE id=$2 RETURNING *`,
+      [stopped ? "推理任务已暂停，运行进程已停止" : "推理任务已暂停", jobId],
+    )).rows[0];
+    await query("INSERT INTO runtime_inference_logs (job_id, stream, line) VALUES ($1,'system',$2)", [jobId, stopped ? "job paused; process stopped" : "job paused"]);
+    return updated;
+  }
+
+  async function resumeInferenceJob(jobId) {
+    const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
+    if (!job) throw new Error("推理任务不存在");
+    if (job.status !== "paused") throw new Error("只有已暂停的推理任务可以继续");
+    const updated = (await query(
+      `UPDATE runtime_inference_jobs SET status='pending', process_pid=NULL, started_at=NULL, finished_at=NULL, message=$1 WHERE id=$2 RETURNING *`,
+      ["推理任务已继续，等待 worker 接管", jobId],
+    )).rows[0];
+    await query("INSERT INTO runtime_inference_logs (job_id, stream, line) VALUES ($1,'system',$2)", [jobId, "job resumed"]);
+    return updated;
+  }
+
   return {
     presentTrainingJobs,
     listTrainingJobs,
@@ -378,6 +404,8 @@ function createRuntimeJobService({
     getInferenceEvaluation,
     deleteInferenceJob,
     requeueInferenceJob,
+    pauseInferenceJob,
+    resumeInferenceJob,
   };
 }
 

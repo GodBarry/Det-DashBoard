@@ -206,10 +206,15 @@ function createModelService({
       where += " AND ma.artifact_type='weights'";
     }
     const rows = await query(
-      `SELECT ma.*, mv.version_name, m.name AS model_name
+      `SELECT ma.*, mv.version_name, mv.stage, mv.created_at AS model_created_at,
+              m.name AS model_name, p.name AS dataset_project_name,
+              tj.name AS training_job_name, tj.current_epoch AS training_current_epoch,
+              tj.total_epochs AS training_total_epochs
        FROM model_files ma
        JOIN model_revisions mv ON mv.id=ma.model_version_id
        JOIN model_clusters m ON m.id=mv.model_id
+       LEFT JOIN projects p ON p.id=mv.dataset_project_id
+       LEFT JOIN runtime_training_jobs tj ON tj.id=mv.training_job_id
        WHERE ${where}
        ORDER BY
          CASE WHEN ma.path ILIKE '%/weights/best.pt' OR ma.path ILIKE '%\\\\weights\\\\best.pt' THEN 0 ELSE 1 END,
@@ -219,14 +224,42 @@ function createModelService({
     );
     const artifact = rows.rows[0];
     if (!artifact) return sendError(res, 404, "model artifact not found");
-    const ext = path.extname(artifact.path || "") || ".bin";
-    const fileName = `${cleanName(artifact.model_name, "model")}_${cleanName(artifact.version_name, "version")}_${path.basename(artifact.path || `artifact${ext}`)}`;
     const meta = artifact.metadata_json || {};
+    const ext = path.extname(artifact.path || "") || ".bin";
+    const sourceStem = path.basename(artifact.path || `artifact${ext}`, ext);
+    const epochValue = Number(meta.epoch ?? meta.checkpointEpoch ?? artifact.training_current_epoch ?? 0) || 0;
+    const weightRole = meta.weightRole || (/best/i.test(sourceStem) ? "best" : /last/i.test(sourceStem) ? "last" : sourceStem);
+    const created = new Date(artifact.model_created_at || artifact.created_at || Date.now());
+    const createdCode = Number.isNaN(created.getTime())
+      ? dateCode()
+      : created.toISOString().replace(/[-:T]/g, "").slice(0, 12);
+    const downloadPart = (value, fallback) => String(value || fallback)
+      .trim()
+      .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^[_\.]+|[_\.]+$/g, "") || fallback;
+    const modelLabel = path.basename(String(artifact.model_name || "model"), path.extname(String(artifact.model_name || "")));
+    const stageLabel = artifact.stage && String(artifact.stage).toLowerCase() !== String(weightRole).toLowerCase()
+      ? downloadPart(artifact.stage, "model")
+      : null;
+    const nameParts = [
+      downloadPart(modelLabel, "model"),
+      artifact.dataset_project_name ? downloadPart(artifact.dataset_project_name, "dataset") : null,
+      artifact.training_job_name ? downloadPart(artifact.training_job_name, "task") : null,
+      epochValue > 0 ? `epoch${epochValue}` : null,
+      downloadPart(weightRole, "weights"),
+      stageLabel,
+      createdCode,
+    ].filter(Boolean);
+    const fileName = `${nameParts.join("_").slice(0, 180)}${ext}`;
+    const asciiFileName = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+    const disposition = `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
     const localPath = meta.localPath && fs.existsSync(meta.localPath) ? meta.localPath : store.localFallbackPath(artifact.path);
     if (fs.existsSync(localPath)) {
       res.writeHead(200, {
         "content-type": "application/octet-stream",
-        "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+        "content-disposition": disposition,
       });
       fs.createReadStream(localPath).pipe(res);
       return;
@@ -234,7 +267,7 @@ function createModelService({
     const stream = await store.getStream(artifact.path);
     res.writeHead(200, {
       "content-type": "application/octet-stream",
-      "content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+      "content-disposition": disposition,
     });
     stream.pipe(res);
   }

@@ -33,7 +33,7 @@ export function EvaluationSampleViewer({
 
   if (!row) return null;
   const imageId = row.project_image_id || row.projectImageId || row.id;
-  const imageSrc = imageId ? `/api/project-images/${imageId}/full` : (row.image_url || row.thumb_url || "");
+  const imageSrc = imageId ? `/api/project-images/${imageId}/preview?size=1920` : (row.image_url || row.thumb_url || "");
   const boxes = getErrorBoxes(row, filter);
 
   return (
@@ -47,7 +47,7 @@ export function EvaluationSampleViewer({
       </div>
       <button className="viewer-page-button viewer-page-prev" disabled={index <= 0} onClick={() => move(-1)} title="上一"><ChevronRight size={28} /></button>
       <div className="viewer-stage">
-        <div className="evaluation-sample-large">
+        <div className="evaluation-sample-large" style={{ aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}` }}>
           {imageSrc && !imageFailed ? <AuthenticatedImage src={imageSrc} draggable="false" alt={row.display_name || "错误样本"} onError={() => setImageFailed(true)} /> : <div className="evaluation-sample-load-error"><ImageIcon size={34} /><b>图片加载失败</b><span>{imageId ? `图片索引：${imageId}` : "该记录没有关联图片索引"}</span></div>}
           {boxes.map((box, boxIndex) => {
             const style = getBoxStyle(box.item, row);

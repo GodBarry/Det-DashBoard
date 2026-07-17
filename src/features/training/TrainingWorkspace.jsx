@@ -1,8 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  ArrowDown,
-  ArrowUp,
   Boxes,
   ChevronDown,
   ChevronRight,
@@ -14,6 +12,7 @@ import {
   Folder,
   FolderOpen,
   Grid,
+  GripVertical,
   Pause,
   Play,
   RefreshCw,
@@ -23,6 +22,7 @@ import {
 
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
+import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 export function TrainingWorkspace({
 
   projects,
@@ -180,7 +180,51 @@ export function TrainingWorkspace({
     { title: 'Python 环境', icon: Cpu, rows: pythonEnvs.map((env) => ({ id: env.id, name: env.name, right: env.status, active: env.id === selectedEnv.id, onClick: () => setTrainingForm({ ...trainingForm, pythonEnvId: env.id, python: env.python_path || trainingForm.python }) })) },
   ].filter((group) => group.rows.length).map((group) => ({ ...group, count: group.rows.length }));
 
-  const queueRows = trainingJobs;
+  const [trainingQueueOrder, setTrainingQueueOrder] = useState(() => trainingJobs.map((job) => job.id));
+  const trainingQueueOrderRef = useRef(trainingQueueOrder);
+  const [draggedTrainingJobId, setDraggedTrainingJobId] = useState("");
+  const [dragOverTrainingJobId, setDragOverTrainingJobId] = useState("");
+  useEffect(() => {
+    const incoming = trainingJobs.map((job) => job.id);
+    setTrainingQueueOrder((current) => {
+      const valid = new Set(incoming);
+      const retained = current.filter((id) => valid.has(id));
+      const next = [...incoming.filter((id) => !retained.includes(id)), ...retained];
+      trainingQueueOrderRef.current = next;
+      return next;
+    });
+  }, [trainingJobs]);
+  const trainingJobById = new Map(trainingJobs.map((job) => [job.id, job]));
+  const queueRows = trainingQueueOrder.map((id) => trainingJobById.get(id)).filter(Boolean);
+  const beginTrainingDrag = (event, jobId) => {
+    event.preventDefault();
+    setDraggedTrainingJobId(jobId);
+    setDragOverTrainingJobId(jobId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveTrainingDrag = (event) => {
+    if (!draggedTrainingJobId) return;
+    event.preventDefault();
+    const targetId = document.elementFromPoint(event.clientX, event.clientY)?.closest(".training-table-row")?.dataset.jobId;
+    if (!targetId || targetId === draggedTrainingJobId) return;
+    setDragOverTrainingJobId(targetId);
+    setTrainingQueueOrder((current) => {
+      const from = current.indexOf(draggedTrainingJobId);
+      const to = current.indexOf(targetId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      next.splice(from, 1);
+      next.splice(to, 0, draggedTrainingJobId);
+      trainingQueueOrderRef.current = next;
+      return next;
+    });
+  };
+  const finishTrainingDrag = (event) => {
+    if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (draggedTrainingJobId) moveRuntimeQueueJob?.("training", draggedTrainingJobId, trainingQueueOrderRef.current);
+    setDraggedTrainingJobId("");
+    setDragOverTrainingJobId("");
+  };
 
   const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [];
 
@@ -357,38 +401,9 @@ export function TrainingWorkspace({
 
           <section className="reference-section dataset-split-section">
             <h2>数据来源</h2>
-            <div className="training-dataset-tree-grid">
-              {[
-                ["trainProjectId", "训练集", "train", trainProjectIds],
-                ["valProjectId", "验证集", "val", valProjectIds],
-                ["testProjectId", "测试集", "test", testProjectIds],
-              ].map(([splitKey, label, hint, selectedIds]) => (
-                <section className={`training-dataset-tree ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey}>
-                  <button className="training-dataset-tree-head" type="button" onClick={() => setActiveDatasetSplit(splitKey)}>
-                    <span><FolderOpen size={14} /><b>{label}</b><small>{hint}</small></span>
-                    <em>已选 {selectedIds.length} 项</em>
-                  </button>
-                  <div className="training-dataset-tree-body">
-                    {visibleDatasetRows.map((project) => {
-                      const checked = selectedIds.includes(project.id);
-                      return (
-                        <div className={`training-dataset-node ${checked ? "selected" : ""}`} style={{ "--tree-depth": project.depth }} key={`${splitKey}-${project.id}`}>
-                          <button className="training-tree-toggle" type="button" disabled={!project.hasChildren} title={project.hasChildren ? "展开或折叠" : "无下级项目"} onClick={() => project.hasChildren && toggleDatasetNode(project.id)}>
-                            {project.hasChildren ? (expandedDatasetNodes.has(project.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}
-                          </button>
-                          <button className="training-tree-select" type="button" onClick={() => { setActiveDatasetSplit(splitKey); toggleDatasetSelection(splitKey, project.id); }}>
-                            <span className="tree-check" aria-hidden="true">{checked ? "✓" : ""}</span>
-                            <Folder size={14} />
-                            <span title={project.name}>{project.name}</span>
-                            <em>{formatCount(project.image_count || 0)}</em>
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {!visibleDatasetRows.length && <div className="training-tree-empty">暂无可用数据集</div>}
-                  </div>
-                </section>
-              ))}
+            <div className="config-row training-task-name-row"><span className="row-label">任务名称</span><input value={trainingForm.name || ""} onChange={(event) => setField("name", event.target.value)} placeholder="可留空，将按 数据集_算法_时间 自动生成" /></div>
+            <div className="training-cascading-splits">
+              {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} ariaLabel={`${label}层级选择`} /></div>)}
             </div>
             <div className="training-filter-bar">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>
@@ -414,7 +429,7 @@ export function TrainingWorkspace({
 
           <section className="reference-section model-init-section">
             <h2>模型与算法</h2>
-            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : !version.training_job_id || version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
+            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
             <div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">选择 Python 环境</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '--'} · {selectedEnv.torch_version || '--'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div>
           </section>
 
@@ -434,7 +449,7 @@ export function TrainingWorkspace({
             const persistedJob = Boolean(job.id && !String(job.id).startsWith("mock-"));
             const terminalJob = ["done", "failed", "cancelled"].includes(String(job.status || "").toLowerCase());
             return (
-              <div className="training-table-row" key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}>
+              <div data-job-id={job.id} className={`training-table-row${draggedTrainingJobId === job.id ? " is-dragging" : ""}${dragOverTrainingJobId === job.id ? " is-drag-over" : ""}`} key={job.id || index} onClick={() => setActiveTrainingJobId(job.id)}>
                 <b>{job.name || "训练任务"}</b>
                 <span>{job.dataset_project_name || selectedProject.name || "--"}</span>
                 <span>{job.model_name || selectedModel.name || "--"}</span>
@@ -445,13 +460,12 @@ export function TrainingWorkspace({
                 <span>{formatMetric(job.map50 ?? parseMaybeJson(job.metrics_json)?.map50)}</span>
                 <span>{job.eta || job.eta_text || "--"}</span>
                 <div className="training-row-actions">
-                  <button title="查看任务" onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>
-                  <button title="上移" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "up"); }}><ArrowUp size={14} /></button>
-                  <button title="下移" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("training", job.id, "down"); }}><ArrowDown size={14} /></button>
+                  <button title="查看详情" onClick={(event) => { event.stopPropagation(); setActiveTrainingJobId(job.id); }}><Eye size={14} /></button>
+                  <button title="打开 TensorBoard" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button>
                   <button title={job.status === "paused" ? "继续任务" : "暂停任务"} disabled={!persistedJob || terminalJob} onClick={(event) => { event.stopPropagation(); updateTrainingJobState?.(job.id, job.status === "paused" ? "resume" : "pause"); }}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>
                   <button className="restart-action" title="重新开始" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); requeueTrainingJob?.(job.id); }}><RotateCcw size={15} strokeWidth={2.2} /></button>
                   <button className="danger-icon" title="删除任务" disabled={!persistedJob} onClick={(event) => { event.stopPropagation(); deleteTrainingJob?.(job.id); }}><Trash2 size={14} /></button>
-                  <button title="打开 TensorBoard" onClick={(event) => { event.stopPropagation(); window.open("http://127.0.0.1:6006", "_blank"); }}><Grid size={14} /></button>
+                  <button className="queue-drag-handle" title="按住拖动任务排序" aria-label="拖动训练任务排序" disabled={!persistedJob} onPointerDown={(event) => beginTrainingDrag(event, job.id)} onPointerMove={moveTrainingDrag} onPointerUp={finishTrainingDrag} onPointerCancel={finishTrainingDrag}><GripVertical size={15} /></button>
                 </div>
               </div>
             );

@@ -154,9 +154,9 @@ return (
 
 <AssetModelFamilyTree families={familyRows} onSelect={setSelectedExportAsset} />
 
-<AssetResourceGroup title="预训练模型" icon={Download} count={modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").length} defaultOpen={false}>
+<AssetResourceGroup title="预训练模型" icon={Download} count={modelVersions.filter((version) => version.stage === "pretrained").length} defaultOpen={false}>
 
-{modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").map((version) => (
+{modelVersions.filter((version) => version.stage === "pretrained").map((version) => (
 
 <button className={selectedExportAsset?.key === `model-${version.id}` ? "active" : ""} key={version.id} onClick={() => setSelectedExportAsset({ key: `model-${version.id}`, type: "模型权重", name: `${version.model_name} / ${version.version_name}`, href: `/api/ml/model-versions/${encodeURIComponent(version.id)}/download` })} onContextMenu={(event) => { event.preventDefault(); const anchor = document.createElement("a"); anchor.href = `/api/ml/model-versions/${encodeURIComponent(version.id)}/download`; anchor.click(); }}><Brain size={14} /><span>{version.model_name} / {version.version_name}</span><Download size={13} /></button>
 
@@ -213,11 +213,11 @@ return (
 <div className="workspace-commandbar asset-commandbar">
 
 {(currentUser?.role === "admin" || userPermissions.includes("assets.register")) && <>
-<button onClick={() => setDrawerMode("cluster")}><span>+</span>登记模型</button>
+<button onClick={() => setDrawerMode("cluster")}><span>+</span>登记模型簇</button>
 
-<button onClick={() => setDrawerMode("version")}><Download size={15} />导入预训练权重</button>
+<button onClick={() => { setVersionForm({ ...versionForm, stage: "pretrained" }); setDrawerMode("pretrained"); }}><Download size={15} />导入预训练模型</button>
 
-<button onClick={() => setDrawerMode("version")}><span>+</span>登记模型版本</button>
+<button onClick={() => { setVersionForm({ ...versionForm, stage: "candidate" }); setDrawerMode("version"); }}><span>+</span>登记模型库模型</button>
 
 <button onClick={() => setDrawerMode("algorithm")}><span>+</span>导入算法适配</button>
 
@@ -294,7 +294,7 @@ return (
 
 <span>{version.model_name || family.family}</span><span>{version.dataset_project_name || "未绑定数据集"}</span><span>{formatDateTime(version.created_at)}</span><em>正常</em><span>{version.artifact_root || `minio://models/${family.family.toLowerCase()}/`}</span>
 
-<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="分享" onClick={() => setShareResource({ ...version, name: version.version_name, resourceType: "model_revision" })}><Share2 size={13} /></button><button title="申请公开" onClick={() => setPublicResource({ id: version.model_id, name: version.model_name, resourceType: "model" })}><Globe2 size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button></div>
+<div className="asset-actions"><button title="查看"><Eye size={13} /></button><button title="下载模型" onClick={() => { const anchor = document.createElement("a"); anchor.href = `/api/ml/model-versions/${encodeURIComponent(version.id)}/download`; anchor.click(); }}><Download size={13} /></button><button title="分享" onClick={() => setShareResource({ ...version, name: version.version_name, resourceType: "model_revision" })}><Share2 size={13} /></button><button title="申请公开" onClick={() => setPublicResource({ id: version.model_id, name: version.model_name, resourceType: "model" })}><Globe2 size={13} /></button><button title="重命名" onClick={() => renameModelVersion(version)}><Edit3 size={13} /></button></div>
 
 </div>
 
@@ -320,7 +320,7 @@ return (
 
 <div className="asset-table-row" key={env.id} title={envTooltip(env)}>
 
-<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons resource={{ ...env, resourceType: "runtime_env" }} onShare={setShareResource} onPublic={setPublicResource} />
+<b>{env.name}</b><span>{String(env.python_version || "3.12").replace(/^Python\s*/i, "")}</span><span>{env.torch_version || "未检"}</span><span>{env.cuda_available ? `CUDA ${env.cuda_version || ""}` : "CPU"}</span><em>可用</em><span>{formatDateTime(env.created_at)}</span><span>{env.source_type === "conda_pack" ? env.artifact_key : env.python_path}</span><AssetActionButtons resource={{ ...env, resourceType: "runtime_env" }} onShare={setShareResource} onPublic={setPublicResource} downloadHref={env.artifact_key ? `/api/ml/python-envs/${encodeURIComponent(env.id)}/download` : ""} />
 
 </div>
 
@@ -364,7 +364,7 @@ return (
 
 <div><span>MinIO对象</span><b>{modelVersions.length + pythonEnvs.length + algorithms.length}</b><Database size={24} /></div>
 
-<div><span>预训练权重</span><b>{modelVersions.filter((version) => !version.training_job_id || version.stage === "pretrained").length}</b><Brain size={24} /></div>
+<div><span>预训练权重</span><b>{modelVersions.filter((version) => version.stage === "pretrained").length}</b><Brain size={24} /></div>
 
 <div><span>可运行环境</span><b>{pythonEnvs.filter((env) => env.status === "ready").length || pythonEnvs.length}</b><Cpu size={24} /></div>
 

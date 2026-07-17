@@ -26,7 +26,7 @@ export function AssetDrawer({
 
   const submit = () => {
     if (mode === "cluster") createModel();
-    if (mode === "version") createModelVersion();
+    if (mode === "version" || mode === "pretrained") createModelVersion();
     if (mode === "env") createPythonEnv();
     if (mode === "algorithm") window.alert("算法适配器导入接口待接入，当前已完成界面布局");
   };
@@ -41,8 +41,9 @@ export function AssetDrawer({
         <button className="drawer-close" onClick={onClose} aria-label="关闭"><X size={17} /></button>
       </div>
       <div className="drawer-tabs">
-        <button type="button" className={mode === "cluster" ? "active" : ""} onClick={() => setMode("cluster")}>模型</button>
-        <button type="button" className={mode === "version" ? "active" : ""} onClick={() => setMode("version")}>模型版本</button>
+        <button type="button" className={mode === "cluster" ? "active" : ""} onClick={() => setMode("cluster")}>模型簇</button>
+        <button type="button" className={mode === "version" ? "active" : ""} onClick={() => { setVersionForm({ ...versionForm, stage: "candidate" }); setMode("version"); }}>模型库模型</button>
+        <button type="button" className={mode === "pretrained" ? "active" : ""} onClick={() => { setVersionForm({ ...versionForm, stage: "pretrained" }); setMode("pretrained"); }}>预训练模型</button>
         <button type="button" className={mode === "algorithm" ? "active" : ""} onClick={() => setMode("algorithm")}>算法适配</button>
         <button type="button" className={mode === "env" ? "active" : ""} onClick={() => setMode("env")}>Python 环境</button>
       </div>
@@ -55,14 +56,14 @@ export function AssetDrawer({
             <DrawerField label="说明" tall><textarea value={modelForm.description} onChange={(e) => setModelForm({ ...modelForm, description: e.target.value })} placeholder="模型簇用途、适用场景、版本策" /></DrawerField>
           </>
         )}
-        {mode === "version" && (
+        {(mode === "version" || mode === "pretrained") && (
           <>
             <DrawerField label="所属模型簇"><select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}><option value="">请选择模型</option>{mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></DrawerField>
             <DrawerField label="版本名称"><input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="yolov8n_ultralytics_8.4.80_cpu" /></DrawerField>
             <DrawerField label="权重来源"><div className="drawer-segment"><button className="active" type="button">本地路径</button><button type="button">MinIO路径</button><button type="button">训练产物</button></div></DrawerField>
             <DrawerField label="权重文件路径"><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} placeholder="C:\\Users\\Administrator\\Downloads\\v8_s.pt" /></DrawerField>
             <DrawerField label="训练数据"><select value={versionForm.datasetProjectId || ""} onChange={(e) => setVersionForm({ ...versionForm, datasetProjectId: e.target.value })}><option value="">请选择训练数据</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></DrawerField>
-            <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })}><option value="pretrained">pretrained</option><option value="candidate">candidate</option><option value="published">published</option></select></DrawerField>
+            <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
             <DrawerField label="说明" tall><textarea value={versionForm.description || ""} onChange={(e) => setVersionForm({ ...versionForm, description: e.target.value })} placeholder="请输入说明（可选）" maxLength={500} /></DrawerField>
             <DrawerField label="MinIO目标路径"><DrawerInputWithIcon readOnly copyIcon value={`assets/models/${versionForm.versionName || "model-version"}/best.pt`} /></DrawerField>
             <div className="auto-parse-card"><h3>自动解析</h3><p><span>文件大小</span><b>--</b></p><p><span>SHA256</span><b>提交后计</b></p><p><span>框架</span><b>Ultralytics</b></p><p><span>任务</span><b>detect</b></p></div>
