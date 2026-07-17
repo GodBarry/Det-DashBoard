@@ -1,0 +1,2162 @@
+[
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 848,
+        "right": 284,
+        "bottom": 926
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1234,
+        "height": 848,
+        "right": 1532,
+        "bottom": 926
+      },
+      {
+        "x": 1546,
+        "y": 78,
+        "width": 360,
+        "height": 848,
+        "right": 1906,
+        "bottom": 926
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 881,
+      "right": 1920,
+      "bottom": 945
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 881,
+        "right": 300,
+        "bottom": 945
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1190,
+        "height": 881,
+        "right": 1490,
+        "bottom": 945
+      },
+      {
+        "x": 1490,
+        "y": 64,
+        "width": 430,
+        "height": 881,
+        "right": 1920,
+        "bottom": 945
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 881,
+      "scrollHeight": 881
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 881,
+      "right": 1920,
+      "bottom": 945
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 861,
+        "right": 292,
+        "bottom": 925
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1210,
+        "height": 684,
+        "right": 1502,
+        "bottom": 748
+      },
+      {
+        "x": 1502,
+        "y": 64,
+        "width": 418,
+        "height": 764,
+        "right": 1920,
+        "bottom": 828
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 881,
+      "scrollHeight": 881
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 48,
+      "right": 1920,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 1920,
+      "height": 892,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 892,
+        "right": 318,
+        "bottom": 940
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1262,
+        "height": 892,
+        "right": 1580,
+        "bottom": 940
+      },
+      {
+        "x": 1580,
+        "y": 48,
+        "width": 340,
+        "height": 892,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 892,
+      "scrollHeight": 892
+    },
+    "rootStyle": {
+      "color": "rgb(21, 35, 51)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          64,
+          106
+        ]
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 848,
+        "right": 284,
+        "bottom": 926
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1234,
+        "height": 848,
+        "right": 1532,
+        "bottom": 926
+      },
+      {
+        "x": 1546,
+        "y": 78,
+        "width": 360,
+        "height": 848,
+        "right": 1906,
+        "bottom": 926
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 881,
+      "right": 1920,
+      "bottom": 945
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 881,
+        "right": 300,
+        "bottom": 945
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1190,
+        "height": 881,
+        "right": 1490,
+        "bottom": 945
+      },
+      {
+        "x": 1490,
+        "y": 64,
+        "width": 430,
+        "height": 881,
+        "right": 1920,
+        "bottom": 945
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 881,
+      "scrollHeight": 881
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 881,
+      "right": 1920,
+      "bottom": 945
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 881,
+        "right": 292,
+        "bottom": 945
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1210,
+        "height": 881,
+        "right": 1502,
+        "bottom": 945
+      },
+      {
+        "x": 1502,
+        "y": 64,
+        "width": 418,
+        "height": 881,
+        "right": 1920,
+        "bottom": 945
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 881,
+      "scrollHeight": 881
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 48,
+      "right": 1920,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 1920,
+      "height": 892,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 892,
+        "right": 318,
+        "bottom": 940
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1262,
+        "height": 892,
+        "right": 1580,
+        "bottom": 940
+      },
+      {
+        "x": 1580,
+        "y": 48,
+        "width": 340,
+        "height": 892,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 892,
+      "scrollHeight": 892
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          64,
+          106
+        ]
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 1228,
+        "right": 284,
+        "bottom": 1306
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1874,
+        "height": 1228,
+        "right": 2172,
+        "bottom": 1306
+      },
+      {
+        "x": 2186,
+        "y": 78,
+        "width": 360,
+        "height": 1228,
+        "right": 2546,
+        "bottom": 1306
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1261,
+      "right": 2560,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1261,
+        "right": 300,
+        "bottom": 1325
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1830,
+        "height": 1261,
+        "right": 2130,
+        "bottom": 1325
+      },
+      {
+        "x": 2130,
+        "y": 64,
+        "width": 430,
+        "height": 1261,
+        "right": 2560,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1261,
+      "right": 2560,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 1241,
+        "right": 292,
+        "bottom": 1305
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1850,
+        "height": 684,
+        "right": 2142,
+        "bottom": 748
+      },
+      {
+        "x": 2142,
+        "y": 64,
+        "width": 418,
+        "height": 764,
+        "right": 2560,
+        "bottom": 828
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 48,
+      "right": 2560,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 2560,
+      "height": 1272,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 1272,
+        "right": 318,
+        "bottom": 1320
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1902,
+        "height": 1272,
+        "right": 2220,
+        "bottom": 1320
+      },
+      {
+        "x": 2220,
+        "y": 48,
+        "width": 340,
+        "height": 1272,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1272,
+      "scrollHeight": 1272
+    },
+    "rootStyle": {
+      "color": "rgb(21, 35, 51)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          26
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          101,
+          106
+        ]
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 1228,
+        "right": 284,
+        "bottom": 1306
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1874,
+        "height": 1228,
+        "right": 2172,
+        "bottom": 1306
+      },
+      {
+        "x": 2186,
+        "y": 78,
+        "width": 360,
+        "height": 1228,
+        "right": 2546,
+        "bottom": 1306
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1261,
+      "right": 2560,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1261,
+        "right": 300,
+        "bottom": 1325
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1830,
+        "height": 1261,
+        "right": 2130,
+        "bottom": 1325
+      },
+      {
+        "x": 2130,
+        "y": 64,
+        "width": 430,
+        "height": 1261,
+        "right": 2560,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1261,
+      "right": 2560,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 1261,
+        "right": 292,
+        "bottom": 1325
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1850,
+        "height": 1261,
+        "right": 2142,
+        "bottom": 1325
+      },
+      {
+        "x": 2142,
+        "y": 64,
+        "width": 418,
+        "height": 1261,
+        "right": 2560,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 48,
+      "right": 2560,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 2560,
+      "height": 1272,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 1272,
+        "right": 318,
+        "bottom": 1320
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1902,
+        "height": 1272,
+        "right": 2220,
+        "bottom": 1320
+      },
+      {
+        "x": 2220,
+        "y": 48,
+        "width": 340,
+        "height": 1272,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1272,
+      "scrollHeight": 1272
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          26
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          101,
+          106
+        ]
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 1228,
+        "right": 284,
+        "bottom": 1306
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1474,
+        "height": 1228,
+        "right": 1772,
+        "bottom": 1306
+      },
+      {
+        "x": 1786,
+        "y": 78,
+        "width": 360,
+        "height": 1228,
+        "right": 2146,
+        "bottom": 1306
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1261,
+      "right": 2160,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1261,
+        "right": 300,
+        "bottom": 1325
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1430,
+        "height": 1261,
+        "right": 1730,
+        "bottom": 1325
+      },
+      {
+        "x": 1730,
+        "y": 64,
+        "width": 430,
+        "height": 1261,
+        "right": 2160,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1261,
+      "right": 2160,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 1241,
+        "right": 292,
+        "bottom": 1305
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1450,
+        "height": 684,
+        "right": 1742,
+        "bottom": 748
+      },
+      {
+        "x": 1742,
+        "y": 64,
+        "width": 418,
+        "height": 764,
+        "right": 2160,
+        "bottom": 828
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 33, 43)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 48,
+      "right": 2160,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 2160,
+      "height": 1272,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 1272,
+        "right": 318,
+        "bottom": 1320
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1502,
+        "height": 1272,
+        "right": 1820,
+        "bottom": 1320
+      },
+      {
+        "x": 1820,
+        "y": 48,
+        "width": 340,
+        "height": 1272,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1272,
+      "scrollHeight": 1272
+    },
+    "rootStyle": {
+      "color": "rgb(21, 35, 51)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          87,
+          106
+        ]
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 14,
+        "y": 78,
+        "width": 270,
+        "height": 1228,
+        "right": 284,
+        "bottom": 1306
+      },
+      {
+        "x": 298,
+        "y": 78,
+        "width": 1474,
+        "height": 1228,
+        "right": 1772,
+        "bottom": 1306
+      },
+      {
+        "x": 1786,
+        "y": 78,
+        "width": 360,
+        "height": 1228,
+        "right": 2146,
+        "bottom": 1306
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1261,
+      "right": 2160,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1261,
+        "right": 300,
+        "bottom": 1325
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1430,
+        "height": 1261,
+        "right": 1730,
+        "bottom": 1325
+      },
+      {
+        "x": 1730,
+        "y": 64,
+        "width": 430,
+        "height": 1261,
+        "right": 2160,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "+",
+        "client": [
+          14,
+          18
+        ],
+        "scroll": [
+          14,
+          21
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "MinIO对象",
+        "client": [
+          32,
+          32
+        ],
+        "scroll": [
+          36,
+          32
+        ]
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1261,
+      "right": 2160,
+      "bottom": 1325
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 292,
+        "height": 1261,
+        "right": 292,
+        "bottom": 1325
+      },
+      {
+        "x": 292,
+        "y": 64,
+        "width": 1450,
+        "height": 1261,
+        "right": 1742,
+        "bottom": 1325
+      },
+      {
+        "x": 1742,
+        "y": 64,
+        "width": 418,
+        "height": 1261,
+        "right": 2160,
+        "bottom": 1325
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1261,
+      "scrollHeight": 1261
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 48,
+      "right": 2160,
+      "bottom": 48
+    },
+    "root": {
+      "x": 0,
+      "y": 48,
+      "width": 2160,
+      "height": 1272,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 48,
+        "width": 318,
+        "height": 1272,
+        "right": 318,
+        "bottom": 1320
+      },
+      {
+        "x": 318,
+        "y": 48,
+        "width": 1502,
+        "height": 1272,
+        "right": 1820,
+        "bottom": 1320
+      },
+      {
+        "x": 1820,
+        "y": 48,
+        "width": 340,
+        "height": 1272,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1272,
+      "scrollHeight": 1272
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "Inter, \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif",
+      "fontSize": "16px"
+    },
+    "clipped": [
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          87,
+          106
+        ]
+      }
+    ]
+  }
+]

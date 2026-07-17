@@ -1,0 +1,212 @@
+[
+  {
+    "viewport": {
+      "name": "1080p-browser",
+      "width": 1920,
+      "height": 940
+    },
+    "theme": "light",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\1080p-browser-light.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 1920,
+        "h": 881,
+        "bg": "rgb(243, 247, 251)",
+        "color": "rgb(51, 65, 85)"
+      },
+      "inspector": {
+        "h": 879,
+        "scrollH": 880
+      },
+      "builder": {
+        "h": 620,
+        "scrollH": 620,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 184,
+        "scrollH": 184
+      },
+      "offenders": []
+    }
+  },
+  {
+    "viewport": {
+      "name": "1080p-browser",
+      "width": 1920,
+      "height": 940
+    },
+    "theme": "dark",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\1080p-browser-dark.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 1920,
+        "h": 881,
+        "bg": "rgb(8, 17, 26)",
+        "color": "rgb(216, 232, 239)"
+      },
+      "inspector": {
+        "h": 879,
+        "scrollH": 880
+      },
+      "builder": {
+        "h": 620,
+        "scrollH": 620,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 184,
+        "scrollH": 184
+      },
+      "offenders": []
+    }
+  },
+  {
+    "viewport": {
+      "name": "2k-browser",
+      "width": 2560,
+      "height": 1320
+    },
+    "theme": "light",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\2k-browser-light.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 2560,
+        "h": 1261,
+        "bg": "rgb(243, 247, 251)",
+        "color": "rgb(51, 65, 85)"
+      },
+      "inspector": {
+        "h": 1259,
+        "scrollH": 1259
+      },
+      "builder": {
+        "h": 993,
+        "scrollH": 993,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 185,
+        "scrollH": 185
+      },
+      "offenders": []
+    }
+  },
+  {
+    "viewport": {
+      "name": "2k-browser",
+      "width": 2560,
+      "height": 1320
+    },
+    "theme": "dark",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\2k-browser-dark.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 2560,
+        "h": 1261,
+        "bg": "rgb(8, 17, 26)",
+        "color": "rgb(216, 232, 239)"
+      },
+      "inspector": {
+        "h": 1259,
+        "scrollH": 1259
+      },
+      "builder": {
+        "h": 993,
+        "scrollH": 993,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 185,
+        "scrollH": 185
+      },
+      "offenders": []
+    }
+  },
+  {
+    "viewport": {
+      "name": "2160x1440-browser",
+      "width": 2160,
+      "height": 1320
+    },
+    "theme": "light",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\2160x1440-browser-light.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 2160,
+        "h": 1261,
+        "bg": "rgb(243, 247, 251)",
+        "color": "rgb(51, 65, 85)"
+      },
+      "inspector": {
+        "h": 1259,
+        "scrollH": 1259
+      },
+      "builder": {
+        "h": 997,
+        "scrollH": 997,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 185,
+        "scrollH": 185
+      },
+      "offenders": []
+    }
+  },
+  {
+    "viewport": {
+      "name": "2160x1440-browser",
+      "width": 2160,
+      "height": 1320
+    },
+    "theme": "dark",
+    "file": "E:\\projects\\Det-DashBoard\\output\\playwright\\training-theme-responsive\\2160x1440-browser-dark.png",
+    "metrics": {
+      "bodyOverflowX": false,
+      "workspace": {
+        "w": 2160,
+        "h": 1261,
+        "bg": "rgb(8, 17, 26)",
+        "color": "rgb(216, 232, 239)"
+      },
+      "inspector": {
+        "h": 1259,
+        "scrollH": 1259
+      },
+      "builder": {
+        "h": 997,
+        "scrollH": 997,
+        "alignContent": "start"
+      },
+      "firstSection": {
+        "h": 103
+      },
+      "queue": {
+        "h": 185,
+        "scrollH": 185
+      },
+      "offenders": []
+    }
+  }
+]

@@ -155,7 +155,16 @@ function cleanName(value, fallback) {
 function modalityCode(modality) {
   if (modality === "infrared") return "IR";
   if (modality === "visible") return "VIS";
+  if (modality === "grayscale") return "GRAY";
   return cleanName(modality, "UNK").toUpperCase();
+}
+
+function normalizeModality(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (["ir", "infrared", "thermal", "thermalinfrared"].includes(normalized)) return "infrared";
+  if (["rgb", "vis", "visible", "visiblelight", "ccd", "color", "colour"].includes(normalized)) return "visible";
+  if (["gray", "grey", "grayscale", "greyscale", "monochrome", "mono"].includes(normalized)) return "grayscale";
+  return "";
 }
 
 function bboxFromPoints(points = []) {
@@ -169,8 +178,11 @@ function bboxFromPoints(points = []) {
 }
 
 function inferModality(meta, fileName) {
+  const explicit = normalizeModality(meta?.modality || meta?.modal || meta?.imageMode || meta?.image_mode);
+  if (explicit) return explicit;
   const text = `${meta.imagePath || ""} ${fileName || ""} ${meta.keyword || ""}`.toLowerCase();
-  if (text.includes("infrared") || text.includes("thermal") || text.includes("_ir") || text.includes("ir_") || text.includes("红外")) return "infrared";
+  if (text.includes("infrared") || text.includes("thermal") || /(^|[\\/_-])ir([\\/_-]|$)/i.test(text) || text.includes("红外")) return "infrared";
+  if (/(^|[\\/_-])(gray|grey|grayscale|greyscale)([\\/_-]|$)/i.test(text) || text.includes("灰度")) return "grayscale";
   return "visible";
 }
 
@@ -189,6 +201,7 @@ module.exports = {
   basenameNoExt,
   cleanName,
   bboxFromPoints,
+  normalizeModality,
   inferModality,
   exportBaseName,
   inferSceneFromPath,

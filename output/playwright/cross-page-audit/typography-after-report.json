@@ -1,0 +1,8773 @@
+[
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          189,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          94,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "minio://models/yolov8l_coco_20260705020039/",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          276,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          167,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          383,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          241,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(51, 65, 85)",
+      "backgroundColor": "rgb(243, 247, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          151,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          151,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          81,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "coco128_e2e_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "128",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "YOLOv8l_COCO_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "1",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.73,
+        "size": 12,
+        "text": "推荐",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "ready",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "资源使用",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "68%",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.88,
+        "size": 14,
+        "text": "+",
+        "color": "rgb(18, 138, 138)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "运行中",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 11.904,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          141,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          81,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1226,
+          51
+        ],
+        "scroll": [
+          1226,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          16,
+          17
+        ],
+        "scroll": [
+          26,
+          17
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          14,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          1,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          5,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          15,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          10,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          13,
+          12
+        ],
+        "scroll": [
+          26,
+          12
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          7
+        ],
+        "scroll": [
+          26,
+          7
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          4
+        ],
+        "scroll": [
+          26,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          10,
+          17
+        ],
+        "scroll": [
+          26,
+          17
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          14,
+          7
+        ],
+        "scroll": [
+          26,
+          7
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 1.44,
+        "size": 11,
+        "text": "推荐",
+        "color": "rgb(163, 230, 53)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 2.4,
+        "size": 12,
+        "text": "运行失败",
+        "color": "rgb(255, 123, 123)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-failed"
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          63,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          6,
+          0
+        ],
+        "scroll": [
+          16,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          4,
+          0
+        ],
+        "scroll": [
+          16,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          8,
+          9
+        ],
+        "scroll": [
+          30,
+          9
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "数据集：coco128_e2e_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "模型：YOLOv8l_COCO_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "完成时间：2026/7/5 10:04:50",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "128 张图　|　807 个预测",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.01,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 3.98,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          189,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "yolov8l_pt_20260705020039",
+        "client": [
+          135,
+          16
+        ],
+        "scroll": [
+          163,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "yolov8n_ultralytics_8.4.80_cpu",
+        "client": [
+          135,
+          16
+        ],
+        "scroll": [
+          172,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          188,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          94,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "minio://models/yolov8l_coco_20260705020039/",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          276,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          167,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          383,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          270,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          241,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          151,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          151,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          81,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          141,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          175,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          81,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1226,
+          51
+        ],
+        "scroll": [
+          1226,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          16,
+          17
+        ],
+        "scroll": [
+          26,
+          17
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          14,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          1,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          5,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          15,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          10,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          13,
+          12
+        ],
+        "scroll": [
+          26,
+          12
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          7
+        ],
+        "scroll": [
+          26,
+          7
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          4
+        ],
+        "scroll": [
+          26,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          10,
+          17
+        ],
+        "scroll": [
+          26,
+          17
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          14,
+          7
+        ],
+        "scroll": [
+          26,
+          7
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "1080p-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 64,
+      "right": 1920,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 1920,
+      "height": 876,
+      "right": 1920,
+      "bottom": 940
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 288,
+        "height": 876,
+        "right": 288,
+        "bottom": 940
+      },
+      {
+        "x": 288,
+        "y": 64,
+        "width": 1252,
+        "height": 876,
+        "right": 1540,
+        "bottom": 940
+      },
+      {
+        "x": 1540,
+        "y": 64,
+        "width": 380,
+        "height": 876,
+        "right": 1920,
+        "bottom": 940
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 1920,
+      "scrollWidth": 1920,
+      "clientHeight": 876,
+      "scrollHeight": 876
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          223,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          63,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          6,
+          0
+        ],
+        "scroll": [
+          16,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          4,
+          0
+        ],
+        "scroll": [
+          16,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          8,
+          9
+        ],
+        "scroll": [
+          30,
+          9
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 3.2,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          18,
+          49,
+          47
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.4,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          220,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          220,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          126,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          354,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          354,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(51, 65, 85)",
+      "backgroundColor": "rgb(243, 247, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          183,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          183,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          113,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "coco128_e2e_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "128",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "YOLOv8l_COCO_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "1",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.73,
+        "size": 12,
+        "text": "推荐",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "ready",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "资源使用",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "68%",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.88,
+        "size": 14,
+        "text": "+",
+        "color": "rgb(18, 138, 138)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "运行中",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          173,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          113,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1794,
+          51
+        ],
+        "scroll": [
+          1794,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          18,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          17,
+          9
+        ],
+        "scroll": [
+          26,
+          9
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          2,
+          23
+        ],
+        "scroll": [
+          26,
+          23
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          6,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          17,
+          4
+        ],
+        "scroll": [
+          26,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          12,
+          6
+        ],
+        "scroll": [
+          26,
+          6
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          15,
+          14
+        ],
+        "scroll": [
+          26,
+          14
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          12,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          16,
+          9
+        ],
+        "scroll": [
+          26,
+          9
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 1.44,
+        "size": 11,
+        "text": "推荐",
+        "color": "rgb(163, 230, 53)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 2.4,
+        "size": 12,
+        "text": "运行失败",
+        "color": "rgb(255, 123, 123)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-failed"
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          255,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          255,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          25
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          98,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          10,
+          4
+        ],
+        "scroll": [
+          16,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          8,
+          2
+        ],
+        "scroll": [
+          16,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          13,
+          20
+        ],
+        "scroll": [
+          30,
+          20
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "数据集：coco128_e2e_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "模型：YOLOv8l_COCO_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "完成时间：2026/7/5 10:04:50",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "128 张图　|　807 个预测",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.01,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 3.98,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "yolov8n_ultralytics_8.4.80_cpu",
+        "client": [
+          167,
+          16
+        ],
+        "scroll": [
+          172,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          220,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          220,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          126,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          354,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          354,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          554,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          183,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          183,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          113,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          173,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          207,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          113,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1794,
+          51
+        ],
+        "scroll": [
+          1794,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          18,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          17,
+          9
+        ],
+        "scroll": [
+          26,
+          9
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          2,
+          23
+        ],
+        "scroll": [
+          26,
+          23
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          6,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          17,
+          4
+        ],
+        "scroll": [
+          26,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          12,
+          6
+        ],
+        "scroll": [
+          26,
+          6
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          15,
+          14
+        ],
+        "scroll": [
+          26,
+          14
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          12,
+          20
+        ],
+        "scroll": [
+          26,
+          20
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          16,
+          9
+        ],
+        "scroll": [
+          26,
+          9
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2k-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 64,
+      "right": 2560,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2560,
+      "height": 1256,
+      "right": 2560,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 320,
+        "height": 1256,
+        "right": 320,
+        "bottom": 1320
+      },
+      {
+        "x": 320,
+        "y": 64,
+        "width": 1820,
+        "height": 1256,
+        "right": 2140,
+        "bottom": 1320
+      },
+      {
+        "x": 2140,
+        "y": 64,
+        "width": 420,
+        "height": 1256,
+        "right": 2560,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2560,
+      "scrollWidth": 2560,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "14px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          255,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          255,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.0",
+        "client": [
+          23,
+          193
+        ],
+        "scroll": [
+          27,
+          193
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.2",
+        "client": [
+          23,
+          159
+        ],
+        "scroll": [
+          27,
+          159
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.4",
+        "client": [
+          23,
+          125
+        ],
+        "scroll": [
+          27,
+          125
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.6",
+        "client": [
+          23,
+          91
+        ],
+        "scroll": [
+          27,
+          91
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "0.8",
+        "client": [
+          23,
+          57
+        ],
+        "scroll": [
+          27,
+          57
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "1.0",
+        "client": [
+          23,
+          23
+        ],
+        "scroll": [
+          27,
+          25
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          98,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          10,
+          4
+        ],
+        "scroll": [
+          16,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          8,
+          2
+        ],
+        "scroll": [
+          16,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          13,
+          20
+        ],
+        "scroll": [
+          30,
+          20
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 3.2,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          18,
+          49,
+          47
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.4,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          106,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "minio://models/yolov8l_coco_20260705020039/",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          276,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          373,
+          16
+        ],
+        "scroll": [
+          383,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(51, 65, 85)",
+      "backgroundColor": "rgb(243, 247, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          163,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          163,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          93,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "coco128_e2e_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "128",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "YOLOv8l_COCO_20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "1",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.46,
+        "size": 12,
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "color": "rgb(8, 127, 131)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.73,
+        "size": 12,
+        "text": "推荐",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.48,
+        "size": 12,
+        "text": "ready",
+        "color": "rgb(97, 116, 135)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "资源使用",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 12,
+        "text": "68%",
+        "color": "rgb(100, 116, 139)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.88,
+        "size": 14,
+        "text": "+",
+        "color": "rgb(18, 138, 138)",
+        "background": [
+          243,
+          247,
+          251
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "运行中",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "status-badge "
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.86,
+        "size": 12,
+        "text": "已写入 MinIO",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(245, 248, 251)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          153,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          93,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1434,
+          51
+        ],
+        "scroll": [
+          1434,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          17,
+          19
+        ],
+        "scroll": [
+          26,
+          19
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          15,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          1,
+          22
+        ],
+        "scroll": [
+          26,
+          22
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          5,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          16,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          11,
+          6
+        ],
+        "scroll": [
+          26,
+          6
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          14,
+          13
+        ],
+        "scroll": [
+          26,
+          13
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          11,
+          19
+        ],
+        "scroll": [
+          26,
+          19
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          15,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 1.44,
+        "size": 11,
+        "text": "推荐",
+        "color": "rgb(163, 230, 53)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 1.78,
+        "size": 12,
+        "text": "运行完成",
+        "color": "rgb(45, 212, 191)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-done"
+      },
+      {
+        "ratio": 2.4,
+        "size": 12,
+        "text": "运行失败",
+        "color": "rgb(255, 123, 123)",
+        "background": [
+          248,
+          250,
+          252
+        ],
+        "cls": "status-badge status-failed"
+      }
+    ]
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "light",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(31, 49, 64)",
+      "backgroundColor": "rgb(244, 247, 250)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          235,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          235,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          86,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          7,
+          4
+        ],
+        "scroll": [
+          16,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          6,
+          2
+        ],
+        "scroll": [
+          16,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          10,
+          20
+        ],
+        "scroll": [
+          30,
+          20
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "数据集：coco128_e2e_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "模型：YOLOv8l_COCO_20260705020039",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "完成时间：2026/7/5 10:04:50",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.42,
+        "size": 10,
+        "text": "128 张图　|　807 个预测",
+        "color": "rgb(99, 116, 134)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 4.01,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          236,
+          248,
+          247
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.36,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 3.98,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          255,
+          255,
+          255
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  },
+  {
+    "page": "dataset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(7, 16, 23)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [],
+    "lowContrast": []
+  },
+  {
+    "page": "asset",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "yolov8l_pt_20260705020039",
+        "client": [
+          147,
+          16
+        ],
+        "scroll": [
+          163,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "yolov8n_ultralytics_8.4.80_cpu",
+        "client": [
+          147,
+          16
+        ],
+        "scroll": [
+          172,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          200,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          106,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "minio://models/yolov8l_coco_20260705020039/",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          276,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\905e08c8-be67-4335-9ffa-f",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          746,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "E:\\projects\\Det-DashBoard\\runtime\\cache\\runtime\\models\\ea838124-60e8-40ec-9f1d-3",
+        "client": [
+          271,
+          16
+        ],
+        "scroll": [
+          735,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/c5/c52995822e4c26e2e900f848a1493b562d0451f923f9bca6d3f",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          704,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/a5/a55ee0cfaa2b5c89d048c6831c60ecde5f39b790308ed828d52",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          709,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/42/4264aeb9ad048677f5530afbf8be1e153fee6b080885477f963",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          701,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          373,
+          16
+        ],
+        "scroll": [
+          383,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "envs/python/server-python/bc/bc476e0d282efe713ac4159697e54ccd2c3c9059880318c169a",
+        "client": [
+          374,
+          16
+        ],
+        "scroll": [
+          706,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "training",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(216, 232, 239)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          163,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          163,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          93,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "inference",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(23, 32, 42)",
+      "backgroundColor": "rgb(8, 17, 26)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705020039",
+        "client": [
+          153,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "miniforge-ultralytics-cpu-20260705015650",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          246,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLO Ultralytics CPU - miniforge base",
+        "client": [
+          187,
+          16
+        ],
+        "scroll": [
+          218,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "DINOv3 Faster R-CNN - miniforge base (missing MMDetection)",
+        "client": [
+          93,
+          16
+        ],
+        "scroll": [
+          363,
+          16
+        ]
+      },
+      {
+        "tag": "DIV",
+        "cls": "inference-toolbar",
+        "text": "推理新建任务+新建推理任务批量运行停止任务刷新",
+        "client": [
+          1434,
+          51
+        ],
+        "scroll": [
+          1434,
+          58
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "Precision",
+        "client": [
+          48,
+          16
+        ],
+        "scroll": [
+          52,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "coco128_e2e_20260705020039",
+        "client": [
+          56,
+          16
+        ],
+        "scroll": [
+          178,
+          16
+        ]
+      },
+      {
+        "tag": "SPAN",
+        "cls": "",
+        "text": "YOLOv8l_COCO_20260705020039",
+        "client": [
+          62,
+          16
+        ],
+        "scroll": [
+          193,
+          16
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "79%",
+        "client": [
+          17,
+          19
+        ],
+        "scroll": [
+          26,
+          19
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          15,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "66%",
+        "client": [
+          1,
+          22
+        ],
+        "scroll": [
+          26,
+          22
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "31%",
+        "client": [
+          5,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "84%",
+        "client": [
+          16,
+          3
+        ],
+        "scroll": [
+          26,
+          3
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "82%",
+        "client": [
+          11,
+          6
+        ],
+        "scroll": [
+          26,
+          6
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "90%",
+        "client": [
+          14,
+          13
+        ],
+        "scroll": [
+          26,
+          13
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "55%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "50%",
+        "client": [
+          0,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "49%",
+        "client": [
+          3,
+          5
+        ],
+        "scroll": [
+          26,
+          5
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "48%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "47%",
+        "client": [
+          11,
+          19
+        ],
+        "scroll": [
+          26,
+          19
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "46%",
+        "client": [
+          0,
+          0
+        ],
+        "scroll": [
+          26,
+          0
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "44%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "40%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "39%",
+        "client": [
+          0,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "37%",
+        "client": [
+          0,
+          1
+        ],
+        "scroll": [
+          26,
+          1
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "34%",
+        "client": [
+          15,
+          8
+        ],
+        "scroll": [
+          26,
+          8
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "prediction-box",
+        "text": "33%",
+        "client": [
+          1,
+          2
+        ],
+        "scroll": [
+          26,
+          2
+        ]
+      }
+    ],
+    "lowContrast": []
+  },
+  {
+    "page": "evaluation",
+    "viewport": "2160x1440-browser",
+    "theme": "dark",
+    "nav": {
+      "x": 0,
+      "y": 0,
+      "width": 2160,
+      "height": 64,
+      "right": 2160,
+      "bottom": 64
+    },
+    "root": {
+      "x": 0,
+      "y": 64,
+      "width": 2160,
+      "height": 1256,
+      "right": 2160,
+      "bottom": 1320
+    },
+    "columns": [
+      {
+        "x": 0,
+        "y": 64,
+        "width": 300,
+        "height": 1256,
+        "right": 300,
+        "bottom": 1320
+      },
+      {
+        "x": 300,
+        "y": 64,
+        "width": 1460,
+        "height": 1256,
+        "right": 1760,
+        "bottom": 1320
+      },
+      {
+        "x": 1760,
+        "y": 64,
+        "width": 400,
+        "height": 1256,
+        "right": 2160,
+        "bottom": 1320
+      }
+    ],
+    "rootScroll": {
+      "clientWidth": 2160,
+      "scrollWidth": 2160,
+      "clientHeight": 1256,
+      "scrollHeight": 1256
+    },
+    "rootStyle": {
+      "color": "rgb(233, 242, 245)",
+      "backgroundColor": "rgb(8, 19, 27)",
+      "fontFamily": "\"Microsoft YaHei\", \"Segoe UI\", Arial, sans-serif",
+      "fontSize": "13px"
+    },
+    "clipped": [
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_full_20260705020248",
+        "client": [
+          235,
+          16
+        ],
+        "scroll": [
+          288,
+          16
+        ]
+      },
+      {
+        "tag": "B",
+        "cls": "",
+        "text": "coco128_yolov8l_e2e_20260705020039",
+        "client": [
+          235,
+          16
+        ],
+        "scroll": [
+          289,
+          16
+        ]
+      },
+      {
+        "tag": "text",
+        "cls": {},
+        "text": "Precision",
+        "client": [
+          26,
+          106
+        ],
+        "scroll": [
+          86,
+          106
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          7,
+          4
+        ],
+        "scroll": [
+          16,
+          4
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "car",
+        "client": [
+          6,
+          2
+        ],
+        "scroll": [
+          16,
+          2
+        ]
+      },
+      {
+        "tag": "I",
+        "cls": "sample-box",
+        "text": "person",
+        "client": [
+          10,
+          20
+        ],
+        "scroll": [
+          30,
+          20
+        ]
+      }
+    ],
+    "lowContrast": [
+      {
+        "ratio": 3.2,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          18,
+          49,
+          47
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.02,
+        "size": 10,
+        "text": "已完成",
+        "color": "rgb(23, 139, 71)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "done"
+      },
+      {
+        "ratio": 4.4,
+        "size": 10,
+        "text": "运行失败",
+        "color": "rgb(224, 74, 84)",
+        "background": [
+          13,
+          27,
+          36
+        ],
+        "cls": "failed"
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000009.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bowl",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000049.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "horse",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000071.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "train",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "car",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000074.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "bicycle",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "dog",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 1.29,
+        "size": 8,
+        "text": "000000000077.jpg",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          219,
+          228,
+          232
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      },
+      {
+        "ratio": 3.65,
+        "size": 8,
+        "text": "person",
+        "color": "rgb(255, 255, 255)",
+        "background": [
+          241,
+          71,
+          79
+        ],
+        "cls": ""
+      }
+    ]
+  }
+]

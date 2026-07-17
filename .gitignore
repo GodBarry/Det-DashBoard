@@ -16,7 +16,7 @@ runtime/
 tmp/
 object-store-fallback/
 portable-data/
-datasets/
+/datasets/
 exports/
 
 # Logs

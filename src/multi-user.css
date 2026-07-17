@@ -1,0 +1,541 @@
+/* Multi-user surfaces inherit the dashboard theme without changing component geometry. */
+.multi-user-scope-tabs,
+.multi-user-dialog,
+.multi-user-admin-center,
+.multi-user-annotation-tasks {
+  --mu-accent: var(--dashboard-accent, var(--accent, #0f9d97));
+  --mu-accent-strong: var(--dashboard-accent-strong, #087f7b);
+  --mu-accent-soft: var(--accent-soft, rgba(15, 157, 151, .11));
+  --mu-bg: var(--surface, #ffffff);
+  --mu-bg-soft: var(--surface-soft, #f5f9fb);
+  --mu-border: var(--border, #d6e1e8);
+  --mu-border-soft: var(--border-soft, #e6edf2);
+  --mu-text: var(--text, #172633);
+  --mu-text-strong: var(--text-strong, #0f1f2b);
+  --mu-muted: var(--muted, #667b89);
+  --mu-shadow: 0 10px 28px rgba(16, 35, 47, .08);
+  color: var(--mu-text);
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+.app-shell.dark .multi-user-scope-tabs,
+.app-shell.dark .multi-user-dialog,
+.app-shell.dark .multi-user-admin-center,
+.app-shell.dark .multi-user-annotation-tasks {
+  --mu-accent: var(--dashboard-accent, var(--accent, #2dd4bf));
+  --mu-accent-strong: #5eead4;
+  --mu-accent-soft: rgba(45, 212, 191, .13);
+  --mu-bg: var(--surface, #0d1b24);
+  --mu-bg-soft: var(--surface-soft, #12232d);
+  --mu-border: var(--border, #2b414d);
+  --mu-border-soft: var(--border-soft, rgba(130, 157, 171, .2));
+  --mu-text: var(--text, #dce9ee);
+  --mu-text-strong: var(--text-strong, #f0f7f9);
+  --mu-muted: var(--muted, #9db0bb);
+  --mu-shadow: 0 14px 34px rgba(0, 0, 0, .3);
+}
+
+.multi-user-scope-tabs,
+.multi-user-dialog,
+.multi-user-admin-center,
+.multi-user-annotation-tasks,
+.multi-user-scope-tabs *,
+.multi-user-dialog *,
+.multi-user-admin-center *,
+.multi-user-annotation-tasks * {
+  box-sizing: border-box;
+}
+
+.multi-user-scope-tabs button,
+.multi-user-dialog button,
+.multi-user-admin-center button,
+.multi-user-annotation-tasks button {
+  letter-spacing: 0;
+}
+
+.multi-user-scope-tabs button:focus-visible,
+.multi-user-dialog button:focus-visible,
+.multi-user-dialog input:focus-visible,
+.multi-user-dialog textarea:focus-visible,
+.multi-user-admin-center button:focus-visible,
+.multi-user-admin-center input:focus-visible,
+.multi-user-admin-center select:focus-visible,
+.multi-user-annotation-tasks button:focus-visible {
+  outline: 2px solid var(--mu-accent);
+  outline-offset: 2px;
+}
+
+.multi-user-scope-tabs {
+  scrollbar-width: thin;
+}
+
+.multi-user-scope-tabs button {
+  flex: 0 1 auto;
+  color: var(--mu-muted) !important;
+  transition: color .16s ease, background-color .16s ease;
+}
+
+.multi-user-scope-tabs button:last-child {
+  border-right: 0 !important;
+}
+
+.multi-user-scope-tabs button:hover:not(:disabled) {
+  color: var(--mu-text-strong) !important;
+  background: var(--mu-bg-soft) !important;
+}
+
+.multi-user-scope-tabs button[data-state="active"] {
+  color: var(--mu-accent-strong) !important;
+  background: var(--mu-accent-soft) !important;
+}
+
+.multi-user-scope-tabs button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-user-scope-tabs button > b {
+  flex: 0 0 auto;
+  border-radius: 8px !important;
+}
+
+.multi-user-dialog-overlay {
+  overscroll-behavior: contain;
+}
+
+.multi-user-dialog {
+  border: 1px solid var(--mu-border) !important;
+  border-radius: 8px !important;
+  background: var(--mu-bg) !important;
+  box-shadow: var(--mu-shadow) !important;
+}
+
+.multi-user-dialog > header,
+.multi-user-dialog > footer {
+  background: var(--mu-bg) !important;
+}
+
+.multi-user-dialog > footer {
+  background: var(--mu-bg-soft) !important;
+}
+
+.multi-user-dialog > header h2,
+.multi-user-admin-center h2,
+.multi-user-annotation-tasks h2,
+.multi-user-dialog b,
+.multi-user-admin-center b,
+.multi-user-annotation-tasks b {
+  color: var(--mu-text-strong) !important;
+  overflow-wrap: anywhere;
+}
+
+.multi-user-dialog p,
+.multi-user-dialog small,
+.multi-user-admin-center p,
+.multi-user-admin-center small,
+.multi-user-annotation-tasks p,
+.multi-user-annotation-tasks small {
+  color: var(--mu-muted) !important;
+  overflow-wrap: anywhere;
+}
+
+.multi-user-dialog input:not([type="checkbox"]),
+.multi-user-dialog textarea,
+.multi-user-admin-center select {
+  border-color: var(--mu-border) !important;
+  color: var(--mu-text) !important;
+  background: var(--mu-bg) !important;
+  caret-color: var(--mu-accent);
+}
+
+.multi-user-dialog textarea::placeholder {
+  color: var(--mu-muted);
+  opacity: .78;
+}
+
+.multi-user-dialog input:not([type="checkbox"]):focus,
+.multi-user-dialog textarea:focus,
+.multi-user-admin-center select:focus {
+  border-color: var(--mu-accent) !important;
+  box-shadow: 0 0 0 3px var(--mu-accent-soft);
+  outline: 0;
+}
+
+.multi-user-dialog input[type="checkbox"],
+.multi-user-admin-center input[type="checkbox"] {
+  accent-color: var(--mu-accent);
+}
+
+.multi-user-dialog label,
+.multi-user-dialog legend,
+.multi-user-dialog span,
+.multi-user-admin-center span,
+.multi-user-annotation-tasks span {
+  overflow-wrap: anywhere;
+}
+
+.multi-user-dialog .settings-actions button,
+.multi-user-admin-center button,
+.multi-user-annotation-tasks button {
+  max-width: 100%;
+  border-radius: 7px;
+}
+
+.multi-user-dialog button.primary,
+.multi-user-admin-center button.primary,
+.multi-user-annotation-tasks button.primary {
+  border: 1px solid var(--mu-accent) !important;
+  color: #ffffff !important;
+  background: var(--mu-accent-strong) !important;
+  box-shadow: none !important;
+}
+
+.app-shell.dark .multi-user-dialog button.primary,
+.app-shell.dark .multi-user-admin-center button.primary,
+.app-shell.dark .multi-user-annotation-tasks button.primary {
+  color: #05201e !important;
+  background: var(--mu-accent) !important;
+}
+
+.multi-user-dialog button:disabled,
+.multi-user-admin-center button:disabled,
+.multi-user-annotation-tasks button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.multi-user-admin-center,
+.multi-user-annotation-tasks {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.multi-user-admin-center > header,
+.multi-user-annotation-tasks > header {
+  padding-bottom: 2px;
+}
+
+.multi-user-admin-center > nav[role="tablist"] {
+  scrollbar-color: var(--mu-accent-soft) transparent;
+  scrollbar-width: thin;
+}
+
+.multi-user-admin-center > nav[role="tablist"] button {
+  flex: 0 0 auto;
+}
+
+.multi-user-admin-center > nav[role="tablist"] button > b,
+.multi-user-annotation-tasks > [role="tablist"] button > b {
+  border-radius: 8px !important;
+}
+
+.multi-user-admin-center > nav[role="tablist"] button:hover,
+.multi-user-annotation-tasks > [role="tablist"] button:hover {
+  color: var(--mu-text-strong) !important;
+  background: var(--mu-bg-soft) !important;
+}
+
+.multi-user-admin-center > nav[role="tablist"] button[aria-selected="true"],
+.multi-user-annotation-tasks > [role="tablist"] button[aria-selected="true"] {
+  color: var(--mu-accent-strong) !important;
+}
+
+.multi-user-admin-center > div,
+.multi-user-annotation-tasks > div {
+  min-width: 0;
+}
+
+.multi-user-admin-center article,
+.multi-user-annotation-tasks article {
+  color: var(--mu-text);
+}
+
+.multi-user-admin-center article > span,
+.multi-user-annotation-tasks article > header > span {
+  min-width: 0;
+}
+
+.multi-user-admin-center article button,
+.multi-user-annotation-tasks article button {
+  flex: 0 0 auto;
+}
+
+.multi-user-admin-center select {
+  min-width: 0;
+}
+
+.multi-user-status {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 8px !important;
+}
+
+.multi-user-status-success {
+  border-color: rgba(18, 183, 106, .22);
+}
+
+.multi-user-status-danger {
+  border-color: rgba(217, 45, 32, .2);
+}
+
+.multi-user-status-active {
+  border-color: rgba(47, 128, 237, .22);
+}
+
+.multi-user-status-pending {
+  border-color: rgba(247, 144, 9, .22);
+}
+
+.multi-user-empty {
+  width: 100%;
+  padding: 18px;
+  text-align: center;
+}
+
+.multi-user-feedback {
+  min-width: 0;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(18, 183, 106, .24);
+  border-radius: 7px;
+  color: #067647;
+  background: rgba(18, 183, 106, .09);
+  font-size: 12px;
+}
+
+.multi-user-feedback > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.multi-user-feedback.error {
+  border-color: rgba(217, 45, 32, .24);
+  color: #b42318;
+  background: rgba(217, 45, 32, .08);
+}
+
+.multi-user-feedback button {
+  width: 26px !important;
+  height: 26px !important;
+}
+
+.multi-user-share-columns {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.multi-user-share-columns > section {
+  min-width: 0;
+}
+
+.multi-user-share-columns h3 {
+  margin: 0 0 8px;
+  color: var(--mu-text-strong);
+  font-size: 14px;
+}
+
+.multi-user-acl-query {
+  display: grid;
+  grid-template-columns: minmax(150px, .5fr) minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.multi-user-acl-grant {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(180px, .5fr) minmax(300px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--mu-border-soft);
+  background: var(--mu-bg-soft);
+}
+
+.multi-user-acl-row .multi-user-status,
+.multi-user-task-item .multi-user-status {
+  flex: 0 0 auto;
+}
+
+.multi-user-acl-row > span:nth-child(3) {
+  flex: 1 1 340px;
+}
+
+.multi-user-task-items article {
+  min-height: 76px;
+}
+
+.multi-user-annotation-tasks article {
+  border-color: var(--mu-border) !important;
+  border-radius: 8px !important;
+  background: var(--mu-bg) !important;
+  box-shadow: 0 1px 2px rgba(16, 35, 47, .05) !important;
+}
+
+.multi-user-annotation-tasks article:hover {
+  border-color: color-mix(in srgb, var(--mu-accent) 42%, var(--mu-border));
+}
+
+.multi-user-annotation-tasks article > div {
+  min-width: 0;
+}
+
+.multi-user-annotation-tasks article > div > span {
+  min-width: 0;
+}
+
+.multi-user-annotation-tasks article > p {
+  max-width: 72ch;
+  color: var(--mu-text) !important;
+  overflow-wrap: anywhere;
+}
+
+@container (min-width: 760px) {
+  .multi-user-annotation-tasks > div:last-child {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container (min-width: 1180px) {
+  .multi-user-annotation-tasks > div:last-child {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@container (min-width: 1760px) {
+  .multi-user-annotation-tasks > div:last-child {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .multi-user-dialog-overlay {
+    place-items: end center !important;
+    padding: 8px !important;
+  }
+
+  .multi-user-dialog {
+    width: 100% !important;
+    max-height: calc(100dvh - 16px) !important;
+  }
+
+  .multi-user-dialog > header,
+  .multi-user-dialog > div,
+  .multi-user-dialog > footer {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .multi-user-dialog > header {
+    padding-top: 14px !important;
+    padding-bottom: 12px !important;
+  }
+
+  .multi-user-dialog > footer {
+    min-height: 58px !important;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+    flex-wrap: wrap;
+  }
+
+  .multi-user-dialog > footer button {
+    flex: 1 1 132px;
+  }
+
+  .multi-user-scope-tabs {
+    width: 100% !important;
+    overflow-x: auto !important;
+  }
+
+  .multi-user-scope-tabs button {
+    flex: 1 0 max-content;
+    padding-inline: 10px !important;
+  }
+
+  .multi-user-admin-center > header,
+  .multi-user-annotation-tasks > header {
+    align-items: flex-start !important;
+  }
+
+  .multi-user-admin-center article,
+  .multi-user-annotation-tasks article > header {
+    align-items: flex-start !important;
+  }
+
+  .multi-user-admin-center article {
+    flex-wrap: wrap;
+  }
+
+  .multi-user-admin-center article > span:nth-child(2) {
+    flex-basis: calc(100% - 46px) !important;
+  }
+
+  .multi-user-admin-center article > span:nth-last-child(1),
+  .multi-user-admin-center article > button:last-child {
+    margin-left: auto;
+  }
+
+  .multi-user-annotation-tasks article > footer {
+    justify-content: stretch !important;
+  }
+
+  .multi-user-annotation-tasks article > footer button {
+    flex: 1 1 120px;
+  }
+
+  .multi-user-share-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-user-acl-query,
+  .multi-user-acl-grant {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-user-acl-row,
+  .multi-user-task-item {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 430px) {
+  .multi-user-dialog-overlay {
+    padding: 0 !important;
+  }
+
+  .multi-user-dialog {
+    max-height: 100dvh !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-left: 0 !important;
+    border-radius: 8px 8px 0 0 !important;
+  }
+
+  .multi-user-dialog > header > span:first-child {
+    display: none !important;
+  }
+
+  .multi-user-admin-center > nav[role="tablist"] button {
+    padding-inline: 10px !important;
+  }
+
+  .multi-user-annotation-tasks > [role="tablist"] {
+    width: 100% !important;
+  }
+
+  .multi-user-annotation-tasks > [role="tablist"] button {
+    flex: 1 1 50%;
+    padding-inline: 8px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .multi-user-scope-tabs button {
+    transition: none;
+  }
+}
