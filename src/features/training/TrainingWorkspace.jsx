@@ -475,7 +475,7 @@ export function TrainingWorkspace({
 
         <section className="training-log-panel"><h3>运行日志</h3>{logRows.length ? logRows.map((line, index) => <p key={index}>{line}</p>) : <p>暂无运行日志</p>}</section>
 
-        <section className="artifact-preview"><h3>产物预览</h3>{runningJob ? ['best.pt', 'last.pt', 'results.csv', 'confusion_matrix.png'].map((name) => <p key={name}><Database size={14} /><span>{name}</span><em>已写入 MinIO</em></p>) : <p><span>暂无训练产物</span></p>}</section>
+        <section className="artifact-preview"><h3>产物预览</h3>{runningJob ? ['best.pt', 'last.pt', 'results.csv', 'confusion_matrix.png'].map((name) => <p key={name}><Database size={14} /><span>{name}</span><em>已写入 MinIO</em></p>) : <p className="artifact-preview-empty">暂无训练产物</p>}</section>
 
       </aside>
 

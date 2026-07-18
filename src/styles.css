@@ -2789,24 +2789,6 @@ button:disabled:hover {
   cursor: not-allowed !important;
 }
 
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(150px,1.2fr) minmax(90px,.75fr) minmax(110px,.85fr) 68px 76px 58px 60px 60px 46px 204px !important;
-  column-gap: 7px !important;
-}
-
-.training-table-head > span:last-child,
-.training-table-row > .training-row-actions {
-  width: 204px !important;
-  min-width: 204px !important;
-  max-width: 204px !important;
-  justify-self: end !important;
-}
-
-.training-row-actions {
-  gap: 4px !important;
-}
-
 .training-row-actions button,
 .queue-action-row button,
 .queue-priority button {
@@ -3501,11 +3483,6 @@ button:disabled:hover {
 
 .asset-card:hover {
   box-shadow: none;
-}
-
-.asset-card.active {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .thumb-wrap {
@@ -5158,6 +5135,13 @@ button:disabled:hover {
   font-family: inherit;
 }
 
+.artifact-preview .artifact-preview-empty {
+  display: block;
+  width: 100%;
+  color: var(--training-muted);
+  text-align: left;
+}
+
 .artifact-preview em {
   color: var(--training-accent);
   font-style: normal;
@@ -6436,12 +6420,6 @@ button:disabled:hover {
   color: #eafffb;
 }
 
-.project-folder-body {
-  min-width: 0;
-  display: grid;
-  gap: 18px;
-}
-
 .home-project-grid .project-folder h3,
 .home-project-grid .project-folder .editable-name {
   min-width: 0;
@@ -6984,14 +6962,6 @@ button:disabled:hover {
   align-items: center;
   gap: 22px;
   color: var(--home-muted);
-}
-
-.project-folder-metrics span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: inherit;
-  font-size: 13px;
 }
 
 .home-project-grid .project-folder > .project-folder-body > span,
@@ -7975,11 +7945,6 @@ button:disabled:hover {
   color: var(--training-text);
   border-color: transparent;
   box-shadow: none;
-}
-
-.app-shell .training-workspace .resource-group button.active {
-  color: var(--training-accent);
-  background: var(--training-control-hover);
 }
 
 .app-shell .training-workspace .training-table-row > *,
@@ -10156,10 +10121,6 @@ button:disabled:hover {
 }
 .queue-priority button { height: 18px !important; color: var(--accent, #14b8a6) !important; }
 
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(210px,1.45fr) minmax(160px,1fr) minmax(160px,1fr) 76px 100px 70px 70px 70px 50px 82px !important;
-}
 .training-table-row > div,
 .training-table-row button {
   display: inline-grid !important;
@@ -10229,15 +10190,7 @@ button:disabled:hover {
   background: var(--training-accent, #14b8a6) !important;
 }
 
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(210px,1.45fr) minmax(160px,1fr) minmax(160px,1fr) 76px 100px 70px 70px 70px 52px 96px !important;
-}
-
 .training-table-row > .training-row-actions {
-  width: 66px !important;
-  min-width: 66px !important;
-  max-width: 66px !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -11388,10 +11341,6 @@ button:disabled:hover {
 .evaluation-chart-svg text.axis-title {
   font-size: 7.5px !important;
 }
-.evaluation-chart-svg path {
-  stroke-width: 1.05 !important;
-}
-
 /* Trash actions and inference queue spacing final pass. */
 .home-trash-panel .trash-row {
   grid-template-columns: 24px minmax(0, 1fr) auto !important;
@@ -11415,15 +11364,6 @@ button:disabled:hover {
 }
 .trash-row-actions button:last-child {
   color: #ef4444 !important;
-}
-.inference-table-head > span,
-.inference-table-row > span,
-.inference-table-row > b,
-.inference-table-row > em {
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
 }
 .inference-table-head .inference-task-name,
 .inference-table-row .inference-task-name {
