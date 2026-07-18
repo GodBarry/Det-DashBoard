@@ -12294,6 +12294,26 @@ button:disabled:hover {
 .evaluation-box-legend .legend-line.prediction {
   border-top: 2px dashed #ef4444 !important;
 }
+.evaluation-error-description,
+.evaluation-viewer-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.evaluation-error-description {
+  padding: 0 2px 6px;
+}
+.evaluation-viewer-description {
+  position: fixed;
+  z-index: 6;
+  left: 50%;
+  top: 56px;
+  width: min(62vw, 760px);
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
 
 /* Final inference queue guard. */
 .inference-workspace .reference-queue .inference-table-head,

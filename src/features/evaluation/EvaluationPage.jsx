@@ -29,7 +29,7 @@ import { EvaluationConfusionMatrix } from "./EvaluationConfusionMatrix.jsx";
 import { EvaluationCurve } from "./EvaluationCurve.jsx";
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
-import { evaluationBarPalette, evaluationErrorBoxes } from "./evaluationPresentation.js";
+import { evaluationBarPalette, evaluationErrorBoxes, evaluationErrorDescriptions } from "./evaluationPresentation.js";
 import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 
 export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, onDelete, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
@@ -382,6 +382,7 @@ return (
 <section className="evaluation-error-samples">
 
 <div className="evaluation-sample-head"><h3>错误样本</h3><div>{errorTabs.map(([id, label]) => <button key={id} className={errorFilter === id ? "active" : ""} onClick={() => { setErrorFilter(id); setSampleOffset(0); }}>{label}</button>)}</div><span>{visibleSampleRows.length} </span></div>
+<p className="evaluation-error-description">{evaluationErrorDescriptions[errorFilter]}</p>
 
 <div className="evaluation-sample-grid">
 

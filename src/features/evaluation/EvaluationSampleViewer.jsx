@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronRight, Image as ImageIcon, RotateCcw, Sun, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
+import { evaluationErrorDescriptions } from "./evaluationPresentation.js";
 
 export function EvaluationSampleViewer({
   rows = [],
@@ -63,6 +64,7 @@ export function EvaluationSampleViewer({
         <button className="viewer-theme-toggle" onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换查看器明暗模式"><Sun size={17} /></button>
         <button onClick={onClose} title="关闭"><X size={18} /></button>
       </div>
+      <p className="evaluation-viewer-description">{evaluationErrorDescriptions[filter]}</p>
       <button className="viewer-page-button viewer-page-prev" disabled={index <= 0} onClick={() => move(-1)} title="上一"><ChevronRight size={28} /></button>
       <div className="viewer-stage shared-image-viewport" onWheel={(event) => { if (!event.ctrlKey) return; event.preventDefault(); zoom(event.deltaY < 0 ? .2 : -.2); }} onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY, pan })} onMouseMove={(event) => drag && setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY - drag.y })} onMouseUp={() => setDrag(null)} onMouseLeave={() => setDrag(null)}>
         <div className="shared-image-canvas evaluation-sample-large" style={{ "--image-ratio": Number(row.image_width || 16) / Number(row.image_height || 9), aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>

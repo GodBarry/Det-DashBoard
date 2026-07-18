@@ -13,6 +13,13 @@ export const evaluationErrorDefinitions = [
   "类别不同但 IoU 未达到正式匹配阈值：按一次误检和一次漏检分别统计，不归入类别错误。",
 ];
 
+export const evaluationErrorDescriptions = {
+  false_negative: "只显示未被正确识别目标的真值实线框。",
+  false_positive: "只显示没有匹配真值目标的预测虚线框，并标出预测类别与置信度。",
+  localization: "同时显示真值实线框和预测虚线框，类别相同但位置偏差较大。",
+  class_error: "同时显示真值类别和预测类别；满足正式 IoU 阈值时计作 FP + FN。",
+};
+
 const errorLabels = {
   false_negative: "漏检",
   false_positive: "误检（虚警）",
