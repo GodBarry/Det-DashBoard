@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sun, X } from "lucide-react";
+import { ChevronRight, Sun, X } from "lucide-react";
 
 import { colors } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
@@ -103,7 +103,8 @@ useEffect(() => {
       if (!nextItems.length) return;
       const currentId = viewerItems[index]?.id || items[index]?.id;
       const nextIndex = Math.max(0, nextItems.findIndex((row) => row.id === currentId));
-      setViewerItems(nextItems);
+      const existing = new Map(viewerItems.map((row) => [row.id, row]));
+      setViewerItems(nextItems.map((row) => existing.has(row.id) ? { ...row, annotations: existing.get(row.id).annotations } : row));
       setIndex(nextIndex < 0 ? 0 : nextIndex);
     })
     .catch(() => {})
@@ -133,6 +134,21 @@ const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
 
 const [loadedItemId, setLoadedItemId] = useState(null);
 const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
+
+useEffect(() => {
+  if (!item?.id || Array.isArray(item.annotations)) return undefined;
+  const controller = new AbortController();
+  fetch(`/api/project-images/${item.id}/annotations`, { signal: controller.signal })
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载图片标注失败")))
+    .then((data) => {
+      const annotations = Array.isArray(data.annotations) ? data.annotations : [];
+      setViewerItems((rows) => rows.map((row) => row.id === item.id ? { ...row, annotations } : row));
+      setDraft(annotations.map((annotation) => ({ ...annotation })));
+      setDefaultLabel(annotations[0]?.label || "");
+    })
+    .catch(() => {});
+  return () => controller.abort();
+}, [item?.id]);
 
 useEffect(() => {
 
@@ -381,9 +397,9 @@ return (
 
 </div>
 
-<button className="viewer-nav prev" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}></button>
+<button className="viewer-page-button viewer-page-prev" title="上一张" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}><ChevronRight size={28} /></button>
 
-<button className="viewer-nav next" disabled={sequenceUrl ? index >= viewerItems.length - 1 : (loadingPage || (!loadPage && index >= viewerItems.length - 1) || (loadPage && (viewerPage * pageSize >= totalItems) && index >= viewerItems.length - 1))} onClick={next}></button>
+<button className="viewer-page-button viewer-page-next" title="下一张" disabled={sequenceUrl ? index >= viewerItems.length - 1 : (loadingPage || (!loadPage && index >= viewerItems.length - 1) || (loadPage && (viewerPage * pageSize >= totalItems) && index >= viewerItems.length - 1))} onClick={next}><ChevronRight size={28} /></button>
 
 <div
 

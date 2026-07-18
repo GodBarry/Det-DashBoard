@@ -81,6 +81,20 @@ function createDatasetContentService({
     });
   }
 
+  async function getImageAnnotations(projectImageId) {
+    const result = await query(
+      `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h,
+              a.shape_type, a.difficult, a.score, a.attributes_json
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+       JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
+       WHERE a.project_image_id=$1 AND a.label_version_id=p.active_label_version_id
+       ORDER BY a.id`,
+      [projectImageId],
+    );
+    return { annotations: result.rows };
+  }
+
   function projectImageFilter(projectId, queryParams = {}) {
     const params = [projectId];
     const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
@@ -149,6 +163,7 @@ function createDatasetContentService({
   async function listProjectImages(projectId, queryParams) {
     const page = Math.max(1, Number(queryParams.page || 1));
     const pageSize = Math.min(10000, Math.max(12, Number(queryParams.pageSize || 48)));
+    const sequenceMode = String(queryParams.sequence || "") === "1";
     const offset = (page - 1) * pageSize;
     const { params, where, labelValues } = projectImageFilter(projectId, queryParams);
     params.push(pageSize, offset);
@@ -157,9 +172,9 @@ function createDatasetContentService({
         COALESCE(NULLIF(pi.source_path, ''),
           CASE WHEN ib.source_path IS NOT NULL THEN regexp_replace(ib.source_path, '/+$', '') || '/' || pi.display_name ELSE pi.display_name END
         ) AS absolute_path,
-        (SELECT count(*)::int FROM image_annotations a
+        ${sequenceMode ? "0::int" : `(SELECT count(*)::int FROM image_annotations a
          JOIN projects p ON p.active_label_version_id = a.label_version_id
-         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id) AS annotation_count
+         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id)`} AS annotation_count
        FROM project_images pi
        JOIN projects p ON p.id = pi.project_id
        JOIN image_assets ia ON ia.id = pi.image_asset_id
@@ -180,6 +195,12 @@ function createDatasetContentService({
 
     const items = rows.rows;
     if (!items.length) return { page, pageSize, total: count.rows[0].count, items };
+
+    // The full viewer sequence only needs lightweight image metadata. Loading
+    // every annotation for a large project delays the page-boundary transition.
+    if (sequenceMode) {
+      return { page, pageSize, total: count.rows[0].count, items };
+    }
 
     const annParams = [projectId, items.map((item) => item.id)];
     const annWhere = ["p.id=$1", "p.deleted_at IS NULL", "a.project_image_id = ANY($2::uuid[])"];
@@ -394,7 +415,7 @@ function createDatasetContentService({
     return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
   }
 
-  return { saveImageAnnotations, countProjectImages, listProjectImages, streamProjectImage, exportProject };
+  return { saveImageAnnotations, getImageAnnotations, countProjectImages, listProjectImages, streamProjectImage, exportProject };
 }
 
 module.exports = { createDatasetContentService };

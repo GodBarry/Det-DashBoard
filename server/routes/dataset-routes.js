@@ -195,6 +195,12 @@ function createDatasetRoutes(deps) {
       sendJson(res, await datasetContentService.saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req), actor));
       return true;
     }
+    const imageAnnotationsMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/annotations$/);
+    if (method === "GET" && imageAnnotationsMatch) {
+      await resourceAccess.assertProjectRead(actor, await projectForImage(imageAnnotationsMatch[1]));
+      sendJson(res, await datasetContentService.getImageAnnotations(imageAnnotationsMatch[1]));
+      return true;
+    }
 
     if (method === "GET" && pathname === "/api/imports/latest") {
       const projectId = parsed.query.projectId || parsed.query.project_id;
