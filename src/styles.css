@@ -12074,6 +12074,38 @@ button:disabled:hover {
   }
 }
 
+/* Dataset selectors sit above the page surface instead of showing the panel
+   through their native control background. */
+.tree-project-picker .tree-project-empty,
+.tree-project-picker .tree-project-selection,
+.tree-project-picker .tree-project-popover,
+.tree-project-picker .tree-project-option,
+.training-cascading-row select,
+.training-filter-bar select,
+.training-filter-bar input,
+.inference-result-dialog select,
+.reference-builder select,
+.reference-builder input {
+  background-color: var(--panel-solid, #f7fafb) !important;
+  color: var(--text) !important;
+}
+.app-shell.dark .tree-project-picker .tree-project-empty,
+.app-shell.dark .tree-project-picker .tree-project-selection,
+.app-shell.dark .tree-project-picker .tree-project-popover,
+.app-shell.dark .tree-project-picker .tree-project-option,
+.app-shell.dark .training-cascading-row select,
+.app-shell.dark .training-filter-bar select,
+.app-shell.dark .training-filter-bar input,
+.app-shell.dark .reference-builder select,
+.app-shell.dark .reference-builder input {
+  background-color: #10202b !important;
+  color: #d9e7ec !important;
+}
+.tree-project-picker .tree-project-popover {
+  z-index: 30 !important;
+  opacity: 1 !important;
+}
+
 .cascading-project-picker { min-width: 0; width: 100%; display: grid; gap: 6px; }
 .cascading-project-levels { min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 .cascading-project-level { min-width: 190px; display: flex; align-items: center; gap: 5px; }
