@@ -148,7 +148,7 @@ function createDatasetContentService({
 
   async function listProjectImages(projectId, queryParams) {
     const page = Math.max(1, Number(queryParams.page || 1));
-    const pageSize = Math.min(200, Math.max(12, Number(queryParams.pageSize || 48)));
+    const pageSize = Math.min(10000, Math.max(12, Number(queryParams.pageSize || 48)));
     const offset = (page - 1) * pageSize;
     const { params, where, labelValues } = projectImageFilter(projectId, queryParams);
     params.push(pageSize, offset);

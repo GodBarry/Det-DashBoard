@@ -13002,6 +13002,25 @@ body.resizing-table-column {
 .dataset-image-dialog .viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 4; border-radius: 6px; }
 .dataset-image-dialog .viewer-nav.prev { left: 18px; }
 .dataset-image-dialog .viewer-nav.next { right: 298px; }
+.dataset-image-dialog .viewer-nav {
+  width: 46px !important;
+  height: 64px !important;
+  border: 1px solid var(--viewer-border) !important;
+  border-radius: 7px !important;
+  background: var(--viewer-toolbar) !important;
+  color: var(--viewer-text) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18) !important;
+}
+.dataset-image-dialog .viewer-nav:hover:not(:disabled) {
+  background: var(--viewer-control-hover) !important;
+  color: #0f9d97 !important;
+}
+.inference-result-dialog .shared-image-viewport {
+  padding-left: 70px !important;
+  padding-right: 70px !important;
+  display: grid !important;
+  place-items: center !important;
+}
 .viewer-inspector-panel { position: fixed; z-index: 5; top: 82px; right: 18px; bottom: 18px; width: 250px; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.2); }
 .dataset-image-dialog .viewer-stage, .inference-result-dialog .shared-image-viewport, .evaluation-sample-dialog .viewer-stage { padding-right: 68px; }
 .viewer-inspector-panel h3 { margin: 0 0 10px; font-size: 13px; }

@@ -86,12 +86,30 @@ strokeWidth={compact ? Math.max(4, width / 600) : Math.max(3, width / 900)}
 
 }
 
-function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations, page = 1, pageSize = 48, totalItems = items.length, loadPage, onPageChange }) {
+function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations, page = 1, pageSize = 48, totalItems = items.length, loadPage, onPageChange, sequenceUrl }) {
 
 const [viewerItems, setViewerItems] = useState(items);
 const [viewerPage, setViewerPage] = useState(page);
 const [loadingPage, setLoadingPage] = useState(false);
 const item = viewerItems[index];
+
+useEffect(() => {
+  if (!sequenceUrl) return undefined;
+  const controller = new AbortController();
+  fetch(sequenceUrl, { signal: controller.signal })
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载项目图片序列失败")))
+    .then((data) => {
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      if (!nextItems.length) return;
+      const currentId = viewerItems[index]?.id || items[index]?.id;
+      const nextIndex = Math.max(0, nextItems.findIndex((row) => row.id === currentId));
+      setViewerItems(nextItems);
+      setIndex(nextIndex < 0 ? 0 : nextIndex);
+    })
+    .catch(() => {})
+    .finally(() => {});
+  return () => controller.abort();
+}, [sequenceUrl]);
 
 const [scale, setScale] = useState(1);
 
@@ -196,6 +214,7 @@ return () => window.removeEventListener("keydown", onKey);
 const zoom = (delta) => setScale((value) => Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2)))));
 
 const movePage = async (delta) => {
+  if (sequenceUrl) return;
   const targetPage = viewerPage + delta;
   const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / Math.max(1, Number(pageSize) || 48)));
   if (!loadPage || targetPage < 1 || targetPage > totalPages || loadingPage) return;
@@ -330,7 +349,7 @@ return (
 
 </div>
 
-<span>{loadPage ? `${(viewerPage - 1) * pageSize + index + 1} / ${totalItems}` : `${index + 1} / ${viewerItems.length}`}</span>
+<span>{sequenceUrl ? `${index + 1} / ${viewerItems.length}` : (loadPage ? `${(viewerPage - 1) * pageSize + index + 1} / ${totalItems}` : `${index + 1} / ${viewerItems.length}`)}</span>
 
 {editMode && (
 
@@ -362,9 +381,9 @@ return (
 
 </div>
 
-<button className="viewer-nav prev" disabled={loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0)} onClick={prev}></button>
+<button className="viewer-nav prev" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}></button>
 
-<button className="viewer-nav next" disabled={loadingPage || (!loadPage && index >= viewerItems.length - 1) || (loadPage && (viewerPage * pageSize >= totalItems) && index >= viewerItems.length - 1)} onClick={next}></button>
+<button className="viewer-nav next" disabled={sequenceUrl ? index >= viewerItems.length - 1 : (loadingPage || (!loadPage && index >= viewerItems.length - 1) || (loadPage && (viewerPage * pageSize >= totalItems) && index >= viewerItems.length - 1))} onClick={next}></button>
 
 <div
 
