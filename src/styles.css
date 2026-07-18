@@ -12219,6 +12219,82 @@ button:disabled:hover {
   white-space: nowrap !important;
 }
 
+/* Denser dataset project cards: a larger folder mark and a tighter content rhythm. */
+.app-shell .home-project-grid .project-folder,
+.app-shell .workspace-folder-grid .project-folder {
+  min-width: 228px !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-icon,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-icon {
+  width: 54px !important;
+  height: 54px !important;
+  justify-self: start !important;
+  align-self: start !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-icon > svg:first-child,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-icon > svg:first-child {
+  width: 34px !important;
+  height: 34px !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-body,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-body {
+  align-self: start !important;
+  justify-self: stretch !important;
+  text-align: left !important;
+}
+.app-shell .home-project-grid .project-folder .project-folder-metrics,
+.app-shell .workspace-folder-grid .project-folder .project-folder-metrics {
+  margin-top: 8px !important;
+  align-self: start !important;
+}
+
+/* Evaluation semantics: truth is a thin solid line; every prediction is a dashed
+   line and is painted above truth when the boxes overlap. */
+.evaluation-sample-grid .sample-box,
+.evaluation-sample-large .sample-box {
+  z-index: 2 !important;
+  border-width: 1.25px !important;
+}
+.evaluation-sample-grid .sample-box[class*=" ground"],
+.evaluation-sample-large .sample-box[class*=" ground"] {
+  z-index: 2 !important;
+  border-style: solid !important;
+  border-width: 1.25px !important;
+}
+.evaluation-sample-grid .sample-box[class*=" prediction"],
+.evaluation-sample-large .sample-box[class*=" prediction"] {
+  z-index: 4 !important;
+  border-style: dashed !important;
+  border-width: 2px !important;
+}
+.evaluation-sample-grid .sample-box.false_negative,
+.evaluation-sample-large .sample-box.false_negative {
+  border-style: solid !important;
+  border-width: 1.25px !important;
+}
+.evaluation-box-legend {
+  display: block !important;
+  line-height: 1.45 !important;
+}
+.evaluation-box-legend-lines,
+.evaluation-box-legend-definitions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.evaluation-box-legend-definitions {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.evaluation-box-legend .legend-line.ground {
+  border-top: 1.25px solid #64748b !important;
+}
+.evaluation-box-legend .legend-line.prediction {
+  border-top: 2px dashed #ef4444 !important;
+}
+
 /* Final inference queue guard. */
 .inference-workspace .reference-queue .inference-table-head,
 .inference-workspace .reference-queue .inference-table-row {
