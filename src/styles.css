@@ -12154,6 +12154,40 @@ button:disabled:hover {
   }
 }
 
+/* Final project-card action layout: one compact, centered column on the right. */
+.app-shell .home-project-grid .project-folder > .project-actions,
+.app-shell .workspace-folder-grid .project-folder > .project-actions {
+  position: static !important;
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  display: grid !important;
+  grid-auto-flow: row !important;
+  grid-template-columns: 25px !important;
+  grid-template-rows: repeat(4, 25px) !important;
+  align-content: center !important;
+  justify-content: center !important;
+  justify-items: center !important;
+  align-items: center !important;
+  width: 30px !important;
+  height: auto !important;
+  gap: 4px !important;
+  inset: auto !important;
+  padding: 0 !important;
+  pointer-events: auto !important;
+}
+.app-shell .home-project-grid .project-folder > .project-actions > button,
+.app-shell .workspace-folder-grid .project-folder > .project-actions > button {
+  position: static !important;
+  grid-column: 1 !important;
+  grid-row: auto !important;
+  width: 25px !important;
+  height: 25px !important;
+  min-width: 25px !important;
+  min-height: 25px !important;
+  margin: 0 !important;
+  pointer-events: auto !important;
+}
+
 /* Final inference queue guard. */
 .inference-workspace .reference-queue .inference-table-head,
 .inference-workspace .reference-queue .inference-table-row {
@@ -12868,6 +12902,50 @@ body.resizing-table-column {
 .workspace-folder-grid .project-actions button { position: static !important; pointer-events: auto; }
 .home-project-grid .project-actions button[title="删除项目"],
 .workspace-folder-grid .project-actions button[title="删除项目"] { grid-column: 3 !important; grid-row: 3 !important; }
+
+/* Keep every project action in one predictable right-hand column. */
+.home-project-grid .project-folder,
+.workspace-folder-grid .project-folder {
+  grid-template-columns: 42px minmax(0, 1fr) 30px !important;
+  align-items: center !important;
+}
+.home-project-grid .project-folder .project-folder-body,
+.workspace-folder-grid .project-folder .project-folder-body {
+  padding-right: 0 !important;
+}
+.home-project-grid .project-actions,
+.workspace-folder-grid .project-actions {
+  position: static !important;
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  width: 30px !important;
+  height: auto !important;
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  grid-template-rows: repeat(4, 25px) !important;
+  align-content: center !important;
+  justify-items: center !important;
+  gap: 4px !important;
+  pointer-events: auto !important;
+}
+.home-project-grid .project-actions button,
+.workspace-folder-grid .project-actions button {
+  position: static !important;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  width: 25px !important;
+  height: 25px !important;
+  margin: 0 !important;
+}
+.home-project-grid .project-actions button[title="删除项目"],
+.workspace-folder-grid .project-actions button[title="删除项目"] {
+  color: #e0525d !important;
+  border-color: color-mix(in srgb, #e0525d 38%, var(--line)) !important;
+}
+.home-project-grid .project-actions button[title="删除项目"]:hover,
+.workspace-folder-grid .project-actions button[title="删除项目"]:hover {
+  background: color-mix(in srgb, #e0525d 12%, transparent) !important;
+}
 
 @media (max-width: 1500px) {
   .training-dataset-tree-grid { grid-template-columns: 1fr; }
