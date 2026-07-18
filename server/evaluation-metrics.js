@@ -114,6 +114,9 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
         }
       }
       const predictedClass = perClass.get(prediction.label);
+      // Match geometry before class: a class mismatch at the official IoU
+      // threshold is one class error, which contributes one FP and one FN.
+      // Below that threshold it remains an unmatched prediction/ground truth.
       if (bestIndex >= 0 && bestIou >= iouThreshold) {
         used.add(bestIndex);
         const truth = imageGt[bestIndex];
