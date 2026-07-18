@@ -11,6 +11,9 @@ if "%DET_DASHBOARD_RUNTIME%"=="" (
 )
 set "ENV_FILE=%ROOT%\.env"
 set "PODMAN=C:\Users\14226\AppData\Local\Programs\Podman\podman.exe"
+rem Use the rootful machine socket because PostgreSQL and MinIO need write access
+rem to the Windows-backed DD-runtime volumes.
+set "CONTAINER_CONNECTION=podman-machine-default-root"
 set "SYSTEM_NPM=D:\Program Files\nodejs\npm.cmd"
 set "NPM=%RUNTIME_ROOT%\node\npm.cmd"
 set "PATH=%RUNTIME_ROOT%\node;%PATH%"
@@ -100,6 +103,7 @@ call :kill_port %MINIO_CONSOLE_PORT%
 
 echo [2/7] Start Podman machine if needed...
 "%PODMAN%" machine start >nul 2>nul
+"%PODMAN%" machine ssh "systemctl start podman.socket" >nul 2>nul
 "%PODMAN%" info >nul 2>nul
 if errorlevel 1 (
   echo Podman is not reachable. Try: podman machine init ^&^& podman machine start
