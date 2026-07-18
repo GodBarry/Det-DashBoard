@@ -627,7 +627,10 @@ const executionLog = liveLogs.length
 return (
   <div className="inference-workspace resizable-workspace" style={{ "--workspace-left": `${columns.left}px`, "--workspace-right": `${columns.right}px` }}>
     <aside className="inference-sidebar reference-sidebar">
-      <h2>推理资源</h2>
+      <div className="resource-sidebar-head"><h2>推理资源</h2></div>
+      <div className="resource-mode-tabs inference-resource-tabs" aria-label="推理资源类型">
+        <button className="active" type="button">推理</button>
+      </div>
       <div className="resource-tree">
         {resourceGroups.map((group) => {
           const GroupIcon = group.icon;

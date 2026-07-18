@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, Sun, X } from "lucide-react";
 
-import { colors } from "../../shared/presentation.js";
+import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 
@@ -42,13 +42,7 @@ function loadImageAnnotations(imageId, priority = "current") {
   return request;
 }
 function labelColor(label = "") {
-
-let hash = 0;
-
-for (let i = 0; i < label.length; i += 1) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
-
-return colors[hash % colors.length];
-
+return categoryColor(label);
 }
 
 function imageMetadata(item, annotations) {

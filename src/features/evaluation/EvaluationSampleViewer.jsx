@@ -71,7 +71,7 @@ export function EvaluationSampleViewer({
           {imageSrc && !imageFailed ? <AuthenticatedImage src={imageSrc} draggable="false" alt={row.display_name || "错误样本"} onLoad={() => setImageLoaded(true)} onError={() => { setImageLoaded(false); setImageFailed(true); }} /> : <div className="evaluation-sample-load-error"><ImageIcon size={34} /><b>图片加载失败</b><span>{imageId ? `图片索引：${imageId}` : "该记录没有关联图片索引"}</span></div>}
           {imageLoaded && boxes.map((box, boxIndex) => {
             const style = getBoxStyle(box.item, row);
-            return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small></i> : null;
+            return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={{ ...style, "--box-color": box.color }}><small>{box.label}</small></i> : null;
           })}
         </div>
       </div>

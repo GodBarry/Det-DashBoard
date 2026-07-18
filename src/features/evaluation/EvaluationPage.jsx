@@ -24,12 +24,13 @@ import {
   formatDateTime,
   formatDuration,
   runStatusLabel,
+  categoryColor,
 } from "../../shared/presentation.js";
 const EvaluationConfusionMatrix = lazy(() => import("./EvaluationConfusionMatrix.jsx").then((module) => ({ default: module.EvaluationConfusionMatrix })));
 const EvaluationCurve = lazy(() => import("./EvaluationCurve.jsx").then((module) => ({ default: module.EvaluationCurve })));
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
-import { evaluationBarPalette, evaluationErrorBoxes, evaluationErrorDescriptions } from "./evaluationPresentation.js";
+import { evaluationErrorBoxes, evaluationErrorDescriptions } from "./evaluationPresentation.js";
 import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 
 export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, onDelete, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
@@ -355,7 +356,7 @@ return (
 
 </div>
 
-<article className="evaluation-live-class-bars"><h3>类别 AP 排名</h3>{rankRows.map((row, index) => <p key={row.label}><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><em>{formatMetric(row.ap50)}</em></p>)}</article>
+<article className="evaluation-live-class-bars"><h3>类别 AP 排名</h3>{rankRows.map((row) => <p key={row.label}><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: categoryColor(row.label) }} /></i><em>{formatMetric(row.ap50)}</em></p>)}</article>
 
 <article className="evaluation-histogram"><h3>置信度 / F1 分布</h3><div>{curves.map((row) => <i key={row.confidence} style={{ height: Number(row.f1 || 0) * 100 + "%" }} />)}<span style={{ left: Number(evaluation?.summary?.recommendedConfidence || 0) * 100 + "%" }}>推荐阈值</span></div></article>
 
@@ -388,7 +389,7 @@ return (
 
 <div className="evaluation-sample-grid">
 
-<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}><div className="evaluation-sample-media" style={{ aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}` }}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small></i> : null; })}</div><span>{row.display_name || "图片结果"}</span></article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
+<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}><div className="evaluation-sample-media" style={{ aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}` }}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={{ ...style, "--box-color": box.color }}><small>{box.label}</small></i> : null; })}</div><span>{row.display_name || "图片结果"}</span></article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
 
 {!samples.length && <div className="empty-state">当前类型没有错误样本</div>}
 
@@ -410,7 +411,7 @@ return (
 
 <section className="evaluation-key-insights"><h3>关键结论</h3>{insightRows.map((text) => <p key={text}>{text}</p>)}</section>
 
-<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50）</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
+<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50）</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: categoryColor(row.label) }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
 
 <div className="evaluation-insight-actions"><button onClick={() => setActiveAnalysis("confusion")}><Grid size={14} />查看混淆矩阵</button><button className="primary"><Download size={14} />生成评估报告</button></div>
 

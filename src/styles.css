@@ -12335,6 +12335,232 @@ button:disabled:hover {
   .model-init-row { grid-template-columns: auto minmax(130px, 1fr) auto minmax(120px, .8fr) !important; }
 }
 
+/* Five-workspace visual contract: shared sidebar, inspector, controls and labels. */
+.reference-sidebar,
+.reference-inspector,
+.evaluation-runs,
+.evaluation-insights,
+.asset-inspector,
+.inspector-panel,
+.home-inspector {
+  --workspace-panel: var(--panel, #fff);
+  --workspace-soft: var(--soft, #f4f8fa);
+  --workspace-border: var(--line, #d6e1e7);
+  --workspace-text: var(--text, #132532);
+  --workspace-muted: var(--muted, #6d8190);
+  --workspace-accent: #0d9f98;
+  background: var(--workspace-panel) !important;
+  color: var(--workspace-text) !important;
+}
+
+.resource-sidebar-head,
+.reference-inspector > .inspector-title,
+.evaluation-insights > h2,
+.asset-inspector > .inspector-title,
+.inspector-panel > .inspector-title {
+  box-sizing: border-box;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 !important;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--workspace-border);
+}
+.resource-sidebar-head h2,
+.reference-inspector > .inspector-title h2,
+.evaluation-insights > h2,
+.asset-inspector > .inspector-title h2,
+.inspector-panel > .inspector-title h2 {
+  margin: 0 !important;
+  color: var(--workspace-text) !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  line-height: 1.2;
+}
+
+.resource-mode-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 4px !important;
+  margin: 10px 10px 8px !important;
+  padding: 3px !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-radius: 6px !important;
+  background: var(--workspace-soft) !important;
+}
+.resource-mode-tabs.inference-resource-tabs { grid-template-columns: 1fr !important; }
+.resource-mode-tabs button {
+  min-width: 0 !important;
+  height: 28px !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  border: 1px solid transparent !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  color: var(--workspace-muted) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+.resource-mode-tabs button.active {
+  border-color: color-mix(in srgb, var(--workspace-accent) 34%, var(--workspace-border)) !important;
+  background: color-mix(in srgb, var(--workspace-accent) 12%, var(--workspace-panel)) !important;
+  color: var(--workspace-accent) !important;
+}
+.resource-tree-row .resource-node-select { border-radius: 4px !important; }
+.resource-tree-row.active .resource-node-select {
+  background: color-mix(in srgb, var(--workspace-accent) 14%, var(--workspace-panel)) !important;
+  box-shadow: inset 2px 0 var(--workspace-accent);
+  color: var(--workspace-accent) !important;
+}
+.resource-tree-row.active .resource-node-select span,
+.resource-tree-row.active .resource-node-select svg { color: var(--workspace-accent) !important; }
+
+.reference-inspector {
+  padding: 0 10px 10px !important;
+  overflow: auto;
+}
+.reference-inspector > .inspector-title { margin: 0 -10px 10px !important; }
+.reference-inspector > :not(.inspector-title),
+.evaluation-insights > section,
+.evaluation-insights > .evaluation-insight-actions {
+  box-sizing: border-box;
+  margin: 0 0 8px !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-radius: 6px !important;
+  background: var(--workspace-panel) !important;
+}
+.reference-inspector > :not(.inspector-title) { padding: 10px !important; }
+.reference-inspector h3,
+.evaluation-insights h3 {
+  color: var(--workspace-text) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.reference-inspector button,
+.evaluation-insights button,
+.asset-inspector button,
+.inspector-panel button,
+.home-inspector button {
+  min-height: 28px;
+  border-color: var(--workspace-border) !important;
+  border-radius: 5px !important;
+  background: var(--workspace-panel) !important;
+  color: var(--workspace-text) !important;
+}
+.reference-inspector button:hover,
+.evaluation-insights button:hover,
+.asset-inspector button:hover,
+.inspector-panel button:hover,
+.home-inspector button:hover {
+  border-color: color-mix(in srgb, var(--workspace-accent) 55%, var(--workspace-border)) !important;
+  color: var(--workspace-accent) !important;
+}
+.reference-inspector button.primary,
+.evaluation-insights button.primary,
+.asset-inspector button.primary,
+.inspector-panel button.primary,
+.home-inspector button.primary {
+  border-color: var(--workspace-accent) !important;
+  background: var(--workspace-accent) !important;
+  color: #fff !important;
+}
+
+/* Error visualization semantics: ground truth is thin solid; predictions are dashed and on top. */
+.evaluation-sample-grid .sample-box,
+.evaluation-sample-large .sample-box {
+  box-sizing: border-box !important;
+  border-color: var(--box-color, #0d9f98) !important;
+  background: color-mix(in srgb, var(--box-color, #0d9f98) 6%, transparent) !important;
+}
+.evaluation-sample-grid .sample-box.ground,
+.evaluation-sample-large .sample-box.ground {
+  z-index: 2 !important;
+  border-width: 1.25px !important;
+  border-style: solid !important;
+}
+.evaluation-sample-grid .sample-box.prediction,
+.evaluation-sample-large .sample-box.prediction {
+  z-index: 4 !important;
+  border-width: 2px !important;
+  border-style: dashed !important;
+}
+.evaluation-sample-grid .sample-box small,
+.evaluation-sample-large .sample-box small {
+  left: auto !important;
+  right: -2px !important;
+  top: -18px !important;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--box-color, #0d9f98) !important;
+  color: #fff !important;
+}
+.evaluation-box-legend-current {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--workspace-accent, #0d9f98);
+  background: color-mix(in srgb, var(--workspace-accent, #0d9f98) 8%, transparent);
+  color: var(--workspace-text, #132532);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.evaluation-box-legend .legend-line.ground { border-top: 1.25px solid currentColor !important; }
+.evaluation-box-legend .legend-line.prediction { border-top: 2px dashed currentColor !important; }
+
+.app-shell.dark .reference-sidebar,
+.app-shell.dark .reference-inspector,
+.app-shell.dark .evaluation-runs,
+.app-shell.dark .evaluation-insights,
+.app-shell.dark .asset-inspector,
+.app-shell.dark .inspector-panel,
+.app-shell.dark .home-inspector {
+  --workspace-panel: #0d1b24;
+  --workspace-soft: #12232e;
+  --workspace-border: #2b3d49;
+  --workspace-text: #e9f2f5;
+  --workspace-muted: #9db0bb;
+}
+
+.evaluation-insights > h2 {
+  margin-bottom: 8px !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-radius: 6px !important;
+  background: var(--workspace-panel) !important;
+}
+.asset-inspector,
+.inspector-panel,
+.home-inspector {
+  box-sizing: border-box;
+  padding: 0 10px 10px !important;
+}
+.asset-inspector > .inspector-title,
+.inspector-panel > .inspector-title {
+  margin: 0 -10px 10px !important;
+}
+.asset-inspector > .asset-stat-grid,
+.asset-inspector > .activity-panel,
+.inspector-panel > .inspector-stats,
+.inspector-panel > .image-info-panel,
+.inspector-panel > .annotation-list,
+.inspector-panel > .records-panel,
+.home-inspector > .home-inspector-block {
+  box-sizing: border-box;
+  margin: 0 0 8px !important;
+  padding: 10px !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-radius: 6px !important;
+  background: var(--workspace-panel) !important;
+}
+.home-inspector > .home-inspector-block .inspector-title,
+.home-inspector > .home-inspector-block .section-title-row {
+  min-height: 32px;
+  margin: -2px 0 8px !important;
+  padding: 0 !important;
+  border-bottom: 1px solid var(--workspace-border);
+}
+
 /* Resizable ML workspaces and schema-driven training controls. */
 .training-workspace.resizable-workspace,
 .inference-workspace.resizable-workspace {

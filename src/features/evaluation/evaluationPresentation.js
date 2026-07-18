@@ -1,3 +1,5 @@
+import { categoryColor } from "../../shared/presentation.js";
+
 export const evaluationBarPalette = ["#0d8f89", "#2563eb", "#7c3aed", "#f59e0b", "#ef4444", "#10b981", "#06b6d4", "#f97316"];
 
 export const evaluationErrorLegend = [
@@ -38,15 +40,15 @@ export function evaluationErrorBoxes(row = {}, filter = "false_negative", predic
     const itemLabel = (item) => item?.label || item?.class_name || item?.category || "目标";
     const scoreLabel = (item) => item?.score == null ? "" : ` ${(Number(item.score) * 100).toFixed(0)}%`;
     if (error.type === "false_negative" && error.groundTruth) {
-      return [{ type: "false_negative ground", item: error.groundTruth, label: `漏检·真值·${itemLabel(error.groundTruth)}` }];
+      return [{ type: "false_negative ground", item: error.groundTruth, color: categoryColor(itemLabel(error.groundTruth)), label: `漏检｜真值｜${itemLabel(error.groundTruth)}` }];
     }
     if (error.type === "false_positive" && error.prediction) {
-      return [{ type: "false_positive prediction", item: error.prediction, label: `误检·预测·${itemLabel(error.prediction)}${scoreLabel(error.prediction)}` }];
+      return [{ type: "false_positive prediction", item: error.prediction, color: categoryColor(itemLabel(error.prediction)), label: `误检｜预测｜${itemLabel(error.prediction)}${scoreLabel(error.prediction)}` }];
     }
 
     const boxes = [];
-    if (error.groundTruth) boxes.push({ type: `${error.type} ground`, item: error.groundTruth, label: `${label}·真值·${itemLabel(error.groundTruth)}` });
-    if (error.prediction) boxes.push({ type: `${error.type} prediction`, item: error.prediction, label: `${label}·预测·${itemLabel(error.prediction)}${scoreLabel(error.prediction)}` });
+    if (error.groundTruth) boxes.push({ type: `${error.type} ground`, item: error.groundTruth, color: categoryColor(itemLabel(error.groundTruth)), label: `${label}｜真值｜${itemLabel(error.groundTruth)}` });
+    if (error.prediction) boxes.push({ type: `${error.type} prediction`, item: error.prediction, color: categoryColor(itemLabel(error.prediction)), label: `${label}｜预测｜${itemLabel(error.prediction)}${scoreLabel(error.prediction)}` });
     return boxes;
   });
 }

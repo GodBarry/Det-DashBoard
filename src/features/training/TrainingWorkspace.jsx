@@ -327,9 +327,9 @@ export function TrainingWorkspace({
 
       <aside className="training-sidebar reference-sidebar">
 
-        <h2>训练资源</h2>
+        <div className="resource-sidebar-head"><h2>训练资源</h2></div>
 
-        <div className="split-target-control" aria-label="选择左侧数据集要写入的划分">
+        <div className="resource-mode-tabs split-target-control" aria-label="选择左侧数据集要写入的划分">
           {[['trainProjectId', '训练'], ['valProjectId', '验证']].map(([key, label]) => <button type="button" className={activeDatasetSplit === key ? 'active' : ''} key={key} onClick={() => setActiveDatasetSplit(key)}>{label}</button>)}
         </div>
 

@@ -1,5 +1,18 @@
 export const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
 
+export function categoryColor(label = "") {
+  let hash = 2166136261;
+  for (const char of String(label).trim().toLowerCase()) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const value = hash >>> 0;
+  const hue = value % 360;
+  const saturation = 62 + ((value >>> 9) % 16);
+  const lightness = 46 + ((value >>> 17) % 10);
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
 export const evaluationClusterLabels = { detect: "目标检测", segment: "实例分割", classify: "图像分类" };
 
 export const evaluationTypeLabels = { training: "训练模型", inference: "推理模型" };

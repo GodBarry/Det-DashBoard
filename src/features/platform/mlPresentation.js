@@ -1,4 +1,4 @@
-import { colors, formatDateTime } from "../../shared/presentation.js";
+import { categoryColor, formatDateTime } from "../../shared/presentation.js";
 
 export function modelFamilyLabel(name = "") {
   const text = String(name || "").trim();
@@ -108,9 +108,7 @@ export function predictionBoxStyle(prediction, row) {
 }
 
 export function predictionColor(label = "") {
-  let hash = 0;
-  for (const char of String(label)) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
-  return colors[Math.abs(hash) % colors.length];
+  return categoryColor(label);
 }
 
 export function predictionItems(value) {
