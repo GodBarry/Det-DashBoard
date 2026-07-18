@@ -170,6 +170,13 @@ function createDatasetRoutes(deps) {
       sendJson(res, await datasetContentService.exportProject(exportMatch[1], await readBody(req), actor));
       return true;
     }
+    const annotationBatchMatch = pathname.match(/^\/api\/projects\/([^/]+)\/image-annotations\/batch$/);
+    if (method === "POST" && annotationBatchMatch) {
+      await resourceAccess.assertProjectRead(actor, annotationBatchMatch[1]);
+      const body = await readBody(req);
+      sendJson(res, await datasetContentService.getImageAnnotationsBatch(annotationBatchMatch[1], body.imageIds));
+      return true;
+    }
 
     const thumbnailMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/thumb$/);
     if (method === "GET" && thumbnailMatch) {

@@ -1,46 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Sun, X } from "lucide-react";
 
 import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
-import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
-
-const annotationCache = new Map();
-const pendingAnnotations = new Map();
-
-function cancelImageAnnotations(imageId, priority) {
-  const pending = pendingAnnotations.get(imageId);
-  if (pending && (!priority || pending.priority === priority)) pending.controller.abort();
-}
-
-function loadImageAnnotations(imageId, priority = "current") {
-  if (!imageId) return Promise.resolve([]);
-  if (annotationCache.has(imageId)) return Promise.resolve(annotationCache.get(imageId));
-  const existing = pendingAnnotations.get(imageId);
-  if (existing) {
-    if (priority !== "current" || existing.priority === "current") return existing.promise;
-    existing.controller.abort();
-    pendingAnnotations.delete(imageId);
-  }
-  const controller = new AbortController();
-  const entry = { controller, priority, promise: null };
-  const request = fetch(`/api/project-images/${imageId}/annotations`, {
-    signal: controller.signal,
-    priority: priority === "current" ? "high" : "low",
-  })
-    .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载图片标注失败")))
-    .then((data) => {
-      const annotations = Array.isArray(data.annotations) ? data.annotations : [];
-      annotationCache.set(imageId, annotations);
-      return annotations;
-    })
-    .finally(() => {
-      if (pendingAnnotations.get(imageId) === entry) pendingAnnotations.delete(imageId);
-    });
-  entry.promise = request;
-  pendingAnnotations.set(imageId, entry);
-  return request;
-}
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { prefetchViewerWindow, setViewerAnnotations, useViewerAnnotations } from "../media/viewerMediaRepository.js";
+import { useViewerNavigation } from "../media/useViewerNavigation.js";
 function labelColor(label = "") {
 return categoryColor(label);
 }
@@ -123,9 +88,11 @@ const [viewerItems, setViewerItems] = useState(items);
 const [viewerPage, setViewerPage] = useState(page);
 const [loadingPage, setLoadingPage] = useState(false);
 const [sequenceIndex, setSequenceIndex] = useState(externalIndex);
+const previousIndexRef = useRef(externalIndex);
 const index = sequenceUrl ? sequenceIndex : externalIndex;
 const setIndex = sequenceUrl ? setSequenceIndex : setExternalIndex;
 const item = viewerItems[index];
+const annotations = useViewerAnnotations(item?.id, item?.annotations);
 
 useEffect(() => {
   if (!sequenceUrl) return undefined;
@@ -170,48 +137,14 @@ const [loadedItemId, setLoadedItemId] = useState(null);
 const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
 
 useEffect(() => {
-  if (!item?.id || Array.isArray(item.annotations)) return undefined;
-  let active = true;
-  loadImageAnnotations(item.id, "current")
-    .then((annotations) => {
-      if (!active) return;
-      setViewerItems((rows) => rows.map((row) => row.id === item.id ? { ...row, annotations } : row));
-      setDraft(annotations.map((annotation) => ({ ...annotation })));
-      setDefaultLabel(annotations[0]?.label || "");
-    })
-    .catch(() => {});
-  return () => {
-    active = false;
-    cancelImageAnnotations(item.id, "current");
-  };
-}, [item?.id]);
+  if (!item?.id) return undefined;
 
-useEffect(() => {
-
-if (!item?.id || loadedItemId !== item.id) return undefined;
-
-let cancelled = false;
-const neighbor = viewerItems[index + 1] || viewerItems[index - 1];
-
-const preloadNeighbors = () => {
-  if (!neighbor?.id) return;
-  const run = () => {
-    if (cancelled) return;
-    preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
-    loadImageAnnotations(neighbor.id, "prefetch").catch(() => {});
-  };
-  if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 250 });
-  else window.setTimeout(run, 80);
-};
-
-preloadNeighbors();
-
-return () => {
-  cancelled = true;
-  cancelImageAnnotations(neighbor?.id, "prefetch");
-};
-
-}, [index, item?.id, viewerItems, loadedItemId]);
+  const direction = index >= previousIndexRef.current ? 1 : -1;
+  previousIndexRef.current = index;
+  const projectId = sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
+  prefetchViewerWindow({ projectId, items: viewerItems, index, direction }).catch(() => {});
+  return undefined;
+}, [index, item?.id, viewerItems, sequenceUrl]);
 
 useEffect(() => {
   if (!loadPage) setViewerItems(items);
@@ -227,11 +160,11 @@ setEditMode(false);
 
 setTool("select");
 
-setDraft((item?.annotations || []).map((ann) => ({ ...ann })));
+setDraft([]);
 
 setSelectedAnnId(null);
 
-setDefaultLabel((item?.annotations || [])[0]?.label || "");
+setDefaultLabel("");
 
 setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.image_height || 1) });
 setLoadedItemId(null);
@@ -239,36 +172,27 @@ setLoadedItemId(null);
 }, [item?.id]);
 
 useEffect(() => {
+  if (editMode) return;
+  setDraft(annotations.map((annotation) => ({ ...annotation })));
+  setDefaultLabel(annotations[0]?.label || "");
+}, [annotations, editMode, item?.id]);
 
-const onKey = (event) => {
+useViewerNavigation({
+  enabled: !editMode,
+  length: viewerItems.length,
+  setIndex,
+  onEscape: () => editMode ? setSelectedAnnId(null) : (onPageChange?.(viewerPage), onClose()),
+});
 
-if (event.key === "Escape") {
-
-if (editMode) setSelectedAnnId(null);
-
-else { onPageChange?.(viewerPage); onClose(); }
-
-}
-
-if (!editMode && event.key === "ArrowLeft") setIndex((value) => Math.max(0, value - 1));
-
-if (!editMode && event.key === "ArrowRight") setIndex((value) => Math.min(viewerItems.length - 1, value + 1));
-
-if (editMode && (event.key === "Delete" || event.key === "Backspace") && selectedAnnId) {
-
-setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId));
-
-setSelectedAnnId(null);
-
-}
-
-};
-
-window.addEventListener("keydown", onKey);
-
-return () => window.removeEventListener("keydown", onKey);
-
-}, [editMode, viewerItems.length, onClose, onPageChange, selectedAnnId, setIndex, viewerPage]);
+useEffect(() => {
+  const onDelete = (event) => {
+    if (!editMode || !selectedAnnId || !["Delete", "Backspace"].includes(event.key)) return;
+    setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId));
+    setSelectedAnnId(null);
+  };
+  window.addEventListener("keydown", onDelete);
+  return () => window.removeEventListener("keydown", onDelete);
+}, [editMode, selectedAnnId]);
 
 const zoom = (delta) => setScale((value) => Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2)))));
 
@@ -294,7 +218,7 @@ const width = Number(item.image_width || naturalSize.width || 1);
 
 const height = Number(item.image_height || naturalSize.height || 1);
 
-const shownAnnotations = editMode ? draft : item.annotations || [];
+const shownAnnotations = editMode ? draft : annotations;
 const annotationCounts = shownAnnotations.reduce((rows, annotation) => {
   const label = String(annotation.label || "未分类");
   rows.set(label, (rows.get(label) || 0) + 1);
@@ -348,6 +272,7 @@ const data = await saveAnnotations(draft);
 
 const annotations = data?.annotations || draft;
 
+setViewerAnnotations(item.id, annotations);
 setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
@@ -380,6 +305,7 @@ body: JSON.stringify({ annotations: draft }),
 
 const annotations = data.annotations || [];
 
+setViewerAnnotations(item.id, annotations);
 setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
@@ -475,7 +401,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ "--image-ratio": Number(item.image_width || 16) / Number(item.image_height || 9), aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<AuthenticatedImage fetchPriority="high" src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onLoad={(event) => { setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 }); setLoadedItemId(item.id); }} />
+<AuthenticatedImage fetchPriority="high" src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onSourceReady={() => setLoadedItemId(item.id)} onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} />
 
 {loadedItemId === item.id && (editMode ? (
 

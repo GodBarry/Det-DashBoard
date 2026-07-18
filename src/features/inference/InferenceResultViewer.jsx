@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight, RotateCcw, Sun, X, ZoomIn, ZoomOut } from "lucide-react";
-import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { prefetchImageWindow } from "../media/viewerMediaRepository.js";
+import { useViewerNavigation } from "../media/useViewerNavigation.js";
 
 export function InferenceResultViewer({ rows = [], initialIndex = 0, onClose, predictionItems, predictionBoxStyle, predictionColor }) {
   const [index, setIndex] = useState(() => Math.max(0, Math.min(rows.length - 1, initialIndex)));
@@ -9,20 +11,16 @@ export function InferenceResultViewer({ rows = [], initialIndex = 0, onClose, pr
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const previousIndexRef = useRef(initialIndex);
   const row = rows[index];
   const move = (delta) => setIndex((current) => Math.max(0, Math.min(rows.length - 1, current + delta)));
   const imageSrc = row?.project_image_id ? `/api/project-images/${row.project_image_id}/preview?size=1920` : (row?.image_url || row?.thumb_url || "");
+  useViewerNavigation({ enabled: true, length: rows.length, setIndex, onEscape: onClose });
   useEffect(() => {
-    const keydown = (event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, [rows.length, onClose]);
-  useEffect(() => {
-    const neighbor = rows[index + 1] || rows[index - 1];
-    if (!neighbor) return undefined;
-    const src = neighbor.project_image_id ? `/api/project-images/${neighbor.project_image_id}/preview?size=1920` : (neighbor.image_url || neighbor.thumb_url);
-    const timer = window.setTimeout(() => { if (src) preloadAuthenticatedImage(src); }, 80);
-    return () => window.clearTimeout(timer);
+    const direction = index >= previousIndexRef.current ? 1 : -1;
+    previousIndexRef.current = index;
+    prefetchImageWindow({ items: rows, index, direction, getSource: (item) => item.project_image_id ? `/api/project-images/${item.project_image_id}/preview?size=1920` : (item.image_url || item.thumb_url || "") });
+    return undefined;
   }, [index, rows]);
   useEffect(() => { setScale(1); setPan({ x: 0, y: 0 }); setImageLoaded(false); }, [index]);
   const zoom = (delta) => setScale((current) => Math.max(.5, Math.min(6, Number((current + delta).toFixed(2)))));

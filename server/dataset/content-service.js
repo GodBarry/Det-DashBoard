@@ -95,6 +95,27 @@ function createDatasetContentService({
     return { annotations: result.rows };
   }
 
+  async function getImageAnnotationsBatch(projectId, imageIds = []) {
+    const ids = [...new Set((Array.isArray(imageIds) ? imageIds : []).filter(Boolean))].slice(0, 32);
+    if (!ids.length) return { annotationsByImage: {} };
+    const result = await query(
+      `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h,
+              a.shape_type, a.difficult, a.score, a.attributes_json
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+       JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
+       WHERE p.id=$1 AND pi.id = ANY($2::uuid[]) AND a.label_version_id=p.active_label_version_id
+       ORDER BY a.project_image_id, a.id`,
+      [projectId, ids],
+    );
+    const annotationsByImage = Object.fromEntries(ids.map((id) => [id, []]));
+    for (const annotation of result.rows) {
+      const key = String(annotation.project_image_id);
+      if (annotationsByImage[key]) annotationsByImage[key].push(annotation);
+    }
+    return { annotationsByImage };
+  }
+
   function projectImageFilter(projectId, queryParams = {}) {
     const params = [projectId];
     const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
@@ -415,7 +436,7 @@ function createDatasetContentService({
     return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
   }
 
-  return { saveImageAnnotations, getImageAnnotations, countProjectImages, listProjectImages, streamProjectImage, exportProject };
+  return { saveImageAnnotations, getImageAnnotations, getImageAnnotationsBatch, countProjectImages, listProjectImages, streamProjectImage, exportProject };
 }
 
 module.exports = { createDatasetContentService };

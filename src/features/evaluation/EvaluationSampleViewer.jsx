@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Image as ImageIcon, RotateCcw, Sun, X, ZoomIn, ZoomOut } from "lucide-react";
-import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { prefetchImageWindow } from "../media/viewerMediaRepository.js";
+import { useViewerNavigation } from "../media/useViewerNavigation.js";
 import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 import { evaluationErrorDescriptions } from "./evaluationPresentation.js";
 
@@ -19,6 +21,7 @@ export function EvaluationSampleViewer({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState(null);
   const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
+  const previousIndexRef = useRef(initialIndex);
   const row = rows[index];
   const move = (delta) => setIndex((value) => Math.max(0, Math.min(rows.length - 1, value + delta)));
 
@@ -30,23 +33,13 @@ export function EvaluationSampleViewer({
   }, [index]);
 
   useEffect(() => {
-    const neighbor = rows[index + 1] || rows[index - 1];
-    const neighborId = neighbor?.project_image_id || neighbor?.projectImageId || neighbor?.id;
-    const src = neighborId ? `/api/project-images/${neighborId}/preview?size=1920` : (neighbor?.image_url || neighbor?.thumb_url);
-    if (!src) return undefined;
-    const timer = window.setTimeout(() => preloadAuthenticatedImage(src), 80);
-    return () => window.clearTimeout(timer);
+    const direction = index >= previousIndexRef.current ? 1 : -1;
+    previousIndexRef.current = index;
+    prefetchImageWindow({ items: rows, index, direction, getSource: (item) => { const id = item.project_image_id || item.projectImageId || item.id; return id ? `/api/project-images/${id}/preview?size=1920` : (item.image_url || item.thumb_url || ""); } });
+    return undefined;
   }, [index, rows]);
 
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === "ArrowLeft") move(-1);
-      if (event.key === "ArrowRight") move(1);
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [rows.length, onClose]);
+  useViewerNavigation({ enabled: true, length: rows.length, setIndex, onEscape: onClose });
 
   if (!row) return null;
   const imageId = row.project_image_id || row.projectImageId || row.id;
