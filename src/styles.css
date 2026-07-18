@@ -11291,11 +11291,6 @@ button:disabled:hover {
   background: rgba(17,30,40,.86) !important;
   color: #dceaf1 !important;
 }
-.inference-table-head,
-.inference-table-row {
-  grid-template-columns: minmax(250px,1.55fr) minmax(120px,.82fr) minmax(120px,.82fr) 78px 100px 80px 80px 74px 74px 74px 168px !important;
-  align-items: center !important;
-}
 .inference-task-name {
   min-width: 0 !important;
   display: inline-flex !important;
@@ -11314,17 +11309,6 @@ button:disabled:hover {
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
-}
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(220px,1.45fr) minmax(150px,1fr) minmax(150px,1fr) 76px 96px 70px 70px 70px 52px 128px !important;
-  align-items: center !important;
-}
-.training-table-row > .training-row-actions {
-  width: 124px !important;
-  min-width: 124px !important;
-  max-width: 124px !important;
-  justify-self: end !important;
 }
 .settings-dialog {
   min-height: 0 !important;
@@ -11518,11 +11502,6 @@ button:disabled:hover {
 .trash-row-actions button:last-child {
   color: #ef4444 !important;
 }
-.inference-table-head,
-.inference-table-row {
-  grid-template-columns: minmax(210px,1.34fr) minmax(104px,.7fr) minmax(104px,.7fr) 72px 92px 72px 72px 68px 68px 68px 190px !important;
-  column-gap: 8px !important;
-}
 .inference-table-head > span,
 .inference-table-row > span,
 .inference-table-row > b,
@@ -11532,44 +11511,10 @@ button:disabled:hover {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
-.inference-table-row > .queue-actions {
-  width: 188px !important;
-  min-width: 188px !important;
-  justify-self: end !important;
-  gap: 7px !important;
-}
-.inference-table-row .queue-action-row,
-.inference-table-row .queue-priority {
-  gap: 5px !important;
-}
-.inference-table-row .queue-action-row button,
-.inference-table-row .queue-priority button {
-  flex-basis: 27px !important;
-  width: 27px !important;
-  min-width: 27px !important;
-  height: 27px !important;
-}
-
-/* Inference queue header/body alignment and wider action column. */
-.reference-queue .inference-table-head,
-.reference-queue .inference-table-row,
-.inference-table-head,
-.inference-table-row {
-  grid-template-columns: minmax(138px, 1fr) 108px 126px 70px 116px 64px 64px 68px 68px 68px 194px !important;
-  column-gap: 8px !important;
-  align-items: center !important;
-}
 .inference-table-head .inference-task-name,
 .inference-table-row .inference-task-name {
   min-width: 0 !important;
   max-width: 100% !important;
-}
-.inference-table-head > span:last-child,
-.inference-table-row > .queue-actions {
-  justify-self: end !important;
-  width: 194px !important;
-  min-width: 194px !important;
-  text-align: right !important;
 }
 .inference-table-row > .queue-actions {
   display: inline-flex !important;
@@ -11586,14 +11531,6 @@ button:disabled:hover {
   flex-wrap: nowrap !important;
   gap: 6px !important;
 }
-.inference-table-row .queue-action-row button,
-.inference-table-row .queue-priority button {
-  width: 28px !important;
-  min-width: 28px !important;
-  height: 28px !important;
-  flex: 0 0 28px !important;
-}
-
 .inference-task-name-row {
   grid-template-columns: 88px minmax(260px, 1fr) !important;
 }
@@ -11674,23 +11611,6 @@ button:disabled:hover {
   font-weight: 650 !important;
 }
 
-.inference-table-row > .queue-actions {
-  transform: translateX(-10px) !important;
-}
-
-.inference-table-row .queue-action-row {
-  transform: translateX(-4px) !important;
-}
-
-/* Final queue readability: keep status column wide enough for Chinese labels. */
-.inference-table-head,
-.inference-table-row {
-  grid-template-columns: minmax(230px,1.45fr) minmax(118px,.78fr) minmax(118px,.8fr) minmax(88px,.55fr) 96px 76px 76px 72px 72px 72px 176px !important;
-}
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(220px,1.42fr) minmax(150px,.95fr) minmax(150px,.95fr) minmax(88px,.55fr) 94px 70px 70px 70px 52px 128px !important;
-}
 .inference-table-head > span:nth-child(4),
 .inference-table-row > em:nth-child(4),
 .training-table-head > span:nth-child(4),
@@ -12098,32 +12018,6 @@ button:disabled:hover {
   line-height: 1;
   text-align: right;
   white-space: nowrap;
-}
-
-/* Queue layout guard: this must remain after legacy responsive overrides. */
-.training-table-head,
-.training-table-row {
-  grid-template-columns: minmax(170px, 1.25fr) minmax(100px, .72fr) minmax(120px, .86fr) 68px 78px 56px 60px 60px 44px 204px !important;
-  column-gap: 7px !important;
-}
-
-.training-table-head > span:last-child,
-.training-table-row > .training-row-actions {
-  width: 204px !important;
-  min-width: 204px !important;
-  max-width: 204px !important;
-  justify-self: end !important;
-}
-
-.training-row-actions {
-  gap: 4px !important;
-}
-
-@media (max-width: 1500px) {
-  .training-table-head,
-  .training-table-row {
-    grid-template-columns: 160px 92px 110px 64px 72px 52px 56px 56px 42px 204px !important;
-  }
 }
 
 /* Evaluation semantics: truth is a thin solid line; every prediction is a dashed
