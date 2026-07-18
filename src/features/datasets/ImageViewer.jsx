@@ -86,11 +86,14 @@ strokeWidth={compact ? Math.max(4, width / 600) : Math.max(3, width / 900)}
 
 }
 
-function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations, page = 1, pageSize = 48, totalItems = items.length, loadPage, onPageChange, sequenceUrl }) {
+function ImageViewer({ items, index: externalIndex, setIndex: setExternalIndex, onClose, onSaved, readOnly = false, saveAnnotations, page = 1, pageSize = 48, totalItems = items.length, loadPage, onPageChange, sequenceUrl }) {
 
 const [viewerItems, setViewerItems] = useState(items);
 const [viewerPage, setViewerPage] = useState(page);
 const [loadingPage, setLoadingPage] = useState(false);
+const [sequenceIndex, setSequenceIndex] = useState(externalIndex);
+const index = sequenceUrl ? sequenceIndex : externalIndex;
+const setIndex = sequenceUrl ? setSequenceIndex : setExternalIndex;
 const item = viewerItems[index];
 
 useEffect(() => {
@@ -209,7 +212,7 @@ else { onPageChange?.(viewerPage); onClose(); }
 
 if (!editMode && event.key === "ArrowLeft") setIndex((value) => Math.max(0, value - 1));
 
-if (!editMode && event.key === "ArrowRight") setIndex((value) => Math.min(items.length - 1, value + 1));
+if (!editMode && event.key === "ArrowRight") setIndex((value) => Math.min(viewerItems.length - 1, value + 1));
 
 if (editMode && (event.key === "Delete" || event.key === "Backspace") && selectedAnnId) {
 
