@@ -12188,6 +12188,37 @@ button:disabled:hover {
   pointer-events: auto !important;
 }
 
+/* Project cards use a real right rail: the rail sits close to the card edge,
+   while the content column absorbs the remaining width. */
+.app-shell .home-project-grid .project-folder,
+.app-shell .workspace-folder-grid .project-folder {
+  grid-template-columns: 42px minmax(0, 1fr) 30px !important;
+  padding: 18px 12px 16px 14px !important;
+  column-gap: 10px !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-body,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-body {
+  min-width: 0 !important;
+  width: auto !important;
+  padding: 0 !important;
+}
+.app-shell .home-project-grid .project-folder > .project-actions,
+.app-shell .workspace-folder-grid .project-folder > .project-actions {
+  justify-self: end !important;
+  align-self: center !important;
+  margin: 0 !important;
+}
+.app-shell .home-project-grid .project-folder h3,
+.app-shell .workspace-folder-grid .project-folder h3,
+.app-shell .home-project-grid .project-folder .editable-name,
+.app-shell .workspace-folder-grid .project-folder .editable-name {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
 /* Final inference queue guard. */
 .inference-workspace .reference-queue .inference-table-head,
 .inference-workspace .reference-queue .inference-table-row {
