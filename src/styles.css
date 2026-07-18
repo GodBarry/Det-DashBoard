@@ -2856,7 +2856,6 @@ button:disabled:hover {
   }
 
   .inspector-panel {
-    grid-column: 2 / -1;
     position: static;
     max-height: none;
   }
