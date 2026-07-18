@@ -11682,86 +11682,6 @@ button:disabled:hover {
   transform: translateX(-4px) !important;
 }
 
-/* Dataset folder cards: text scales with the card width on narrow viewports. */
-.home-project-grid .project-folder,
-.workspace-folder-grid .project-folder,
-.app-shell.light .home-project-grid .project-folder,
-.app-shell.light .workspace-folder-grid .project-folder,
-.app-shell.dark .home-project-grid .project-folder,
-.app-shell.dark .workspace-folder-grid .project-folder {
-  box-sizing: border-box !important;
-  display: grid !important;
-  grid-template-columns: 42px minmax(0, 1fr) 30px !important;
-  column-gap: 8px !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-}
-.home-project-grid .project-folder .project-folder-body,
-.workspace-folder-grid .project-folder .project-folder-body,
-.app-shell.light .home-project-grid .project-folder .project-folder-body,
-.app-shell.light .workspace-folder-grid .project-folder .project-folder-body,
-.app-shell.dark .home-project-grid .project-folder .project-folder-body,
-.app-shell.dark .workspace-folder-grid .project-folder .project-folder-body {
-  min-width: 0 !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  padding-right: 4px !important;
-  overflow: hidden !important;
-}
-.home-project-grid .project-folder h3,
-.workspace-folder-grid .project-folder h3,
-.home-project-grid .project-folder .editable-name,
-.workspace-folder-grid .project-folder .editable-name {
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-.project-folder-metrics {
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  gap: clamp(4px, .7vw, 12px) !important;
-  align-items: center !important;
-  overflow: hidden !important;
-}
-.project-folder-metrics span {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  overflow: hidden !important;
-  white-space: nowrap !important;
-  text-overflow: ellipsis !important;
-}
-.project-folder-metrics svg {
-  flex: 0 0 auto !important;
-}
-.home-project-grid .project-folder > .project-folder-body > span,
-.workspace-folder-grid .project-folder > .project-folder-body > span {
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-@media (max-width: 1500px) {
-  .home-project-grid,
-  .workspace-folder-grid,
-  .app-shell.light .home-project-grid,
-  .app-shell.light .workspace-folder-grid,
-  .app-shell.dark .home-project-grid,
-  .app-shell.dark .workspace-folder-grid {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)) !important;
-  }
-}
-
 /* Final queue readability: keep status column wide enough for Chinese labels. */
 .inference-table-head,
 .inference-table-row {
@@ -12204,100 +12124,6 @@ button:disabled:hover {
   .training-table-row {
     grid-template-columns: 160px 92px 110px 64px 72px 52px 56px 56px 42px 204px !important;
   }
-}
-
-/* Final project-card action layout: one compact, centered column on the right. */
-.app-shell .home-project-grid .project-folder > .project-actions,
-.app-shell .workspace-folder-grid .project-folder > .project-actions {
-  position: static !important;
-  grid-column: 3 !important;
-  grid-row: 1 !important;
-  display: grid !important;
-  grid-auto-flow: row !important;
-  grid-template-columns: 25px !important;
-  grid-template-rows: repeat(4, 25px) !important;
-  align-content: center !important;
-  justify-content: center !important;
-  justify-items: center !important;
-  align-items: center !important;
-  width: 30px !important;
-  height: auto !important;
-  gap: 4px !important;
-  inset: auto !important;
-  padding: 0 !important;
-  pointer-events: auto !important;
-}
-.app-shell .home-project-grid .project-folder > .project-actions > button,
-.app-shell .workspace-folder-grid .project-folder > .project-actions > button {
-  position: static !important;
-  grid-column: 1 !important;
-  grid-row: auto !important;
-  width: 25px !important;
-  height: 25px !important;
-  min-width: 25px !important;
-  min-height: 25px !important;
-  margin: 0 !important;
-  pointer-events: auto !important;
-}
-
-/* Project cards use a real right rail: the rail sits close to the card edge,
-   while the content column absorbs the remaining width. */
-.app-shell .home-project-grid .project-folder,
-.app-shell .workspace-folder-grid .project-folder {
-  grid-template-columns: 42px minmax(0, 1fr) 30px !important;
-  padding: 18px 12px 16px 14px !important;
-  column-gap: 10px !important;
-}
-.app-shell .home-project-grid .project-folder > .project-folder-body,
-.app-shell .workspace-folder-grid .project-folder > .project-folder-body {
-  min-width: 0 !important;
-  width: auto !important;
-  padding: 0 !important;
-}
-.app-shell .home-project-grid .project-folder > .project-actions,
-.app-shell .workspace-folder-grid .project-folder > .project-actions {
-  justify-self: end !important;
-  align-self: center !important;
-  margin: 0 !important;
-}
-.app-shell .home-project-grid .project-folder h3,
-.app-shell .workspace-folder-grid .project-folder h3,
-.app-shell .home-project-grid .project-folder .editable-name,
-.app-shell .workspace-folder-grid .project-folder .editable-name {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-/* Denser dataset project cards: a larger folder mark and a tighter content rhythm. */
-.app-shell .home-project-grid .project-folder,
-.app-shell .workspace-folder-grid .project-folder {
-  min-width: 228px !important;
-}
-.app-shell .home-project-grid .project-folder > .project-folder-icon,
-.app-shell .workspace-folder-grid .project-folder > .project-folder-icon {
-  width: 54px !important;
-  height: 54px !important;
-  justify-self: start !important;
-  align-self: start !important;
-}
-.app-shell .home-project-grid .project-folder > .project-folder-icon > svg:first-child,
-.app-shell .workspace-folder-grid .project-folder > .project-folder-icon > svg:first-child {
-  width: 34px !important;
-  height: 34px !important;
-}
-.app-shell .home-project-grid .project-folder > .project-folder-body,
-.app-shell .workspace-folder-grid .project-folder > .project-folder-body {
-  align-self: start !important;
-  justify-self: stretch !important;
-  text-align: left !important;
-}
-.app-shell .home-project-grid .project-folder .project-folder-metrics,
-.app-shell .workspace-folder-grid .project-folder .project-folder-metrics {
-  margin-top: 8px !important;
-  align-self: start !important;
 }
 
 /* Evaluation semantics: truth is a thin solid line; every prediction is a dashed
@@ -13083,28 +12909,94 @@ body.resizing-table-column {
 .evaluation-sample-dialog.viewer-dark .evaluation-box-legend { border-color: rgba(151,174,188,.24); background: rgba(10,24,34,.94); color: #b6c8d0; }
 .evaluation-sample-dialog.viewer-light .evaluation-box-legend { border-color: #ccd8de; background: rgba(255,255,255,.96); color: #526873; }
 
-/* Folder actions: sharing/public/rename stay in the top row; trash remains isolated. */
-.home-project-grid .project-folder .project-folder-body,
-.workspace-folder-grid .project-folder .project-folder-body { padding-right: 112px !important; }
-.home-project-grid .project-actions,
-.workspace-folder-grid .project-actions { position: absolute !important; inset: 10px 10px 10px auto !important; width: 101px !important; display: grid !important; grid-template-columns: repeat(3,27px) !important; grid-template-rows: 27px 1fr 27px !important; justify-content: end !important; gap: 6px !important; pointer-events: none; }
-.home-project-grid .project-actions button,
-.workspace-folder-grid .project-actions button { position: static !important; pointer-events: auto; }
-.home-project-grid .project-actions button[title="删除项目"],
-.workspace-folder-grid .project-actions button[title="删除项目"] { grid-column: 3 !important; grid-row: 3 !important; }
-
-/* Keep every project action in one predictable right-hand column. */
-.home-project-grid .project-folder,
-.workspace-folder-grid .project-folder {
+/* Dataset project cards have one stable internal layout in both themes. */
+.app-shell .home-project-grid,
+.app-shell .workspace-folder-grid,
+.app-shell.light .home-project-grid,
+.app-shell.light .workspace-folder-grid,
+.app-shell.dark .home-project-grid,
+.app-shell.dark .workspace-folder-grid {
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)) !important;
+}
+.app-shell .home-project-grid .project-folder,
+.app-shell .workspace-folder-grid .project-folder,
+.app-shell.light .home-project-grid .project-folder,
+.app-shell.light .workspace-folder-grid .project-folder,
+.app-shell.dark .home-project-grid .project-folder,
+.app-shell.dark .workspace-folder-grid .project-folder {
+  box-sizing: border-box !important;
+  display: grid !important;
   grid-template-columns: 42px minmax(0, 1fr) 30px !important;
-  align-items: center !important;
+  min-width: 228px !important;
+  padding: 18px 12px 16px 14px !important;
+  column-gap: 10px !important;
+  align-items: start !important;
+  overflow: hidden !important;
 }
-.home-project-grid .project-folder .project-folder-body,
-.workspace-folder-grid .project-folder .project-folder-body {
+.app-shell .home-project-grid .project-folder > .project-folder-icon,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-icon {
+  width: 54px !important;
+  height: 54px !important;
+  justify-self: start !important;
+  align-self: start !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-icon > svg:first-child,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-icon > svg:first-child {
+  width: 34px !important;
+  height: 34px !important;
+}
+.app-shell .home-project-grid .project-folder > .project-folder-body,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-body,
+.app-shell.light .home-project-grid .project-folder > .project-folder-body,
+.app-shell.light .workspace-folder-grid .project-folder > .project-folder-body,
+.app-shell.dark .home-project-grid .project-folder > .project-folder-body,
+.app-shell.dark .workspace-folder-grid .project-folder > .project-folder-body {
+  display: block !important;
+  min-width: 0 !important;
+  width: auto !important;
   padding-right: 0 !important;
+  overflow: hidden !important;
+  text-align: left !important;
 }
-.home-project-grid .project-actions,
-.workspace-folder-grid .project-actions {
+.app-shell .home-project-grid .project-folder h3,
+.app-shell .workspace-folder-grid .project-folder h3,
+.app-shell .home-project-grid .project-folder .editable-name,
+.app-shell .workspace-folder-grid .project-folder .editable-name,
+.app-shell .home-project-grid .project-folder > .project-folder-body > span,
+.app-shell .workspace-folder-grid .project-folder > .project-folder-body > span {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.app-shell .home-project-grid .project-folder .project-folder-metrics,
+.app-shell .workspace-folder-grid .project-folder .project-folder-metrics {
+  width: 100% !important;
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: clamp(4px, .7vw, 12px) !important;
+  margin-top: 8px !important;
+  overflow: hidden !important;
+}
+.app-shell .home-project-grid .project-folder .project-folder-metrics span,
+.app-shell .workspace-folder-grid .project-folder .project-folder-metrics span {
+  min-width: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.app-shell .home-project-grid .project-folder .project-folder-metrics svg,
+.app-shell .workspace-folder-grid .project-folder .project-folder-metrics svg {
+  flex: 0 0 auto !important;
+}
+.app-shell .home-project-grid .project-folder > .project-actions,
+.app-shell .workspace-folder-grid .project-folder > .project-actions {
   position: static !important;
   grid-column: 3 !important;
   grid-row: 1 !important;
@@ -13118,13 +13010,15 @@ body.resizing-table-column {
   gap: 4px !important;
   pointer-events: auto !important;
 }
-.home-project-grid .project-actions button,
-.workspace-folder-grid .project-actions button {
+.app-shell .home-project-grid .project-folder > .project-actions > button,
+.app-shell .workspace-folder-grid .project-folder > .project-actions > button {
   position: static !important;
-  grid-column: auto !important;
+  grid-column: 1 !important;
   grid-row: auto !important;
   width: 25px !important;
   height: 25px !important;
+  min-width: 25px !important;
+  min-height: 25px !important;
   margin: 0 !important;
 }
 .home-project-grid .project-actions button[title="删除项目"],
@@ -13135,6 +13029,17 @@ body.resizing-table-column {
 .home-project-grid .project-actions button[title="删除项目"]:hover,
 .workspace-folder-grid .project-actions button[title="删除项目"]:hover {
   background: color-mix(in srgb, #e0525d 12%, transparent) !important;
+}
+
+@media (max-width: 1500px) {
+  .app-shell .home-project-grid,
+  .app-shell .workspace-folder-grid,
+  .app-shell.light .home-project-grid,
+  .app-shell.light .workspace-folder-grid,
+  .app-shell.dark .home-project-grid,
+  .app-shell.dark .workspace-folder-grid {
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)) !important;
+  }
 }
 
 @media (max-width: 1500px) {
