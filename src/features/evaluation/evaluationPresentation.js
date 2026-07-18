@@ -2,7 +2,7 @@ export const evaluationBarPalette = ["#0d8f89", "#2563eb", "#7c3aed", "#f59e0b",
 
 export const evaluationErrorLegend = [
   { type: "false_negative", label: "漏检：真值框" },
-  { type: "false_positive", label: "误检：预测框" },
+  { type: "false_positive", label: "误检（虚警）：预测框" },
   { type: "localization ground", label: "定位偏差：真值框" },
   { type: "localization prediction", label: "定位偏差：预测框" },
   { type: "class_error ground", label: "类别错误：真值框" },
@@ -11,7 +11,7 @@ export const evaluationErrorLegend = [
 
 const errorLabels = {
   false_negative: "漏检",
-  false_positive: "误检",
+  false_positive: "误检（虚警）",
   localization: "定位偏差",
   class_error: "类别错误",
 };
@@ -20,14 +20,7 @@ export function evaluationErrorBoxes(row = {}, filter = "false_negative", predic
   const errors = Array.isArray(row.errors) ? row.errors : [];
   const selected = errors.filter((item) => !filter || item.type === filter);
 
-  if (!selected.length && errors.length) return [];
-  if (!selected.length) {
-    return predictionItems(row.predictions_json).slice(0, 3).map((prediction) => ({
-      type: "prediction",
-      item: prediction,
-      label: "预测框",
-    }));
-  }
+  if (!selected.length) return [];
 
   return selected.flatMap((error) => {
     const label = errorLabels[error.type] || "错误";

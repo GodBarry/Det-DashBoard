@@ -133,7 +133,14 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
         totalFp += 1;
         predictedClass.fp += 1;
         matrix[labelIndex.get("背景")][labelIndex.get(prediction.label)] += 1;
-        imageErrors.push({ type: bestIou >= 0.1 ? "localization" : "false_positive", prediction, groundTruth: bestIndex >= 0 ? imageGt[bestIndex] : null, iou: bestIou });
+        const truth = bestIndex >= 0 ? imageGt[bestIndex] : null;
+        const sameClass = truth && truth.label === prediction.label;
+        imageErrors.push({
+          type: sameClass && bestIou >= 0.1 ? "localization" : "false_positive",
+          prediction,
+          groundTruth: sameClass ? truth : null,
+          iou: bestIou,
+        });
       }
     }
     for (let index = 0; index < imageGt.length; index += 1) {

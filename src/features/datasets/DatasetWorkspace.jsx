@@ -12,6 +12,7 @@ import { AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from
 import { formatCount } from "../../shared/presentation.js";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { metadataOption, modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
+import { buildWorkspaceSearchParams } from "./dataset-workspace-core.js";
 
 export function DatasetWorkspace({ mode, viewModel }) {
   const {
@@ -347,6 +348,15 @@ deleteProjectPermanently={deleteProjectPermanently}
       </>
     );
   }
+
+  const loadViewerPage = async (targetPage) => {
+    if (!activeProject?.id) return [];
+    const params = buildWorkspaceSearchParams(targetPage, filters);
+    const response = await fetch(`/api/projects/${activeProject.id}/images?${params}`);
+    if (!response.ok) throw new Error("加载图片页失败");
+    const data = await response.json();
+    return data.items || [];
+  };
 
   return (
     <>
@@ -821,6 +831,16 @@ items={items}
 index={viewerIndex}
 
 setIndex={setViewerIndex}
+
+page={page}
+
+pageSize={48}
+
+totalItems={totalItems}
+
+loadPage={loadViewerPage}
+
+onPageChange={setPage}
 
 onClose={() => setViewerIndex(null)}
 

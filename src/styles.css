@@ -12774,6 +12774,10 @@ body.resizing-table-column {
 .tree-project-selection > button { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; }
 .tree-project-empty { width: auto; flex: 0 1 210px; grid-template-columns: 16px minmax(0,1fr) 16px; color: var(--muted); text-align: left; }
 .tree-project-popover { position: absolute; z-index: 40; top: 100%; left: 0; right: 0; max-height: 280px; margin-top: 4px; padding: 5px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 14px 32px rgba(0,0,0,.18); }
+.training-workspace .tree-project-popover { background: #f8fbfc; border-color: #c9d9df; box-shadow: 0 16px 34px rgba(24,54,68,.2); }
+.app-shell.dark .training-workspace .tree-project-popover { background: #101d26; border-color: #2b4654; box-shadow: 0 16px 34px rgba(0,0,0,.42); }
+.training-workspace .tree-project-option { background: transparent; }
+.training-workspace .tree-project-name { background: transparent; }
 .tree-project-option { min-width: 0; display: grid; grid-template-columns: 24px minmax(0,1fr); padding-left: calc(var(--tree-depth) * 17px); }
 .tree-project-toggle { width: 24px; height: 28px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; }
 .tree-project-name { min-width: 0; height: 28px; padding: 0 6px; display: grid; grid-template-columns: 16px minmax(0,1fr) auto 14px; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--text); text-align: left; }

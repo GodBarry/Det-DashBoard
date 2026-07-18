@@ -213,7 +213,7 @@ const insightRows = evaluation?.evaluated ? [
 
 weakestClass ? weakestClass.label + " 的 AP50 最低，为 " + formatMetric(weakestClass.ap50) + "" : "暂无类别级结论",
 
-"当前漏检 " + formatCount(evaluation.summary?.fn || 0) + " 个，误检 " + formatCount(evaluation.summary?.fp || 0) + " 个",
+"当前漏检 " + formatCount(evaluation.summary?.fn || 0) + " 个，误检（虚警） " + formatCount(evaluation.summary?.fp || 0) + " 个",
 
 "平均匹配 IoU 为 " + formatMetric(evaluation.summary?.avgIou || 0) + "",
 
@@ -239,7 +239,7 @@ const visibleSampleRows = evaluation?.evaluated ? errorRows : previewRows;
 const samples = visibleSampleRows.slice(0, 5);
   const sampleWindow = visibleSampleRows.slice(sampleOffset, sampleOffset + 5);
   const shiftSamples = (delta) => setSampleOffset((value) => Math.max(0, Math.min(Math.max(0, visibleSampleRows.length - 5), value + delta)));
-  const errorTabs = [["false_negative", "漏检"], ["false_positive", "误检"], ["localization", "定位偏差"], ["class_error", "类别错误"]];
+  const errorTabs = [["false_negative", "漏检"], ["false_positive", "误检（虚警）"], ["localization", "定位偏差"], ["class_error", "类别错误"]];
 
 return (
 
@@ -403,7 +403,7 @@ return (
 
 <section className="evaluation-rating"><span>总体评级</span><div><b>{evaluation?.evaluated ? (Number(metrics.map50 || 0) >= .7 ? "A" : Number(metrics.map50 || 0) >= .4 ? "B" : "C") : "--"}</b><strong>{evaluation?.evaluated ? "已评估" : "无标注"}</strong></div><p>发布建议 <em>{Number(metrics.map50 || 0) >= .5 ? "可进入验证" : "暂不建议发布"}</em></p></section>
 
-<section className="evaluation-problems"><h3>问题统计</h3><div><p><span>漏检</span><b>{problemCounts.false_negative}</b></p><p><span>误检</span><b>{problemCounts.false_positive}</b></p><p><span>定位偏差</span><b>{problemCounts.localization}</b></p><p><span>类别错误</span><b>{problemCounts.class_error}</b></p></div></section>
+<section className="evaluation-problems"><h3>问题统计</h3><div><p><span>漏检</span><b>{problemCounts.false_negative}</b></p><p><span>误检（虚警）</span><b>{problemCounts.false_positive}</b></p><p><span>定位偏差</span><b>{problemCounts.localization}</b></p><p><span>类别错误</span><b>{problemCounts.class_error}</b></p></div></section>
 
 <section className="evaluation-key-insights"><h3>关键结论</h3>{insightRows.map((text) => <p key={text}>{text}</p>)}</section>
 

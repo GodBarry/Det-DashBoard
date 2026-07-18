@@ -86,9 +86,12 @@ strokeWidth={compact ? Math.max(4, width / 600) : Math.max(3, width / 900)}
 
 }
 
-function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations }) {
+function ImageViewer({ items, index, setIndex, onClose, onSaved, readOnly = false, saveAnnotations, page = 1, pageSize = 48, totalItems = items.length, loadPage, onPageChange }) {
 
-const item = items[index];
+const [viewerItems, setViewerItems] = useState(items);
+const [viewerPage, setViewerPage] = useState(page);
+const [loadingPage, setLoadingPage] = useState(false);
+const item = viewerItems[index];
 
 const [scale, setScale] = useState(1);
 
@@ -125,7 +128,7 @@ for (const offset of [1, -1, 2, -2]) {
 
 if (cancelled) return;
 
-const neighbor = items[index + offset];
+const neighbor = viewerItems[index + offset];
 
 if (neighbor?.id) await preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
 
@@ -137,7 +140,11 @@ preloadNeighbors();
 
 return () => { cancelled = true; };
 
-}, [index, item?.id, items, loadedItemId]);
+}, [index, item?.id, viewerItems, loadedItemId]);
+
+useEffect(() => {
+  if (!loadPage) setViewerItems(items);
+}, [items, loadPage]);
 
 useEffect(() => {
 
@@ -168,7 +175,7 @@ if (event.key === "Escape") {
 
 if (editMode) setSelectedAnnId(null);
 
-else onClose();
+else { onPageChange?.(viewerPage); onClose(); }
 
 }
 
@@ -190,13 +197,26 @@ window.addEventListener("keydown", onKey);
 
 return () => window.removeEventListener("keydown", onKey);
 
-}, [editMode, items.length, onClose, selectedAnnId, setIndex]);
+}, [editMode, viewerItems.length, onClose, onPageChange, selectedAnnId, setIndex, viewerPage]);
 
 const zoom = (delta) => setScale((value) => Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2)))));
 
-const prev = () => setIndex(Math.max(0, index - 1));
-
-const next = () => setIndex(Math.min(items.length - 1, index + 1));
+const movePage = async (delta) => {
+  const targetPage = viewerPage + delta;
+  const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / Math.max(1, Number(pageSize) || 48)));
+  if (!loadPage || targetPage < 1 || targetPage > totalPages || loadingPage) return;
+  setLoadingPage(true);
+  try {
+    const nextItems = await loadPage(targetPage);
+    if (nextItems?.length) {
+      setViewerPage(targetPage);
+      setViewerItems(nextItems);
+      setIndex(delta > 0 ? 0 : nextItems.length - 1);
+    }
+  } finally { setLoadingPage(false); }
+};
+const prev = () => index > 0 ? setIndex(index - 1) : movePage(-1);
+const next = () => index < viewerItems.length - 1 ? setIndex(index + 1) : movePage(1);
 
 const width = Number(item.image_width || naturalSize.width || 1);
 
@@ -316,7 +336,7 @@ return (
 
 </div>
 
-<span>{index + 1} / {items.length}</span>
+<span>{loadPage ? `${(viewerPage - 1) * pageSize + index + 1} / ${totalItems}` : `${index + 1} / ${viewerItems.length}`}</span>
 
 {editMode && (
 
@@ -344,13 +364,13 @@ return (
 
 <button onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换明暗模式"><Sun size={16} /></button>
 
-<button onClick={onClose}><X size={16} /></button>
+<button onClick={() => { onPageChange?.(viewerPage); onClose(); }}><X size={16} /></button>
 
 </div>
 
-<button className="viewer-nav prev" disabled={index <= 0} onClick={prev}></button>
+<button className="viewer-nav prev" disabled={loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0)} onClick={prev}></button>
 
-<button className="viewer-nav next" disabled={index >= items.length - 1} onClick={next}></button>
+<button className="viewer-nav next" disabled={loadingPage || (!loadPage && index >= viewerItems.length - 1) || (loadPage && (viewerPage * pageSize >= totalItems) && index >= viewerItems.length - 1)} onClick={next}></button>
 
 <div
 

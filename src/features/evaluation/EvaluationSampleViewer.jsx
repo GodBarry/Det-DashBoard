@@ -58,7 +58,7 @@ export function EvaluationSampleViewer({
       <div className="viewer-toolbar">
         <div><b>错误样本检查</b><span>{row.display_name || "未命名图像"}</span></div>
         <span className="viewer-counter">{index + 1} / {rows.length}</span>
-        <em>{filter === "false_negative" ? "漏检" : filter === "false_positive" ? "误检" : filter === "localization" ? "定位偏差" : "类别错误"}</em>
+        <em>{filter === "false_negative" ? "漏检" : filter === "false_positive" ? "误检（虚警）" : filter === "localization" ? "定位偏差" : "类别错误"}</em>
         <span className="viewer-zoom-tools"><button onClick={() => zoom(-.25)} title="缩小"><ZoomOut size={16} /></button><button onClick={() => zoom(.25)} title="放大"><ZoomIn size={16} /></button><button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }} title="重置"><RotateCcw size={16} /></button></span>
         <button className="viewer-theme-toggle" onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换查看器明暗模式"><Sun size={17} /></button>
         <button onClick={onClose} title="关闭"><X size={18} /></button>
