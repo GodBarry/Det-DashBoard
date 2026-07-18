@@ -8,7 +8,7 @@ export function readDatasetActivityLogs() {
 export function recordDatasetActivity(action, message, level = "info", details = "") {
   const rows = readDatasetActivityLogs();
   const row = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), action, message, level, details: String(details || "") };
-  const next = [row, ...rows].slice(0, 200);
+  const next = [row, ...rows];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: row }));
   return row;

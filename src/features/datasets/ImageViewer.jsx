@@ -8,19 +8,37 @@ import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/
 const annotationCache = new Map();
 const pendingAnnotations = new Map();
 
-function loadImageAnnotations(imageId) {
+function cancelImageAnnotations(imageId, priority) {
+  const pending = pendingAnnotations.get(imageId);
+  if (pending && (!priority || pending.priority === priority)) pending.controller.abort();
+}
+
+function loadImageAnnotations(imageId, priority = "current") {
   if (!imageId) return Promise.resolve([]);
   if (annotationCache.has(imageId)) return Promise.resolve(annotationCache.get(imageId));
-  if (pendingAnnotations.has(imageId)) return pendingAnnotations.get(imageId);
-  const request = fetch(`/api/project-images/${imageId}/annotations`)
+  const existing = pendingAnnotations.get(imageId);
+  if (existing) {
+    if (priority !== "current" || existing.priority === "current") return existing.promise;
+    existing.controller.abort();
+    pendingAnnotations.delete(imageId);
+  }
+  const controller = new AbortController();
+  const entry = { controller, priority, promise: null };
+  const request = fetch(`/api/project-images/${imageId}/annotations`, {
+    signal: controller.signal,
+    priority: priority === "current" ? "high" : "low",
+  })
     .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载图片标注失败")))
     .then((data) => {
       const annotations = Array.isArray(data.annotations) ? data.annotations : [];
       annotationCache.set(imageId, annotations);
       return annotations;
     })
-    .finally(() => pendingAnnotations.delete(imageId));
-  pendingAnnotations.set(imageId, request);
+    .finally(() => {
+      if (pendingAnnotations.get(imageId) === entry) pendingAnnotations.delete(imageId);
+    });
+  entry.promise = request;
+  pendingAnnotations.set(imageId, entry);
   return request;
 }
 function labelColor(label = "") {
@@ -160,7 +178,7 @@ const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".ap
 useEffect(() => {
   if (!item?.id || Array.isArray(item.annotations)) return undefined;
   let active = true;
-  loadImageAnnotations(item.id)
+  loadImageAnnotations(item.id, "current")
     .then((annotations) => {
       if (!active) return;
       setViewerItems((rows) => rows.map((row) => row.id === item.id ? { ...row, annotations } : row));
@@ -168,7 +186,10 @@ useEffect(() => {
       setDefaultLabel(annotations[0]?.label || "");
     })
     .catch(() => {});
-  return () => { active = false; };
+  return () => {
+    active = false;
+    cancelImageAnnotations(item.id, "current");
+  };
 }, [item?.id]);
 
 useEffect(() => {
@@ -176,14 +197,14 @@ useEffect(() => {
 if (!item?.id || loadedItemId !== item.id) return undefined;
 
 let cancelled = false;
+const neighbor = viewerItems[index + 1] || viewerItems[index - 1];
 
 const preloadNeighbors = () => {
-  const neighbor = viewerItems[index + 1] || viewerItems[index - 1];
   if (!neighbor?.id) return;
   const run = () => {
     if (cancelled) return;
     preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
-    loadImageAnnotations(neighbor.id).catch(() => {});
+    loadImageAnnotations(neighbor.id, "prefetch").catch(() => {});
   };
   if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 250 });
   else window.setTimeout(run, 80);
@@ -191,7 +212,10 @@ const preloadNeighbors = () => {
 
 preloadNeighbors();
 
-return () => { cancelled = true; };
+return () => {
+  cancelled = true;
+  cancelImageAnnotations(neighbor?.id, "prefetch");
+};
 
 }, [index, item?.id, viewerItems, loadedItemId]);
 

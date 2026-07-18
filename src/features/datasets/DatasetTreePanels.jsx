@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Edit3,
@@ -209,6 +210,11 @@ export function HomeInspector({ stats, trashProjects, restoreProject, restoreAll
 
 const [activityLogs, setActivityLogs] = useState(readDatasetActivityLogs);
 useEffect(() => subscribeDatasetActivity(() => setActivityLogs(readDatasetActivityLogs())), []);
+const [activityPage, setActivityPage] = useState(1);
+const activityPageSize = 5;
+const activityPages = Math.max(1, Math.ceil(activityLogs.length / activityPageSize));
+const visibleActivityLogs = activityLogs.slice((activityPage - 1) * activityPageSize, activityPage * activityPageSize);
+useEffect(() => setActivityPage((value) => Math.min(value, activityPages)), [activityPages]);
 
 return (
 
@@ -285,8 +291,9 @@ return (
 </section>
 
 <section className="home-inspector-block dataset-operation-log">
-<div className="section-title-row compact-title"><h2>操作日志</h2><span>最近 {Math.min(activityLogs.length, 30)} 条</span></div>
-<div className="dataset-log-list">{activityLogs.slice(0, 30).map((row) => <article className={`dataset-log-row level-${row.level}`} key={row.id}><div className="dataset-log-row-head"><time>{new Date(row.createdAt).toLocaleTimeString()}</time><b>{row.action}</b></div><span className="dataset-log-message">{row.message}</span>{row.details && <details><summary>查看详情</summary><pre>{row.details}</pre></details>}</article>)}{!activityLogs.length && <div className="muted dataset-log-empty">暂无数据操作日志</div>}</div>
+<div className="section-title-row compact-title"><h2>操作日志</h2><span>共 {formatCount(activityLogs.length)} 条</span></div>
+<div className="dataset-log-list">{visibleActivityLogs.map((row) => <article className={`dataset-log-row level-${row.level}`} key={row.id}><div className="dataset-log-row-head"><time>{new Date(row.createdAt).toLocaleString()}</time><b>{row.action}</b></div><span className="dataset-log-message">{row.message}</span>{row.details && <details><summary>查看详情</summary><pre>{row.details}</pre></details>}</article>)}{!activityLogs.length && <div className="muted dataset-log-empty">暂无数据操作日志</div>}</div>
+{activityLogs.length > 0 && <div className="dataset-log-pagination"><span>共 {activityPages} 页</span><button title="上一页" disabled={activityPage <= 1} onClick={() => setActivityPage((value) => Math.max(1, value - 1))}><ChevronLeft size={14} /></button><label>第<input aria-label="操作日志页码" type="number" min="1" max={activityPages} value={activityPage} onChange={(event) => setActivityPage(Math.max(1, Math.min(activityPages, Number(event.target.value) || 1)))} />页</label><button title="下一页" disabled={activityPage >= activityPages} onClick={() => setActivityPage((value) => Math.min(activityPages, value + 1))}><ChevronRight size={14} /></button></div>}
 </section>
 
 </aside>
