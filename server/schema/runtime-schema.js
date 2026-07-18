@@ -9,6 +9,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE video_assets ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     `CREATE TABLE IF NOT EXISTS app_users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,6 +51,19 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     )`,
     `CREATE INDEX IF NOT EXISTS idx_compute_tasks_queue
       ON compute_tasks(status, priority, created_at)`,
+    `CREATE TABLE IF NOT EXISTS project_video_frames (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_video_id UUID NOT NULL REFERENCES project_videos(id) ON DELETE CASCADE,
+      project_image_id UUID NOT NULL UNIQUE REFERENCES project_images(id) ON DELETE CASCADE,
+      source_frame_index INT NOT NULL,
+      timestamp_ms BIGINT NOT NULL DEFAULT 0,
+      extraction_interval INT NOT NULL DEFAULT 1,
+      extraction_task_id UUID REFERENCES compute_tasks(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(project_video_id, source_frame_index)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_project_video_frames_sequence
+      ON project_video_frames(project_video_id, source_frame_index)`,
     `CREATE TABLE IF NOT EXISTS compute_task_logs (
       id BIGSERIAL PRIMARY KEY,
       task_id UUID NOT NULL REFERENCES compute_tasks(id) ON DELETE CASCADE,

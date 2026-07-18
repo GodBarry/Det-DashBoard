@@ -18,12 +18,14 @@ def bbox_from_mask(mask):
 
 
 def suggestion(image, prompt, mask, score=None, frame_index=None):
+    if image.get("persistSuggestion") is False or not image.get("projectImageId"):
+        return None
     box = bbox_from_mask(mask)
     if box is None:
         return None
     return {
         "projectImageId": image["projectImageId"],
-        "frameIndex": image.get("frameIndex") if frame_index is None else frame_index,
+        "frameIndex": image.get("sequenceIndex", image.get("frameIndex")),
         "trackId": prompt.get("trackId", ""),
         "revision": int(prompt.get("revision", 1)),
         "label": prompt.get("label", "unknown"),
@@ -81,7 +83,6 @@ def propagate(request):
         raise RuntimeError("propagate requires a registered SAMURAI model weight")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     start_frame = int(payload.get("startFrame") or 0)
-    frame_offset = int(payload.get("frameOffset") or 0)
     image_paths = [row["path"] for row in images]
     rows = []
     # Some SAMURAI forks only support scalar stability scores. Isolate each
@@ -100,7 +101,7 @@ def propagate(request):
                 if frame_index < 0 or frame_index >= len(images):
                     continue
                 for mask in masks:
-                    row = suggestion(images[frame_index], prompt, (mask[0].detach().cpu().numpy() > 0), frame_index=frame_index + frame_offset)
+                    row = suggestion(images[frame_index], prompt, (mask[0].detach().cpu().numpy() > 0), frame_index=frame_index)
                     if row:
                         rows.append(row)
         del state, predictor

@@ -39,6 +39,7 @@ const { createProjectService } = require("./dataset/project-service");
 const { createDatasetContentService } = require("./dataset/content-service");
 const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
+const { createVideoService } = require("./dataset/video-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
 const { createMlRoutes } = require("./routes/ml-routes");
@@ -46,6 +47,7 @@ const { createAnnotationRoutes } = require("./routes/annotation-routes");
 const { createComputeTaskService } = require("./compute-tasks/compute-task-service");
 const { createAnnotationService } = require("./annotation/annotation-service");
 const { createComputeWorker } = require("./compute-tasks/compute-worker");
+const { createVideoFrameExecutor } = require("./compute-tasks/video-frame-executor");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
@@ -113,12 +115,14 @@ let projectService;
 let datasetContentService;
 let baselineService;
 let importService;
+let videoService;
 let datasetRoutes;
 let mlRoutes;
 let annotationRoutes;
 let computeTaskService;
 let annotationService;
 let computeWorkerController;
+let videoFrameExecutor;
 let inferenceSubmissionService;
 let runtimeJobService;
 let trainingCatalogService;
@@ -381,6 +385,7 @@ async function main() {
   await resourceAccess.initializeSchema();
   computeTaskService = createComputeTaskService({ query, transaction, resourceAccess, accessControl, httpError, stopProcess });
   annotationService = createAnnotationService({ query, transaction, computeTaskService, resourceAccess, httpError });
+  videoService = createVideoService({ query, resourceAccess, computeTaskService, httpError });
   importService = createImportService({
     query,
     transaction,
@@ -511,6 +516,20 @@ async function main() {
     clock: runtimeWorkerClock,
     dateCode,
   });
+  videoFrameExecutor = createVideoFrameExecutor({
+    query,
+    transaction,
+    fs,
+    path,
+    storageRoot,
+    store,
+    writeObjectToFile,
+    runChildProcess,
+    hashFile,
+    imageObjectKey,
+    sharp,
+    processRef: process,
+  });
   computeWorkerController = createComputeWorker({
     query,
     transaction,
@@ -523,6 +542,7 @@ async function main() {
     modelService,
     algorithmRuntimeSource,
     runChildProcess,
+    videoFrameExecutor,
     processRef: process,
     logger: console,
     clock: runtimeWorkerClock,
@@ -587,6 +607,7 @@ async function main() {
     trashService,
     importService,
     datasetContentService,
+    videoService,
     baselineService,
   });
   annotationRoutes = createAnnotationRoutes({

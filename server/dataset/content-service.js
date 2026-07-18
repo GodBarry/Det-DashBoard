@@ -190,6 +190,7 @@ function createDatasetContentService({
     params.push(pageSize, offset);
     const rows = await query(
       `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, ia.object_key,
+        pvf.project_video_id,pvf.source_frame_index,pvf.timestamp_ms,pvf.extraction_interval,
         COALESCE(NULLIF(pi.source_path, ''),
           CASE WHEN ib.source_path IS NOT NULL THEN regexp_replace(ib.source_path, '/+$', '') || '/' || pi.display_name ELSE pi.display_name END
         ) AS absolute_path,
@@ -200,8 +201,12 @@ function createDatasetContentService({
        JOIN projects p ON p.id = pi.project_id
        JOIN image_assets ia ON ia.id = pi.image_asset_id
        LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+       LEFT JOIN project_video_frames pvf ON pvf.project_image_id=pi.id
+       LEFT JOIN project_videos pv ON pv.id=pvf.project_video_id
        WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
-       ORDER BY pi.created_at DESC
+       ORDER BY COALESCE(pv.created_at,pi.created_at) DESC,
+                CASE WHEN pvf.id IS NOT NULL THEN pvf.source_frame_index END ASC NULLS LAST,
+                pi.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );

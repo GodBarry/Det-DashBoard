@@ -13,6 +13,7 @@ function createDatasetRoutes(deps) {
     trashService,
     importService,
     datasetContentService,
+    videoService,
     baselineService,
   } = deps;
 
@@ -150,6 +151,16 @@ function createDatasetRoutes(deps) {
     if (method === "GET" && imageListMatch) {
       await resourceAccess.assertProjectRead(actor, imageListMatch[1]);
       sendJson(res, await datasetContentService.listProjectImages(imageListMatch[1], parsed.query));
+      return true;
+    }
+    const videoListMatch = pathname.match(/^\/api\/projects\/([^/]+)\/videos$/);
+    if (method === "GET" && videoListMatch) {
+      sendJson(res, { videos: await videoService.listProjectVideos(videoListMatch[1], actor) });
+      return true;
+    }
+    const videoExtractMatch = pathname.match(/^\/api\/project-videos\/([^/]+)\/extract$/);
+    if (method === "POST" && videoExtractMatch) {
+      sendJson(res, { task: await videoService.createExtractionTask(videoExtractMatch[1], await readBody(req), actor) });
       return true;
     }
     const imageCountMatch = pathname.match(/^\/api\/projects\/([^/]+)\/images-count$/);

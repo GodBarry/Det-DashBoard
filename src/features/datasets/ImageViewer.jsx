@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, History, MousePointer2, Route, ScanLine, ScrollText, Sun, Undo2, X, XCircle } from "lucide-react";
+import { ChevronRight, Film, History, MousePointer2, Route, ScanLine, ScrollText, Sun, Undo2, X, XCircle } from "lucide-react";
 
 import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
@@ -148,6 +148,8 @@ const [showTaskHistory, setShowTaskHistory] = useState(false);
 const [annotationTaskHistory, setAnnotationTaskHistory] = useState([]);
 const [annotationTaskLogs, setAnnotationTaskLogs] = useState([]);
 const [annotationLastCommit, setAnnotationLastCommit] = useState(null);
+const [showSupplementDialog, setShowSupplementDialog] = useState(false);
+const [supplementCount, setSupplementCount] = useState(3);
 
 const [tool, setTool] = useState("select");
 
@@ -461,7 +463,7 @@ setEditMode(false);
 
 };
 
-const runAnnotationAlgorithm = async () => {
+const runAnnotationAlgorithm = async ({ supplementFrames = 0 } = {}) => {
   if (annotationMode === "manual") return;
   if (!annotationAlgorithmId) { setAnnotationMessage("请先选择可用的标注方法"); return; }
   if (!selectedAnn) { setAnnotationMessage("请先选择或绘制一个目标区域作为提示"); return; }
@@ -494,7 +496,13 @@ const runAnnotationAlgorithm = async () => {
     const selectedSequence = viewerItems.slice(index);
     const input = annotationMode === "segmentation"
       ? { projectImageId: item.id, prompt }
-      : { imageIds: selectedSequence.map((row) => row.id), startFrame: 0, frameOffset: index, prompts: [prompt] };
+      : {
+        imageIds: selectedSequence.map((row) => row.id),
+        startFrame: 0,
+        frameOffset: index,
+        prompts: [prompt],
+        ...(supplementFrames > 0 ? { supplementCount: supplementFrames } : {}),
+      };
     const operationResponse = await fetch(`/api/annotation/sessions/${session.id}/operations`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -654,7 +662,8 @@ return (
 {compatibleAnnotationEnvironments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
 </select>}
 
-{annotationMode !== "manual" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={runAnnotationAlgorithm}>{annotationMode === "segmentation" ? "生成分割" : "开始跟踪"}</button>}
+{annotationMode !== "manual" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => runAnnotationAlgorithm()}>{annotationMode === "segmentation" ? "生成分割" : "开始跟踪"}</button>}
+{annotationMode === "tracking" && <button title="从原视频补充过渡帧后重新跟踪" disabled={!selectedAnn || index >= viewerItems.length - 1 || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => setShowSupplementDialog(true)}><Film size={15} />补帧跟踪</button>}
 
 <button disabled={!selectedAnnId} onClick={() => { setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId)); setSelectedAnnId(null); }}>删除</button>
 
@@ -689,6 +698,15 @@ return (
 </div>
 <div className="annotation-task-log"><b><ScrollText size={14} />任务日志</b>{annotationTaskLogs.length ? annotationTaskLogs.slice(-80).map((row) => <code key={row.id}>{row.line}</code>) : <p>选择任务查看日志</p>}</div>
 </aside>}
+
+{editMode && showSupplementDialog && <div className="annotation-supplement-backdrop" onClick={() => setShowSupplementDialog(false)}>
+<section className="annotation-supplement-dialog" role="dialog" aria-modal="true" aria-labelledby="supplement-dialog-title" onClick={(event) => event.stopPropagation()}>
+<header><div><Film size={17} /><div><h3 id="supplement-dialog-title">补帧跟踪</h3><p>从当前帧与下一正式帧之间提取临时过渡帧</p></div></div><button title="关闭" onClick={() => setShowSupplementDialog(false)}><X size={15} /></button></header>
+<label><span>补帧数量</span><input type="number" min="1" max="99" step="1" value={supplementCount} onChange={(event) => setSupplementCount(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} /></label>
+<p className="annotation-supplement-note">临时帧只参与连续跟踪，不进入数据集、统计和导出结果。</p>
+<footer><button onClick={() => setShowSupplementDialog(false)}>取消</button><button className="primary" onClick={() => { setShowSupplementDialog(false); runAnnotationAlgorithm({ supplementFrames: supplementCount }); }}>准备补帧并跟踪</button></footer>
+</section>
+</div>}
 
 <button className="viewer-page-button viewer-page-prev" title="上一张" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}><ChevronRight size={28} /></button>
 

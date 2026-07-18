@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, CheckCircle, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Copy, Database, Download, Edit3, Eye,
   Folder, FolderOpen, FolderPlus, Globe2, Grid, Image as ImageIcon, Import, List, MoreVertical, Move,
@@ -123,6 +123,73 @@ export function DatasetWorkspace({ mode, viewModel }) {
     resolveSelectedConflicts,
     setItems
   } = viewModel;
+
+  const [projectVideos, setProjectVideos] = useState([]);
+  const [showVideoExtractDialog, setShowVideoExtractDialog] = useState(false);
+  const [selectedVideoId, setSelectedVideoId] = useState("");
+  const [frameInterval, setFrameInterval] = useState(10);
+  const [videoExtractionTask, setVideoExtractionTask] = useState(null);
+
+  const refreshProjectVideos = async () => {
+    if (!activeProject?.id) { setProjectVideos([]); return; }
+    const [response, taskResponse] = await Promise.all([
+      fetch(`/api/projects/${activeProject.id}/videos`),
+      fetch("/api/compute/tasks?purpose=video"),
+    ]);
+    const [data, taskData] = await Promise.all([response.json(), taskResponse.json()]);
+    if (!response.ok) throw new Error(data.error || "加载视频资产失败");
+    setProjectVideos(data.videos || []);
+    setSelectedVideoId((current) => (data.videos || []).some((video) => video.id === current) ? current : (data.videos?.[0]?.id || ""));
+    if (taskResponse.ok) {
+      const videoIds = new Set((data.videos || []).map((video) => String(video.id)));
+      const activeTask = (taskData.tasks || []).find((task) => videoIds.has(String(task.session_key)) && ["pending", "running", "paused"].includes(task.status));
+      if (activeTask) setVideoExtractionTask(activeTask);
+    }
+  };
+
+  useEffect(() => {
+    refreshProjectVideos().catch((loadError) => setError(loadError.message));
+  }, [activeProject?.id]);
+
+  useEffect(() => {
+    if (!videoExtractionTask?.id || ["done", "failed", "cancelled"].includes(videoExtractionTask.status)) return undefined;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/compute/tasks?purpose=video&sessionKey=${videoExtractionTask.session_key || selectedVideoId}`);
+        const data = await response.json();
+        const current = (data.tasks || []).find((task) => task.id === videoExtractionTask.id);
+        if (!current || stopped) return;
+        setVideoExtractionTask(current);
+        if (current.status === "failed") setError(current.message || "视频抽帧失败，请查看计算任务日志");
+        if (current.status === "done") {
+          await refreshProjectVideos();
+          const imageResponse = await fetch(`/api/projects/${activeProject.id}/images?${buildWorkspaceSearchParams(1, filters)}`);
+          const imageData = await imageResponse.json();
+          if (!stopped && imageResponse.ok) { setItems(imageData.items || []); setPage(1); }
+        }
+      } catch (pollError) {
+        if (!stopped) setError(pollError.message);
+      }
+    };
+    const timer = window.setInterval(poll, 800);
+    poll();
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [videoExtractionTask?.id, videoExtractionTask?.status, selectedVideoId, activeProject?.id]);
+
+  const startVideoExtraction = async () => {
+    if (!selectedVideoId) { setError("当前项目没有可抽帧的视频"); return; }
+    const interval = Math.max(1, Math.floor(Number(frameInterval) || 1));
+    const response = await fetch(`/api/project-videos/${selectedVideoId}/extract`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ interval }),
+    });
+    const data = await response.json();
+    if (!response.ok) { setError(data.error || "创建视频抽帧任务失败"); return; }
+    setVideoExtractionTask(data.task);
+    setShowVideoExtractDialog(false);
+  };
 
   if (mode === "home") {
     return (
@@ -416,6 +483,8 @@ setExpandedIds={setHomeExpandedIds}
 
 <button onClick={importData}><Import size={16} />导入数据</button>
 
+<button onClick={() => { refreshProjectVideos().then(() => setShowVideoExtractDialog(true)).catch((loadError) => setError(loadError.message)); }}><Video size={16} />视频抽帧</button>
+
 <button onClick={exportProject}><Upload size={16} />导出数据</button>
 
 <button onClick={openWorkspaceTrash}><Trash2 size={16} />回收</button>
@@ -440,7 +509,7 @@ setExpandedIds={setHomeExpandedIds}
 
 {hasCurrentImages && <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />}
 
-<ProgressStrip latestImport={latestImport} jobs={jobs} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
+<ProgressStrip latestImport={latestImport} jobs={jobs} videoTask={videoExtractionTask} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
 
 <WorkspaceFolders
 
@@ -820,6 +889,19 @@ resolveSelected={resolveSelectedConflicts}
 
 )}
 
+{showVideoExtractDialog && <div className="overlay video-extract-overlay" onClick={() => setShowVideoExtractDialog(false)}>
+<section className="dialog video-extract-dialog" role="dialog" aria-modal="true" aria-labelledby="video-extract-title" onClick={(event) => event.stopPropagation()}>
+<header><div className="dialog-heading"><span className="dialog-title-icon"><Video size={18} /></span><div><h2 id="video-extract-title">固定间隔抽帧</h2><p>{activeProject?.name || "当前项目"} · 正式帧将登记为数据集图片</p></div></div><button className="icon-button" aria-label="关闭视频抽帧" onClick={() => setShowVideoExtractDialog(false)}><X size={17} /></button></header>
+<div className="video-extract-body">
+<label><span>视频资产</span><select aria-label="选择视频资产" value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)}><option value="">选择视频</option>{projectVideos.map((video) => <option key={video.id} value={video.id}>{video.display_name}</option>)}</select></label>
+<label><span>抽帧间隔</span><div className="video-interval-control"><input aria-label="抽帧间隔" type="number" min="1" max="100000" step="1" value={frameInterval} onChange={(event) => setFrameInterval(Math.max(1, Math.floor(Number(event.target.value) || 1)))} /><em>每 N 帧保存 1 张</em></div></label>
+{selectedVideoId && <div className="video-extract-summary">{(() => { const video = projectVideos.find((item) => item.id === selectedVideoId); const metadata = video?.metadata_json || {}; return <><span>已抽取 <b>{video?.extracted_frame_count || 0}</b> 张</span><span>总帧数 <b>{metadata.totalFrames || "待解析"}</b></span><span>帧率 <b>{metadata.fps ? Number(metadata.fps).toFixed(2) : "待解析"}</b></span></>; })()}</div>}
+{!projectVideos.length && <div className="video-extract-empty">当前项目没有视频，请先通过“导入数据”登记视频资产。</div>}
+</div>
+<footer><button onClick={() => setShowVideoExtractDialog(false)}>取消</button><button className="primary" disabled={!selectedVideoId} onClick={startVideoExtraction}>创建抽帧任务</button></footer>
+</section>
+</div>}
+
 {viewerIndex != null && items[viewerIndex] && (
 
 <ImageViewer
@@ -969,7 +1051,7 @@ return (
 );
 
 }
-function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport }) {
+function ProgressStrip({ latestImport, jobs, videoTask, error, onCloseError, onCancelImport }) {
 
 const runningStatuses = new Set(["pending", "scanning", "running", "cancel_requested", "preparing"]);
 
@@ -998,6 +1080,8 @@ return (
 {visibleImport && <ProgressBar title="导入进度" message={visibleImport.message || visibleImport.status} progress={visibleImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
 
 {latestExport && <ProgressBar title="导出进度" message={latestExport.message || latestExport.status} progress={latestExport.progress || 0} />}
+
+{videoTask && runningStatuses.has(videoTask.status) && <ProgressBar title="视频抽帧" message={videoTask.message || videoTask.status} progress={videoTask.progress || 0} />}
 
 </div>
 

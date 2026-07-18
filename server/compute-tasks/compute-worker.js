@@ -3,6 +3,7 @@
 function createComputeWorker({
   query, transaction, fs, path, storageRoot, store, writeObjectToFile,
   pythonEnvService, modelService, algorithmRuntimeSource, runChildProcess,
+  videoFrameExecutor,
   processRef = process, logger = console, clock,
 }) {
   async function claim(workerId) {
@@ -45,7 +46,14 @@ function createComputeWorker({
       const ext = path.extname(row.display_name || "") || ".jpg";
       const target = path.join(imageRoot, `${String(index).padStart(8, "0")}${ext}`);
       if (!fs.existsSync(target)) await writeObjectToFile(row.object_key, target);
-      result.push({ projectImageId: row.id, path: target, frameIndex: index, displayName: row.display_name });
+      result.push({
+        projectImageId: row.id,
+        path: target,
+        frameIndex: index,
+        sequenceIndex: Number(input.frameOffset || 0) + index,
+        displayName: row.display_name,
+        persistSuggestion: true,
+      });
     }
     return result;
   }
@@ -53,6 +61,15 @@ function createComputeWorker({
   async function execute(task) {
     const input = typeof task.input_json === "string" ? JSON.parse(task.input_json || "{}") : (task.input_json || {});
     const taskParameters = typeof task.parameters_json === "string" ? JSON.parse(task.parameters_json || "{}") : (task.parameters_json || {});
+    if (task.operation === "fixed_interval_extract") {
+      if (!videoFrameExecutor) throw new Error("视频抽帧执行器未配置");
+      const output = await videoFrameExecutor.executeFixedInterval(task, appendLog);
+      await query(
+        `UPDATE compute_tasks SET status='done',progress=100,output_json=$1,message='固定间隔抽帧完成',
+         process_pid=NULL,finished_at=now(),updated_at=now() WHERE id=$2`, [output, task.id],
+      );
+      return;
+    }
     const algorithm = task.adapter_id ? (await query("SELECT * FROM algorithm_assets WHERE id=$1 AND deleted_at IS NULL", [task.adapter_id])).rows[0] : null;
     if (!algorithm) throw new Error("计算任务缺少可用算法资产");
     const environment = task.environment_asset_id ? (await query("SELECT * FROM runtime_envs WHERE id=$1", [task.environment_asset_id])).rows[0] : null;
@@ -66,7 +83,13 @@ function createComputeWorker({
     const adapterPath = path.join(taskRoot, "adapter.py");
     if (algorithm.adapter_key) await writeObjectToFile(algorithm.adapter_key, adapterPath);
     if (!fs.existsSync(adapterPath)) throw new Error("算法资产缺少 adapter.py");
-    const images = await materializeImages(input, taskRoot);
+    let images = await materializeImages(input, taskRoot);
+    let supplemental = { images, cleanup: null, supplementalFrameIndices: [] };
+    if (Number(input.supplementCount || 0) > 0) {
+      if (!videoFrameExecutor) throw new Error("视频补帧执行器未配置");
+      supplemental = await videoFrameExecutor.supplementSequence(task, input, images, env.python_path, appendLog);
+      images = supplemental.images;
+    }
     const modelPath = task.model_asset_id ? await modelService.findWeightArtifact(task.model_asset_id) : "";
     const modelRevision = task.model_asset_id
       ? (await query("SELECT params_json FROM model_revisions WHERE id=$1", [task.model_asset_id])).rows[0]
@@ -79,7 +102,7 @@ function createComputeWorker({
     const outputPath = path.join(taskRoot, "result.json");
     fs.writeFileSync(requestPath, JSON.stringify({
       protocol: "det-dashboard.compute.v1", taskId: task.id, purpose: task.purpose,
-      operation: task.operation, input: { ...input, images }, parameters,
+      operation: task.operation, input: { ...input, images, supplementalFrameIndices: supplemental.supplementalFrameIndices || [] }, parameters,
       assets: { algorithmRoot: source?.cacheRoot || "", modelPath, outputPath },
     }, null, 2), "utf8");
     await query("UPDATE compute_tasks SET progress=20,message='算法资源已就绪',updated_at=now() WHERE id=$1", [task.id]);
@@ -105,17 +128,25 @@ function createComputeWorker({
       reportAdapterProgress(text);
       return appendLog(task.id, stream, text);
     };
-    await runChildProcess(env.python_path, [adapterPath, "--det-dashboard-task", requestPath, "--output", outputPath], {
-      cwd: source?.cacheRoot || taskRoot,
-      env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [source?.cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
-      onSpawn: (child) => query("UPDATE compute_tasks SET process_pid=$1 WHERE id=$2", [child.pid || null, task.id]).catch(() => {}),
-      onStdout: (text) => handleOutput("stdout", text),
-      onStderr: (text) => handleOutput("stderr", text),
-    });
+    try {
+      await runChildProcess(env.python_path, [adapterPath, "--det-dashboard-task", requestPath, "--output", outputPath], {
+        cwd: source?.cacheRoot || taskRoot,
+        env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [source?.cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+        onSpawn: (child) => query("UPDATE compute_tasks SET process_pid=$1 WHERE id=$2", [child.pid || null, task.id]).catch(() => {}),
+        onStdout: (text) => handleOutput("stdout", text),
+        onStderr: (text) => handleOutput("stderr", text),
+      });
+    } finally {
+      for (const cleanupPath of supplemental.cleanup || []) fs.rmSync(cleanupPath, { recursive: true, force: true });
+    }
     const afterRun = (await query("SELECT status FROM compute_tasks WHERE id=$1", [task.id])).rows[0];
     if (afterRun?.status !== "running") return;
     if (!fs.existsSync(outputPath)) throw new Error("算法适配器没有生成 result.json");
     const output = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    if (supplemental.supplementalFrameIndices?.length) {
+      output.supplementalFrameIndices = supplemental.supplementalFrameIndices;
+      output.supplementalCount = supplemental.supplementalFrameIndices.length;
+    }
     await transaction(async (client) => {
       const sessionId = input.annotationSessionId;
       if (sessionId && Array.isArray(output.suggestions)) {
