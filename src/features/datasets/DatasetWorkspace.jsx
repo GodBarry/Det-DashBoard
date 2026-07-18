@@ -470,8 +470,6 @@ projectLastImportAt={projectLastImportAt}
 
 <>
 
-<ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
-
 <ImageGrid
 
 items={items}
@@ -510,7 +508,7 @@ deleteCheckedImages={deleteCheckedImages}
 
 </main>
 
-<Inspector item={hasCurrentImages ? selected : null} summary={summary} />
+<Inspector item={hasCurrentImages ? selected : null} summary={summary} imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </div>
 
@@ -1173,11 +1171,11 @@ return (
 
 }
 
-function ImportRecords({ imports, trashImports, deleteImport, restoreImport, emptyImportTrash }) {
+function ImportRecords({ imports, trashImports, deleteImport, restoreImport, emptyImportTrash, compact = false }) {
 
 return (
 
-<section className="records-panel">
+<section className={`records-panel ${compact ? "inspector-import-records" : ""}`}>
 
 <h2>导入记录</h2>
 
@@ -1325,7 +1323,7 @@ return (
 
 }
 
-function Inspector({ item, summary }) {
+function Inspector({ item, summary, imports, trashImports, deleteImport, restoreImport, emptyImportTrash }) {
 
 const topLabels = optionList(summary?.labels).slice(0, 6);
 
@@ -1340,6 +1338,8 @@ return (
 <InspectorStats summary={summary} labels={topLabels} />
 
 <p className="muted">选择一张图片查看详情</p>
+
+<ImportRecords compact imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </aside>
 
@@ -1409,6 +1409,8 @@ return (
 
 </section>
 
+<ImportRecords compact imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
+
 </aside>
 
 );
@@ -1455,7 +1457,7 @@ return (
 
 <p key={item.label}>
 
-<span><i style={{ background: labelColor(item.label) }} />{item.label}</span>
+<span><i style={{ background: labelColor(item.label) }} /><em title={item.label}>{item.label}</em></span>
 
 <strong><em style={{ width: `${Math.max(8, Math.round((item.count / maxLabelCount) * 100))}%`, background: labelColor(item.label) }} /></strong>
 

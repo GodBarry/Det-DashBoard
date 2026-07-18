@@ -4,6 +4,25 @@ import { ChevronRight, Sun, X } from "lucide-react";
 import { colors } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 import { AuthenticatedImage, preloadAuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+
+const annotationCache = new Map();
+const pendingAnnotations = new Map();
+
+function loadImageAnnotations(imageId) {
+  if (!imageId) return Promise.resolve([]);
+  if (annotationCache.has(imageId)) return Promise.resolve(annotationCache.get(imageId));
+  if (pendingAnnotations.has(imageId)) return pendingAnnotations.get(imageId);
+  const request = fetch(`/api/project-images/${imageId}/annotations`)
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载图片标注失败")))
+    .then((data) => {
+      const annotations = Array.isArray(data.annotations) ? data.annotations : [];
+      annotationCache.set(imageId, annotations);
+      return annotations;
+    })
+    .finally(() => pendingAnnotations.delete(imageId));
+  pendingAnnotations.set(imageId, request);
+  return request;
+}
 function labelColor(label = "") {
 
 let hash = 0;
@@ -140,17 +159,16 @@ const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".ap
 
 useEffect(() => {
   if (!item?.id || Array.isArray(item.annotations)) return undefined;
-  const controller = new AbortController();
-  fetch(`/api/project-images/${item.id}/annotations`, { signal: controller.signal })
-    .then((response) => response.ok ? response.json() : Promise.reject(new Error("加载图片标注失败")))
-    .then((data) => {
-      const annotations = Array.isArray(data.annotations) ? data.annotations : [];
+  let active = true;
+  loadImageAnnotations(item.id)
+    .then((annotations) => {
+      if (!active) return;
       setViewerItems((rows) => rows.map((row) => row.id === item.id ? { ...row, annotations } : row));
       setDraft(annotations.map((annotation) => ({ ...annotation })));
       setDefaultLabel(annotations[0]?.label || "");
     })
     .catch(() => {});
-  return () => controller.abort();
+  return () => { active = false; };
 }, [item?.id]);
 
 useEffect(() => {
@@ -162,7 +180,11 @@ let cancelled = false;
 const preloadNeighbors = () => {
   const neighbor = viewerItems[index + 1] || viewerItems[index - 1];
   if (!neighbor?.id) return;
-  const run = () => { if (!cancelled) preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`); };
+  const run = () => {
+    if (cancelled) return;
+    preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
+    loadImageAnnotations(neighbor.id).catch(() => {});
+  };
   if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 250 });
   else window.setTimeout(run, 80);
 };

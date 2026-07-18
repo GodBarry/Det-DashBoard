@@ -3533,7 +3533,11 @@ button:disabled:hover {
   left: 7px;
   z-index: 2;
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 4px;
+  max-width: calc(100% - 14px);
 }
 
 .thumb-tags em {
@@ -3544,6 +3548,7 @@ button:disabled:hover {
   font-style: normal;
   font-size: 11px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .thumb-tags em + em {
@@ -3711,6 +3716,7 @@ button:disabled:hover {
 }
 
 .class-bars p span {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3719,6 +3725,7 @@ button:disabled:hover {
 }
 
 .class-bars p span i {
+  flex: 0 0 7px;
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -4561,6 +4568,43 @@ button:disabled:hover {
 
 .switch-option {
   justify-content: space-between;
+}
+.class-bars p span > em {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-import-records {
+  margin-top: 14px !important;
+  padding-top: 14px !important;
+  border-top: 1px solid var(--border-soft) !important;
+  background: transparent !important;
+}
+.inspector-import-records .record-row {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+.inspector-import-records .record-row span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.preview-panel .asset-card .thumb-tags {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+.preview-panel .asset-card .thumb-tags > em {
+  display: inline-flex !important;
+  width: auto !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
 }
 
 .pager-page {
