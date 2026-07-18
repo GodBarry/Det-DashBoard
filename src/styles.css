@@ -10409,26 +10409,6 @@ button:disabled:hover {
   .nav-tools { grid-column: 1 / -1 !important; min-width: 0 !important; justify-content: flex-end !important; }
 }
 
-/* Dataset dark mode must keep the exact white-mode geometry. */
-.app-shell.dark .home-workspace,
-.app-shell.dark .workspace-layout,
-.app-shell.dark .workspace-folder-layout {
-  grid-template-columns: 292px minmax(0, 1fr) 374px !important;
-  gap: 12px !important;
-  padding: 12px 14px !important;
-}
-.app-shell.dark .home-project-grid,
-.app-shell.dark .workspace-folder-grid {
-  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr)) !important;
-  gap: 14px !important;
-  align-content: start !important;
-}
-.app-shell.dark .home-project-grid .project-folder,
-.app-shell.dark .workspace-folder-grid .project-folder {
-  min-height: 146px !important;
-  grid-template-columns: 50px minmax(0, 1fr) 34px !important;
-}
-
 /* Make training use the same accent behavior as asset management. */
 .app-shell:has(.training-workspace),
 .training-workspace {
@@ -10623,71 +10603,6 @@ button:disabled:hover {
 .app-shell.light .evaluation-viz-main,
 .app-shell.light .evaluation-insights {
   background: #f8fbfd !important;
-}
-
-.home-workspace,
-.workspace-layout,
-.workspace-folder-layout,
-.app-shell.light .home-workspace,
-.app-shell.light .workspace-layout,
-.app-shell.light .workspace-folder-layout,
-.app-shell.dark .home-workspace,
-.app-shell.dark .workspace-layout,
-.app-shell.dark .workspace-folder-layout {
-  grid-template-columns: var(--workbench-left-w) minmax(0, 1fr) var(--workbench-right-w) !important;
-  gap: 0 !important;
-  padding: 0 !important;
-}
-
-.home-project-grid,
-.workspace-folder-grid,
-.app-shell.light .home-project-grid,
-.app-shell.light .workspace-folder-grid,
-.app-shell.dark .home-project-grid,
-.app-shell.dark .workspace-folder-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
-  gap: 12px !important;
-  align-content: start !important;
-}
-
-.home-project-grid .project-folder,
-.workspace-folder-grid .project-folder,
-.app-shell.light .home-project-grid .project-folder,
-.app-shell.light .workspace-folder-grid .project-folder,
-.app-shell.dark .home-project-grid .project-folder,
-.app-shell.dark .workspace-folder-grid .project-folder {
-  min-width: 0 !important;
-  min-height: 136px !important;
-  grid-template-columns: 46px minmax(0, 1fr) 32px !important;
-}
-
-.home-project-grid .project-folder h3,
-.workspace-folder-grid .project-folder h3,
-.home-project-grid .project-folder .editable-name,
-.workspace-folder-grid .project-folder .editable-name {
-  max-width: 112px !important;
-}
-
-@media (max-width: 1680px) {
-  .home-project-grid,
-  .workspace-folder-grid,
-  .app-shell.light .home-project-grid,
-  .app-shell.light .workspace-folder-grid,
-  .app-shell.dark .home-project-grid,
-  .app-shell.dark .workspace-folder-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  }
-}
-
-@media (min-width: 1681px) {
-  .home-project-grid,
-  .workspace-folder-grid,
-  .app-shell.light .home-project-grid,
-  .app-shell.light .workspace-folder-grid,
-  .app-shell.dark .home-project-grid,
-  .app-shell.dark .workspace-folder-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
-  }
 }
 
 .main-nav .theme-toggle,
@@ -12809,7 +12724,7 @@ body.resizing-table-column {
 .app-shell.light .workspace-folder-grid,
 .app-shell.dark .home-project-grid,
 .app-shell.dark .workspace-folder-grid {
-  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)) !important;
+  grid-template-columns: repeat(auto-fill, minmax(286px, 1fr)) !important;
 }
 .app-shell .home-project-grid .project-folder,
 .app-shell .workspace-folder-grid .project-folder,
@@ -12819,24 +12734,29 @@ body.resizing-table-column {
 .app-shell.dark .workspace-folder-grid .project-folder {
   box-sizing: border-box !important;
   display: grid !important;
-  grid-template-columns: 42px minmax(0, 1fr) 30px !important;
-  min-width: 228px !important;
-  padding: 18px 12px 16px 14px !important;
-  column-gap: 10px !important;
+  grid-template-columns: minmax(0, 1fr) 30px !important;
+  grid-template-rows: 42px minmax(0, 1fr) !important;
+  min-width: 286px !important;
+  min-height: 150px !important;
+  padding: 14px 10px 12px 14px !important;
+  column-gap: 8px !important;
+  row-gap: 3px !important;
   align-items: start !important;
   overflow: hidden !important;
 }
 .app-shell .home-project-grid .project-folder > .project-folder-icon,
 .app-shell .workspace-folder-grid .project-folder > .project-folder-icon {
-  width: 54px !important;
-  height: 54px !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: 42px !important;
+  height: 42px !important;
   justify-self: start !important;
   align-self: start !important;
 }
 .app-shell .home-project-grid .project-folder > .project-folder-icon > svg:first-child,
 .app-shell .workspace-folder-grid .project-folder > .project-folder-icon > svg:first-child {
-  width: 34px !important;
-  height: 34px !important;
+  width: 28px !important;
+  height: 28px !important;
 }
 .app-shell .home-project-grid .project-folder > .project-folder-body,
 .app-shell .workspace-folder-grid .project-folder > .project-folder-body,
@@ -12845,6 +12765,8 @@ body.resizing-table-column {
 .app-shell.dark .home-project-grid .project-folder > .project-folder-body,
 .app-shell.dark .workspace-folder-grid .project-folder > .project-folder-body {
   display: block !important;
+  grid-column: 1 !important;
+  grid-row: 2 !important;
   min-width: 0 !important;
   width: auto !important;
   padding-right: 0 !important;
@@ -12864,6 +12786,13 @@ body.resizing-table-column {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
+.app-shell .home-project-grid .project-folder h3,
+.app-shell .workspace-folder-grid .project-folder h3,
+.app-shell .home-project-grid .project-folder .editable-name,
+.app-shell .workspace-folder-grid .project-folder .editable-name {
+  margin: 0 0 6px !important;
+  text-align: left !important;
+}
 .app-shell .home-project-grid .project-folder .project-folder-metrics,
 .app-shell .workspace-folder-grid .project-folder .project-folder-metrics {
   width: 100% !important;
@@ -12871,7 +12800,7 @@ body.resizing-table-column {
   display: grid !important;
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   gap: clamp(4px, .7vw, 12px) !important;
-  margin-top: 8px !important;
+  margin: 0 0 6px !important;
   overflow: hidden !important;
 }
 .app-shell .home-project-grid .project-folder .project-folder-metrics span,
@@ -12891,14 +12820,14 @@ body.resizing-table-column {
 .app-shell .home-project-grid .project-folder > .project-actions,
 .app-shell .workspace-folder-grid .project-folder > .project-actions {
   position: static !important;
-  grid-column: 3 !important;
-  grid-row: 1 !important;
+  grid-column: 2 !important;
+  grid-row: 1 / 3 !important;
   width: 30px !important;
   height: auto !important;
   display: grid !important;
   grid-template-columns: 1fr !important;
   grid-template-rows: repeat(4, 25px) !important;
-  align-content: center !important;
+  align-content: start !important;
   justify-items: center !important;
   gap: 4px !important;
   pointer-events: auto !important;
@@ -12931,7 +12860,7 @@ body.resizing-table-column {
   .app-shell.light .workspace-folder-grid,
   .app-shell.dark .home-project-grid,
   .app-shell.dark .workspace-folder-grid {
-    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)) !important;
+    grid-template-columns: repeat(auto-fill, minmax(286px, 1fr)) !important;
   }
 }
 
