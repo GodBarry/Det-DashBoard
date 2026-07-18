@@ -397,7 +397,7 @@ setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY -
 
 <div className="viewer-image-wrap" style={{ "--image-ratio": Number(item.image_width || 16) / Number(item.image_height || 9), aspectRatio: `${Number(item.image_width || 16)} / ${Number(item.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
 
-<AuthenticatedImage src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onLoad={(event) => { setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 }); setLoadedItemId(item.id); }} />
+<AuthenticatedImage fetchPriority="high" src={`/api/project-images/${item.id}/preview?size=1920`} placeholderSrc={`/api/project-images/${item.id}/thumb`} draggable="false" onLoad={(event) => { setNaturalSize({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 }); setLoadedItemId(item.id); }} />
 
 {loadedItemId === item.id && (editMode ? (
 

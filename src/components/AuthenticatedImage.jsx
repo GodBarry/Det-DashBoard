@@ -27,11 +27,20 @@ function remember(key, objectUrl) {
   return objectUrl;
 }
 
-export function loadAuthenticatedImage(src) {
+export function loadAuthenticatedImage(src, options = {}) {
   if (!src) return Promise.resolve("");
   const key = cacheKey(src);
   const cached = imageCache.get(key);
   if (cached) return Promise.resolve(remember(key, cached));
+  // Viewer requests are cancellable and must not share a low-priority preload.
+  if (options.signal) {
+    return fetch(src, { signal: options.signal, cache: "force-cache" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Image request failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => remember(key, URL.createObjectURL(blob)));
+  }
   if (pendingImages.has(key)) return pendingImages.get(key);
 
   const request = fetch(src)
@@ -68,6 +77,7 @@ export const AuthenticatedImage = memo(function AuthenticatedImage({ src, placeh
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     if (!src) {
       setObjectUrl("");
       return () => { active = false; };
@@ -79,7 +89,7 @@ export const AuthenticatedImage = memo(function AuthenticatedImage({ src, placeh
       }).catch(() => {});
     }
 
-    loadAuthenticatedImage(src)
+    loadAuthenticatedImage(src, { signal: controller.signal })
       .then((nextObjectUrl) => {
         if (active) {
           setObjectUrl(nextObjectUrl);
@@ -92,6 +102,7 @@ export const AuthenticatedImage = memo(function AuthenticatedImage({ src, placeh
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [src, placeholderSrc]);
 
