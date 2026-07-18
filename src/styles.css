@@ -12314,6 +12314,16 @@ button:disabled:hover {
   text-align: center;
   pointer-events: none;
 }
+.shared-image-canvas .viewer-box-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity .12s ease;
+}
+.shared-image-canvas .viewer-box-layer.loading {
+  opacity: 0;
+}
 
 /* Final inference queue guard. */
 .inference-workspace .reference-queue .inference-table-head,

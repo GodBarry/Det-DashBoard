@@ -30,12 +30,12 @@ export function EvaluationSampleViewer({
   }, [index]);
 
   useEffect(() => {
-    [-2, -1, 1, 2].forEach((offset) => {
-      const neighbor = rows[index + offset];
-      const neighborId = neighbor?.project_image_id || neighbor?.projectImageId || neighbor?.id;
-      const src = neighborId ? `/api/project-images/${neighborId}/preview?size=1920` : (neighbor?.image_url || neighbor?.thumb_url);
-      if (src) preloadAuthenticatedImage(src);
-    });
+    const neighbor = rows[index + 1] || rows[index - 1];
+    const neighborId = neighbor?.project_image_id || neighbor?.projectImageId || neighbor?.id;
+    const src = neighborId ? `/api/project-images/${neighborId}/preview?size=1920` : (neighbor?.image_url || neighbor?.thumb_url);
+    if (!src) return undefined;
+    const timer = window.setTimeout(() => preloadAuthenticatedImage(src), 80);
+    return () => window.clearTimeout(timer);
   }, [index, rows]);
 
   useEffect(() => {

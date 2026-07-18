@@ -122,18 +122,12 @@ if (!item?.id || loadedItemId !== item.id) return undefined;
 
 let cancelled = false;
 
-const preloadNeighbors = async () => {
-
-for (const offset of [1, -1, 2, -2]) {
-
-if (cancelled) return;
-
-const neighbor = viewerItems[index + offset];
-
-if (neighbor?.id) await preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`);
-
-}
-
+const preloadNeighbors = () => {
+  const neighbor = viewerItems[index + 1] || viewerItems[index - 1];
+  if (!neighbor?.id) return;
+  const run = () => { if (!cancelled) preloadAuthenticatedImage(`/api/project-images/${neighbor.id}/preview?size=1920`); };
+  if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: 250 });
+  else window.setTimeout(run, 80);
 };
 
 preloadNeighbors();
