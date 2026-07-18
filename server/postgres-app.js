@@ -42,6 +42,10 @@ const { createImportService } = require("./dataset/import-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
 const { createMlRoutes } = require("./routes/ml-routes");
+const { createAnnotationRoutes } = require("./routes/annotation-routes");
+const { createComputeTaskService } = require("./compute-tasks/compute-task-service");
+const { createAnnotationService } = require("./annotation/annotation-service");
+const { createComputeWorker } = require("./compute-tasks/compute-worker");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
@@ -111,6 +115,10 @@ let baselineService;
 let importService;
 let datasetRoutes;
 let mlRoutes;
+let annotationRoutes;
+let computeTaskService;
+let annotationService;
+let computeWorkerController;
 let inferenceSubmissionService;
 let runtimeJobService;
 let trainingCatalogService;
@@ -335,6 +343,7 @@ async function route(req, res) {
   }
   if (await datasetRoutes.handle(req, res, parsed, actor)) return;
   if (await mlRoutes.handle(req, res, parsed, actor)) return;
+  if (await annotationRoutes.handle(req, res, parsed, actor)) return;
   if (method === "GET" && parsed.pathname === "/api/jobs") {
     const scoped = scopedSql("jobs", "j", actor, requestedScope(parsed, actor));
     const rows = await query(`SELECT j.* FROM jobs j WHERE ${scoped.sql} ORDER BY created_at DESC LIMIT 50`, scoped.params);
@@ -370,6 +379,8 @@ async function main() {
   runtimeQueueService = createRuntimeQueueService({ query, transaction, accessControl });
   resourceAccess = createResourceAccess({ query, transaction, httpError, accessControl });
   await resourceAccess.initializeSchema();
+  computeTaskService = createComputeTaskService({ query, transaction, resourceAccess, accessControl, httpError, stopProcess });
+  annotationService = createAnnotationService({ query, transaction, computeTaskService, resourceAccess, httpError });
   importService = createImportService({
     query,
     transaction,
@@ -437,6 +448,8 @@ async function main() {
     algorithmAssetPrefix,
     algorithmManifestKey,
     algorithmAdapterKey,
+    fs,
+    path,
   });
   trainingCatalogService = createTrainingCatalogService({
     query,
@@ -497,6 +510,22 @@ async function main() {
     logger: console,
     clock: runtimeWorkerClock,
     dateCode,
+  });
+  computeWorkerController = createComputeWorker({
+    query,
+    transaction,
+    fs,
+    path,
+    storageRoot,
+    store,
+    writeObjectToFile,
+    pythonEnvService,
+    modelService,
+    algorithmRuntimeSource,
+    runChildProcess,
+    processRef: process,
+    logger: console,
+    clock: runtimeWorkerClock,
   });
   inferenceSubmissionService = createInferenceSubmissionService({
     query,
@@ -559,6 +588,12 @@ async function main() {
     importService,
     datasetContentService,
     baselineService,
+  });
+  annotationRoutes = createAnnotationRoutes({
+    readBody,
+    sendJson,
+    annotationService,
+    computeTaskService,
   });
   collaborationService = createCollaborationService({
     query,
@@ -675,6 +710,7 @@ const processLifecycle = createProcessLifecycle({
   lifecycle,
   startTrainingWorker: () => trainingWorkerController.startTrainingWorker(),
   startInferenceWorker: () => inferenceWorkerController.startInferenceWorker(),
+  startComputeWorker: () => computeWorkerController.startComputeWorker(),
   pool,
   port,
   host,

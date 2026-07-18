@@ -54,6 +54,13 @@ function createMlRoutes(deps) {
       sendJson(res, { algorithms: await algorithmAssetService.listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
       return true;
     }
+    const algorithmSourceMatch = pathname.match(/^\/api\/ml\/algorithm-assets\/([^/]+)\/import-source$/);
+    if (method === "POST" && algorithmSourceMatch) {
+      accessControl.requireAdmin(actor);
+      const body = await readBody(req);
+      sendJson(res, await algorithmAssetService.importAlgorithmSource(algorithmSourceMatch[1], body.sourcePath || body.source_path));
+      return true;
+    }
     if (method === "GET" && pathname === "/api/ml/asset-links") {
       sendJson(res, { links: await runtimeAssetLinkService.listLinks(actor, requestedScope(parsed, actor)) });
       return true;

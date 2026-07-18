@@ -145,7 +145,8 @@ function createModelService({
     params.splice(0, params.length, ...scoped.params);
     where.push(scoped.sql);
     const rows = await query(
-      `SELECT mv.*, m.name AS model_name, p.name AS dataset_project_name,
+      `SELECT mv.*, m.name AS model_name, m.framework AS model_framework,
+         m.task_type AS model_task_type, p.name AS dataset_project_name,
          tj.name AS training_job_name, tj.current_epoch AS training_current_epoch,
          tj.total_epochs AS training_total_epochs, tj.finished_at AS training_finished_at,
          COALESCE((

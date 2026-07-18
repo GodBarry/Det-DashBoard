@@ -245,7 +245,6 @@ async function listObjectKeys(prefix = "") {
     path.join(storageRoot, "object-store-fallback"),
     path.join(fallbackStorageRoot, "object-store-fallback"),
     path.join(__dirname, "..", "object-store-fallback"),
-    path.join(minio.dataDir, minio.bucket),
   ]) {
     for (const key of walkLocalObjectKeys(rootDir, prefix)) keys.add(key);
   }

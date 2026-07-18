@@ -1,3 +1,5 @@
+const { annotationAdapterSource } = require("../compute-tasks/builtin-annotation-adapter");
+
 const builtinAlgorithmAssets = [
   {
     name: "Ultralytics YOLO",
@@ -78,6 +80,30 @@ const builtinAlgorithmAssets = [
     adapter: "# Platform adapter placeholder for DINOv3 Faster R-CNN.\n",
   },
   {
+    name: "SAM2 Segmentation",
+    algorithmKey: "sam2_segmentation",
+    framework: "sam2",
+    taskType: "segment",
+    version: "2.1",
+    tasks: ["segment"],
+    operations: [{ name: "segment", promptTypes: ["points", "box"], outputTypes: ["mask", "polygon", "rectangle"], supportsSession: true }],
+    description: "Interactive prompt segmentation for the shared annotation editor.",
+    params: { output_type: "polygon", multimask_output: false, device: "cuda:0" },
+    adapter: annotationAdapterSource,
+  },
+  {
+    name: "SAMURAI Tracking",
+    algorithmKey: "samurai_tracking",
+    framework: "samurai",
+    taskType: "track",
+    version: "2.1",
+    tasks: ["track"],
+    operations: [{ name: "propagate", promptTypes: ["points", "box", "mask"], outputTypes: ["mask", "polygon", "rectangle"], directions: ["forward", "backward", "both"], supportsSession: true, supportsMultipleObjects: true, supportsCorrection: true }],
+    description: "SAMURAI multi-object sequence tracking adapter for annotation suggestions.",
+    params: { output_type: "rectangle", direction: "forward", device: "cuda:0" },
+    adapter: annotationAdapterSource,
+  },
+  {
     name: "RT-DETR",
     algorithmKey: "rtdetr",
     framework: "pytorch",
@@ -112,7 +138,7 @@ const builtinAlgorithmAssets = [
   },
 ];
 
-const supportedBuiltinKeys = ["ultralytics_yolo", "dinov3_faster_rcnn"];
+const supportedBuiltinKeys = ["ultralytics_yolo", "dinov3_faster_rcnn", "sam2_segmentation", "samurai_tracking"];
 
 function createAlgorithmAssetService({
   query,
@@ -122,6 +148,8 @@ function createAlgorithmAssetService({
   algorithmAssetPrefix,
   algorithmManifestKey,
   algorithmAdapterKey,
+  fs,
+  path,
   logger = console,
 }) {
   if (typeof query !== "function") throw new TypeError("createAlgorithmAssetService requires query");
@@ -143,7 +171,8 @@ function createAlgorithmAssetService({
       framework: asset.framework,
       version: asset.version || "builtin",
       tasks: asset.tasks || [asset.taskType || "detect"],
-      entry: { type: "python", adapter: "adapter.py", function: "run_inference" },
+      operations: asset.operations || [],
+      entry: { type: "python", adapter: "adapter.py", function: "execute" },
       inputs: { imageDir: true, manifest: true, modelWeights: true },
       outputs: { predictionsJson: true, visualizations: true, labelmeJson: true },
       params: asset.params || {},
@@ -163,7 +192,7 @@ function createAlgorithmAssetService({
       template_key: asset.algorithmKey,
       framework: asset.framework,
       task_type: asset.taskType,
-      capabilities_json: { tasks: asset.tasks, builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
+      capabilities_json: { tasks: asset.tasks, operations: asset.operations || [], builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
     }));
   }
 
@@ -179,7 +208,7 @@ function createAlgorithmAssetService({
       minio_prefix: algorithmAssetPrefix(asset.algorithmKey, asset.version),
       manifest_key: algorithmManifestKey(asset.algorithmKey, asset.version),
       adapter_key: algorithmAdapterKey(asset.algorithmKey, asset.version),
-      capabilities_json: { tasks: asset.tasks, builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
+      capabilities_json: { tasks: asset.tasks, operations: asset.operations || [], builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } },
       default_params_json: asset.params || {},
       description: asset.description,
       status: "ready",
@@ -192,8 +221,9 @@ function createAlgorithmAssetService({
       const minioPrefix = algorithmAssetPrefix(asset.algorithmKey, version);
       const manifestKey = algorithmManifestKey(asset.algorithmKey, version);
       const adapterKey = algorithmAdapterKey(asset.algorithmKey, version);
-      if (!(await store.objectExists(manifestKey))) await store.putJson(manifestKey, algorithmManifest(asset));
-      if (!(await store.objectExists(adapterKey))) await store.putText(adapterKey, asset.adapter || "", "text/x-python");
+      const annotationAsset = ["sam2_segmentation", "samurai_tracking"].includes(asset.algorithmKey);
+      if (annotationAsset || !(await store.objectExists(manifestKey))) await store.putJson(manifestKey, algorithmManifest(asset));
+      if (annotationAsset || !(await store.objectExists(adapterKey))) await store.putText(adapterKey, asset.adapter || "", "text/x-python");
       await query(
         `INSERT INTO algorithm_assets
          (name, algorithm_key, framework, task_type, version, source_type, minio_prefix, manifest_key, adapter_key, source_prefix, capabilities_json, default_params_json, description, status)
@@ -222,7 +252,7 @@ function createAlgorithmAssetService({
           manifestKey,
           adapterKey,
           `${minioPrefix}/source/`,
-          JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } }),
+          JSON.stringify({ tasks: asset.tasks || [asset.taskType || "detect"], operations: asset.operations || [], builtin: true, parameterSchema: asset.parameterSchema || { groups: [] } }),
           JSON.stringify(asset.params || {}),
           asset.description || "",
         ],
@@ -367,10 +397,40 @@ function createAlgorithmAssetService({
     }
   }
 
+  async function importAlgorithmSource(algorithmId, sourcePath) {
+    if (!fs || !path) throw new Error("服务器未启用算法源码目录导入");
+    const root = path.resolve(String(sourcePath || "").trim());
+    if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error("算法源码目录不存在");
+    const algorithm = (await query("SELECT * FROM algorithm_assets WHERE id=$1 AND deleted_at IS NULL", [algorithmId])).rows[0];
+    if (!algorithm) throw new Error("算法资产不存在");
+    const sourcePrefix = String(algorithm.source_prefix || `${algorithm.minio_prefix}/source/`).replace(/\\/g, "/").replace(/\/*$/, "/");
+    const ignoredDirectories = new Set([".git", "__pycache__", ".pytest_cache", ".mypy_cache", "checkpoints"]);
+    const files = [];
+    const visit = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) visit(absolute);
+        else if (entry.isFile() && !entry.name.endsWith(".pyc")) files.push(absolute);
+      }
+    };
+    visit(root);
+    for (const file of files) {
+      const relative = path.relative(root, file).split(path.sep).join("/");
+      await store.putFile(`${sourcePrefix}${relative}`, file);
+    }
+    await query(
+      "UPDATE algorithm_assets SET source_type='minio',source_prefix=$1,status='ready',updated_at=now() WHERE id=$2",
+      [sourcePrefix, algorithmId],
+    );
+    return { algorithmId, sourcePrefix, fileCount: files.length };
+  }
+
   return {
     ensureBuiltinAlgorithmAssets,
     syncMinioAlgorithmAssets,
     listAlgorithmAssets,
+    importAlgorithmSource,
     getBuiltinTrainingTemplateFallbacks,
   };
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Sun, X } from "lucide-react";
+import { ChevronRight, MousePointer2, Route, ScanLine, Sun, X } from "lucide-react";
 
 import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
@@ -8,6 +8,18 @@ import { prefetchViewerWindow, setViewerAnnotations, useViewerAnnotations } from
 import { useViewerNavigation } from "../media/useViewerNavigation.js";
 function labelColor(label = "") {
 return categoryColor(label);
+}
+
+function algorithmCapabilities(algorithm) {
+  let capabilities = algorithm?.capabilities_json || {};
+  if (typeof capabilities === "string") {
+    try { capabilities = JSON.parse(capabilities); } catch { capabilities = {}; }
+  }
+  return capabilities;
+}
+
+function supportsAnnotationOperation(algorithm, operation) {
+  return (algorithmCapabilities(algorithm).operations || []).some((entry) => entry?.name === operation);
 }
 
 function imageMetadata(item, annotations) {
@@ -120,6 +132,17 @@ const [pan, setPan] = useState({ x: 0, y: 0 });
 const [drag, setDrag] = useState(null);
 
 const [editMode, setEditMode] = useState(false);
+const [annotationMode, setAnnotationMode] = useState("manual");
+const [annotationAlgorithms, setAnnotationAlgorithms] = useState([]);
+const [annotationAlgorithmId, setAnnotationAlgorithmId] = useState("");
+const [annotationModels, setAnnotationModels] = useState([]);
+const [annotationModelId, setAnnotationModelId] = useState("");
+const [annotationEnvironments, setAnnotationEnvironments] = useState([]);
+const [annotationEnvironmentId, setAnnotationEnvironmentId] = useState("");
+const [annotationSession, setAnnotationSession] = useState(null);
+const [annotationTask, setAnnotationTask] = useState(null);
+const [annotationMessage, setAnnotationMessage] = useState("");
+const [annotationSuggestions, setAnnotationSuggestions] = useState([]);
 
 const [tool, setTool] = useState("select");
 
@@ -158,6 +181,15 @@ setPan({ x: 0, y: 0 });
 
 setEditMode(false);
 
+setAnnotationMode("manual");
+
+setAnnotationSession(null);
+
+setAnnotationTask(null);
+
+setAnnotationMessage("");
+setAnnotationSuggestions([]);
+
 setTool("select");
 
 setDraft([]);
@@ -170,6 +202,89 @@ setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.ima
 setLoadedItemId(null);
 
 }, [item?.id]);
+
+useEffect(() => {
+  if (annotationAlgorithms.length) return;
+  fetch("/api/ml/algorithm-assets?scope=all")
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法加载算法资产")))
+    .then((data) => setAnnotationAlgorithms(data.algorithms || []))
+    .catch((error) => setAnnotationMessage(error.message));
+  fetch("/api/ml/model-versions?scope=all")
+    .then((response) => response.ok ? response.json() : ({ versions: [] }))
+    .then((data) => setAnnotationModels(data.versions || []));
+  fetch("/api/ml/python-envs?scope=all")
+    .then((response) => response.ok ? response.json() : ({ envs: [] }))
+    .then((data) => setAnnotationEnvironments(data.envs || []));
+}, [annotationAlgorithms.length]);
+
+useEffect(() => {
+  if (annotationMode === "manual") { setAnnotationAlgorithmId(""); return; }
+  const operation = annotationMode === "segmentation" ? "segment" : "propagate";
+  const available = annotationAlgorithms.filter((algorithm) => supportsAnnotationOperation(algorithm, operation));
+  if (!available.some((algorithm) => String(algorithm.id) === String(annotationAlgorithmId))) {
+    setAnnotationAlgorithmId(available[0]?.id || "");
+  }
+}, [annotationMode, annotationAlgorithms, annotationAlgorithmId]);
+
+const selectedAnnotationAlgorithm = annotationAlgorithms.find((algorithm) => String(algorithm.id) === String(annotationAlgorithmId));
+const compatibleAnnotationModels = annotationModels.filter((model) => {
+  const framework = String(model.model_framework || "").toLowerCase();
+  const selectedFramework = String(selectedAnnotationAlgorithm?.framework || "").toLowerCase();
+  if (["sam2", "samurai"].includes(selectedFramework)) return ["sam2", "samurai"].includes(framework);
+  return !selectedFramework || framework === selectedFramework;
+});
+const compatibleAnnotationEnvironments = annotationEnvironments.filter((environment) => {
+  if (!selectedAnnotationAlgorithm) return true;
+  const name = String(environment.name || "").toLowerCase();
+  return name.includes("samurai") || name.includes("sam2");
+});
+
+useEffect(() => {
+  if (!compatibleAnnotationModels.some((model) => String(model.id) === String(annotationModelId))) {
+    setAnnotationModelId(compatibleAnnotationModels[0]?.id || "");
+  }
+  if (!compatibleAnnotationEnvironments.some((environment) => String(environment.id) === String(annotationEnvironmentId))) {
+    setAnnotationEnvironmentId(compatibleAnnotationEnvironments[0]?.id || "");
+  }
+}, [annotationAlgorithmId, annotationModels, annotationEnvironments]);
+
+useEffect(() => {
+  if (!annotationTask?.id || !annotationSession?.id || ["done", "failed", "cancelled"].includes(annotationTask.status)) return undefined;
+  let stopped = false;
+  const poll = async () => {
+    try {
+      const response = await fetch(`/api/compute/tasks?purpose=annotation&sessionKey=${annotationSession.id}`);
+      const data = await response.json();
+      const current = (data.tasks || []).find((row) => row.id === annotationTask.id);
+      if (!current || stopped) return;
+      setAnnotationTask(current);
+      setAnnotationMessage(current.message || current.status);
+      if (current.status === "done") {
+        const suggestionResponse = await fetch(`/api/annotation/sessions/${annotationSession.id}/suggestions`);
+        const suggestionData = await suggestionResponse.json();
+        if (!stopped) setAnnotationSuggestions(suggestionData.suggestions || []);
+      }
+    } catch (error) {
+      if (!stopped) setAnnotationMessage(error.message);
+    }
+  };
+  poll();
+  const timer = window.setInterval(poll, 900);
+  return () => { stopped = true; window.clearInterval(timer); };
+}, [annotationTask?.id, annotationTask?.status, annotationSession?.id]);
+
+useEffect(() => {
+  if (!editMode || !annotationSuggestions.length || !item?.id) return;
+  const current = annotationSuggestions.filter((row) => String(row.project_image_id) === String(item.id));
+  setDraft((rows) => [
+    ...rows.filter((row) => !row.algorithmSuggestion),
+    ...current.map((row) => {
+      const geometry = typeof row.geometry_json === "string" ? JSON.parse(row.geometry_json || "{}") : (row.geometry_json || {});
+      const [x1, y1, x2, y2] = geometry.bbox || [0, 0, 1, 1];
+      return { id: row.id, label: row.label, bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(1, y2 - y1), shape_type: row.shape_type, track_id: row.track_id, algorithmSuggestion: true };
+    }),
+  ]);
+}, [annotationSuggestions, item?.id, editMode]);
 
 useEffect(() => {
   if (editMode) return;
@@ -279,6 +394,14 @@ onSaved?.(item.id, annotations);
 
 setEditMode(false);
 
+setAnnotationMode("manual");
+
+setAnnotationSession(null);
+
+setAnnotationTask(null);
+
+setAnnotationMessage("");
+
 } catch (error) {
 
 window.alert("提交失败: " + error.message);
@@ -318,11 +441,111 @@ setEditMode(false);
 
 };
 
+const runAnnotationAlgorithm = async () => {
+  if (annotationMode === "manual") return;
+  if (!annotationAlgorithmId) { setAnnotationMessage("请先选择可用的标注方法"); return; }
+  if (!selectedAnn) { setAnnotationMessage("请先选择或绘制一个目标区域作为提示"); return; }
+  const projectId = item.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
+  if (!projectId) { setAnnotationMessage("无法确定当前数据集项目"); return; }
+  setAnnotationMessage("正在创建标注计算任务...");
+  try {
+    let session = annotationSession;
+    if (!session || session.mode !== annotationMode
+      || String(session.adapter_id) !== String(annotationAlgorithmId)
+      || String(session.model_asset_id || "") !== String(annotationModelId || "")
+      || String(session.environment_asset_id || "") !== String(annotationEnvironmentId || "")) {
+      const createResponse = await fetch("/api/annotation/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId, mode: annotationMode, adapterId: annotationAlgorithmId, modelAssetId: annotationModelId || null, environmentAssetId: annotationEnvironmentId || null }),
+      });
+      const createData = await createResponse.json();
+      if (!createResponse.ok) throw new Error(createData.error || "创建标注会话失败");
+      session = createData.session;
+      setAnnotationSession(session);
+    }
+    const prompt = {
+      type: "box",
+      bbox: [Number(selectedAnn.bbox_x), Number(selectedAnn.bbox_y), Number(selectedAnn.bbox_x) + Number(selectedAnn.bbox_w), Number(selectedAnn.bbox_y) + Number(selectedAnn.bbox_h)],
+      label: selectedAnn.label || defaultLabel || "unknown",
+      trackId: selectedAnn.track_id || `track-${String(selectedAnn.id).replace(/^tmp_/, "")}`,
+    };
+    const operation = annotationMode === "segmentation" ? "segment" : "propagate";
+    const input = annotationMode === "segmentation"
+      ? { projectImageId: item.id, prompt }
+      : { imageIds: viewerItems.map((row) => row.id), startFrame: index, prompts: [prompt] };
+    const operationResponse = await fetch(`/api/annotation/sessions/${session.id}/operations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation, input, parameters: annotationMode === "tracking" ? { direction: "forward" } : {} }),
+    });
+    const operationData = await operationResponse.json();
+    if (!operationResponse.ok) throw new Error(operationData.error || "提交标注任务失败");
+    setAnnotationTask(operationData.task);
+    setAnnotationMessage(operation === "segment" ? "分割任务已提交" : "跟踪任务已提交");
+  } catch (error) {
+    setAnnotationMessage(error.message);
+  }
+};
+
+const controlAnnotationTask = async (action) => {
+  if (!annotationTask?.id) return;
+  const response = await fetch(`/api/compute/tasks/${annotationTask.id}/${action}`, { method: "POST" });
+  const data = await response.json();
+  if (!response.ok) { setAnnotationMessage(data.error || "任务操作失败"); return; }
+  setAnnotationTask(data.task);
+  setAnnotationMessage(data.task.message);
+};
+
+const commitAlgorithmSuggestions = async () => {
+  if (!annotationSession?.id || !annotationSuggestions.length) return;
+  const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/commit`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
+  });
+  const data = await response.json();
+  if (!response.ok) { setAnnotationMessage(data.error || "确认算法标注失败"); return; }
+  setAnnotationMessage(`已确认 ${data.accepted} 条标注，并生成新标签版本`);
+  setAnnotationSuggestions([]);
+  setAnnotationTask(null);
+  onSaved?.();
+};
+
+const correctTrackingFromCurrentFrame = async () => {
+  if (!annotationSession?.id || annotationMode !== "tracking" || !selectedAnn) return;
+  const trackId = selectedAnn.track_id || `track-${String(selectedAnn.id)}`;
+  const prompt = {
+    type: "box", trackId, label: selectedAnn.label || "unknown",
+    bbox: [Number(selectedAnn.bbox_x), Number(selectedAnn.bbox_y), Number(selectedAnn.bbox_x) + Number(selectedAnn.bbox_w), Number(selectedAnn.bbox_y) + Number(selectedAnn.bbox_h)],
+  };
+  setAnnotationMessage("正在从当前帧建立修正关键帧...");
+  try {
+    const correctionResponse = await fetch(`/api/annotation/sessions/${annotationSession.id}/corrections`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ trackId, frameIndex: index, prompt }),
+    });
+    const correctionData = await correctionResponse.json();
+    if (!correctionResponse.ok) throw new Error(correctionData.error || "创建修正关键帧失败");
+    const operationResponse = await fetch(`/api/annotation/sessions/${annotationSession.id}/operations`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: "correct", input: { imageIds: viewerItems.map((row) => row.id), startFrame: index, prompts: [prompt] }, parameters: { direction: "forward", revision: correctionData.revision.revision } }),
+    });
+    const operationData = await operationResponse.json();
+    if (!operationResponse.ok) throw new Error(operationData.error || "提交重新跟踪任务失败");
+    setAnnotationSuggestions((rows) => rows.filter((row) => !(row.track_id === trackId && Number(row.frame_index) >= index)));
+    setAnnotationTask(operationData.task);
+    setAnnotationMessage("修正关键帧已建立，正在重新跟踪");
+  } catch (error) {
+    setAnnotationMessage(error.message);
+  }
+};
+
 return (
 
-<div className={`viewer-overlay dataset-image-dialog viewer-${viewerTheme}`} onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
+<div className={`viewer-overlay dataset-image-dialog viewer-${viewerTheme} ${editMode ? "viewer-editing" : ""}`} onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
 
-<div className="viewer-topbar">
+<div className={`viewer-topbar ${editMode ? "annotation-editor-topbar" : ""}`}>
+
+<div className="viewer-context-row">
 
 {!readOnly && <button className={editMode ? "active-tool edit-toggle" : "edit-toggle"} onClick={() => setEditMode((value) => !value)}>{editMode ? "退出编" : "编辑"}</button>}
 
@@ -336,9 +559,25 @@ return (
 
 <span>{sequenceUrl ? `${index + 1} / ${viewerItems.length}` : (loadPage ? `${(viewerPage - 1) * pageSize + index + 1} / ${totalItems}` : `${index + 1} / ${viewerItems.length}`)}</span>
 
+<div className="viewer-utility-actions">
+<button onClick={() => zoom(-0.25)}>-</button>
+<button onClick={() => zoom(0.25)}>+</button>
+<button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}>重置</button>
+<button onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换明暗模式"><Sun size={16} /></button>
+<button onClick={() => { onPageChange?.(viewerPage); onClose(); }}><X size={16} /></button>
+</div>
+
+</div>
+
 {editMode && (
 
-<>
+<div className="annotation-action-row">
+
+<div className="annotation-mode-control" role="tablist" aria-label="标注模式">
+<button className={annotationMode === "manual" ? "active-tool" : ""} onClick={() => setAnnotationMode("manual")}><MousePointer2 size={15} />手动标注</button>
+<button className={annotationMode === "segmentation" ? "active-tool" : ""} onClick={() => setAnnotationMode("segmentation")}><ScanLine size={15} />分割标注</button>
+<button className={annotationMode === "tracking" ? "active-tool" : ""} onClick={() => setAnnotationMode("tracking")}><Route size={15} />跟踪标注</button>
+</div>
 
 <button className={tool === "select" ? "active-tool" : ""} onClick={() => setTool("select")}>选择</button>
 
@@ -346,25 +585,42 @@ return (
 
 <input className="label-input" value={defaultLabel} onChange={(event) => setDefaultLabel(event.target.value)} placeholder="标签" />
 
+{annotationMode !== "manual" && <select className="annotation-method-select" value={annotationAlgorithmId} onChange={(event) => setAnnotationAlgorithmId(event.target.value)}>
+{!annotationAlgorithms.length && <option value="">正在加载方法...</option>}
+{annotationAlgorithms.filter((algorithm) => supportsAnnotationOperation(algorithm, annotationMode === "segmentation" ? "segment" : "propagate")).map((algorithm) => <option key={algorithm.id} value={algorithm.id}>{algorithm.name}</option>)}
+</select>}
+
+{annotationMode !== "manual" && <select className="annotation-method-select annotation-model-select" value={annotationModelId} onChange={(event) => setAnnotationModelId(event.target.value)} aria-label="模型权重">
+<option value="">选择模型权重</option>
+{compatibleAnnotationModels.map((model) => <option key={model.id} value={model.id}>{model.model_name || model.version_name}</option>)}
+</select>}
+
+{annotationMode !== "manual" && <select className="annotation-method-select annotation-env-select" value={annotationEnvironmentId} onChange={(event) => setAnnotationEnvironmentId(event.target.value)} aria-label="Python环境">
+<option value="">选择运行环境</option>
+{compatibleAnnotationEnvironments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
+</select>}
+
+{annotationMode !== "manual" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={runAnnotationAlgorithm}>{annotationMode === "segmentation" ? "生成分割" : "开始跟踪"}</button>}
+
 <button disabled={!selectedAnnId} onClick={() => { setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId)); setSelectedAnnId(null); }}>删除</button>
 
 <button className="save-ann" onClick={save}>保存</button>
 
-</>
+</div>
 
 )}
 
-<button onClick={() => zoom(-0.25)}>-</button>
-
-<button onClick={() => zoom(0.25)}>+</button>
-
-<button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}>重置</button>
-
-<button onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换明暗模式"><Sun size={16} /></button>
-
-<button onClick={() => { onPageChange?.(viewerPage); onClose(); }}><X size={16} /></button>
-
 </div>
+
+{editMode && annotationMessage && <div className="annotation-task-status" title={annotationTask?.id || ""}>{annotationMessage}{annotationTask ? ` · ${annotationTask.status}` : ""}</div>}
+
+{editMode && annotationTask && <div className="annotation-task-actions">
+{["pending", "running"].includes(annotationTask.status) && <button onClick={() => controlAnnotationTask("pause")}>暂停</button>}
+{annotationTask.status === "paused" && <button onClick={() => controlAnnotationTask("resume")}>继续</button>}
+{!["done", "failed", "cancelled"].includes(annotationTask.status) && <button onClick={() => controlAnnotationTask("cancel")}>取消</button>}
+{annotationSuggestions.length > 0 && <button className="primary" onClick={commitAlgorithmSuggestions}>确认结果</button>}
+{annotationMode === "tracking" && annotationSession && selectedAnn && <button onClick={correctTrackingFromCurrentFrame}>从此帧修正</button>}
+</div>}
 
 <button className="viewer-page-button viewer-page-prev" title="上一张" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}><ChevronRight size={28} /></button>
 
@@ -605,6 +861,8 @@ height={Math.max(1, Number(ann.bbox_h || 0))}
 fill="rgba(0,0,0,0.01)"
 
 stroke={color}
+
+strokeDasharray={ann.algorithmSuggestion ? `${Math.max(10, width / 120)} ${Math.max(7, width / 170)}` : undefined}
 
 strokeWidth={selected ? Math.max(5, width / 550) : Math.max(3, width / 900)}
 
