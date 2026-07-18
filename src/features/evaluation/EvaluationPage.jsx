@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import {
   ArrowLeft,
   Boxes,
@@ -25,8 +25,8 @@ import {
   formatDuration,
   runStatusLabel,
 } from "../../shared/presentation.js";
-import { EvaluationConfusionMatrix } from "./EvaluationConfusionMatrix.jsx";
-import { EvaluationCurve } from "./EvaluationCurve.jsx";
+const EvaluationConfusionMatrix = lazy(() => import("./EvaluationConfusionMatrix.jsx").then((module) => ({ default: module.EvaluationConfusionMatrix })));
+const EvaluationCurve = lazy(() => import("./EvaluationCurve.jsx").then((module) => ({ default: module.EvaluationCurve })));
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { evaluationBarPalette, evaluationErrorBoxes, evaluationErrorDescriptions } from "./evaluationPresentation.js";
@@ -339,6 +339,8 @@ return (
 
 <section className="evaluation-analysis-stage">
 
+<Suspense fallback={<div className="evaluation-chart-loading">正在加载评估图表...</div>}>
+
 {activeAnalysis === "overview" && <div className="evaluation-overview-grid">
 
 <article className="evaluation-pr-chart"><h3>Precision-Recall 曲线</h3><EvaluationCurve kind="pr" curves={curves} /></article>
@@ -377,7 +379,7 @@ return (
 
 </div>}
 
-</section>
+</Suspense></section>
 
 <section className="evaluation-error-samples">
 

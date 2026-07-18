@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 const MAX_CACHE_ENTRIES = 192;
 const imageCache = new Map();
 const pendingImages = new Map();
+const preloadQueue = new Set();
+let preloadScheduled = false;
 
 function cacheKey(src) {
   let scope = "anonymous";
@@ -44,10 +46,20 @@ export function loadAuthenticatedImage(src) {
 }
 
 export function preloadAuthenticatedImage(src) {
-  return loadAuthenticatedImage(src).catch(() => "");
+  if (!src || preloadQueue.has(src)) return Promise.resolve("");
+  preloadQueue.add(src);
+  const run = () => {
+    preloadQueue.delete(src);
+    preloadScheduled = false;
+    return loadAuthenticatedImage(src).catch(() => "");
+  };
+  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+    return new Promise((resolve) => window.requestIdleCallback(() => resolve(run()), { timeout: 350 }));
+  }
+  return new Promise((resolve) => window.setTimeout(() => resolve(run()), 120));
 }
 
-export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady, ...props }) {
+export const AuthenticatedImage = memo(function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady, ...props }) {
   const [objectUrl, setObjectUrl] = useState("");
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -84,6 +96,6 @@ export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady
   }, [src, placeholderSrc]);
 
   return <img {...props} src={objectUrl || TRANSPARENT_PIXEL} />;
-}
+}, (previous, next) => previous.src === next.src && previous.placeholderSrc === next.placeholderSrc && previous.alt === next.alt && previous.className === next.className);
 
 export default AuthenticatedImage;
