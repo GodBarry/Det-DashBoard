@@ -12952,6 +12952,25 @@ body.resizing-table-column {
   background: #f8fbfc;
   color: #27414f;
 }
+.annotation-task-history { position: fixed; z-index: 12; top: 126px; left: 18px; bottom: 18px; width: min(430px,calc(100vw - 36px)); display: grid; grid-template-rows: 42px minmax(150px,42%) minmax(0,1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb,var(--panel) 97%,transparent); color: var(--text); box-shadow: 0 18px 48px rgba(0,0,0,.28); }
+.annotation-task-history > header { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 13px; border-bottom: 1px solid var(--line); }
+.annotation-task-history > header div,.annotation-task-log > b { display: flex; align-items: center; gap: 7px; }
+.annotation-task-history > header button { width: 28px; height: 28px; padding: 0; }
+.annotation-task-history-list { padding: 8px; overflow: auto; }
+.annotation-task-history-list > button { width: 100%; min-height: 52px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 3px 8px; padding: 7px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); text-align: left; }
+.annotation-task-history-list > button:hover,.annotation-task-history-list > button.active { border-color: color-mix(in srgb,var(--accent) 45%,var(--line)); background: color-mix(in srgb,var(--accent) 10%,var(--panel)); }
+.annotation-task-history-list span { display: flex; align-items: center; gap: 7px; font-weight: 700; }
+.annotation-task-history-list em { color: var(--muted); font-size: 11px; font-style: normal; }
+.annotation-task-history-list small { grid-column: 1/-1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.task-state { width: 7px; height: 7px; border-radius: 50%; background: #93a4ad; }
+.task-state.running,.task-state.pending { background: #14b8a6; }
+.task-state.done { background: #22c55e; }
+.task-state.failed,.task-state.cancelled { background: #ef5b67; }
+.task-state.paused { background: #f0b94b; }
+.annotation-task-log { min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; overflow: auto; border-top: 1px solid var(--line); }
+.annotation-task-log > b { position: sticky; top: -10px; padding: 6px 0; background: var(--panel); font-size: 12px; }
+.annotation-task-log code { color: var(--muted); font: 11px/1.5 Consolas,"Courier New",monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.annotation-task-log p,.annotation-task-history-list p { margin: 12px 4px; color: var(--muted); font-size: 12px; }
 .dataset-image-dialog .viewer-image-wrap { width: min(88vw,1320px,calc((100vh - 110px) * var(--image-ratio))); max-width: none; max-height: none; overflow: hidden; border: 1px solid rgba(151,174,188,.22); border-radius: 7px; box-shadow: 0 20px 60px rgba(0,0,0,.38); }
 .dataset-image-dialog .viewer-image-wrap img { object-fit: fill; }
 .inference-result-dialog .shared-image-viewport {

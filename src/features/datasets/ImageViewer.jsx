@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, MousePointer2, Route, ScanLine, Sun, X } from "lucide-react";
+import { ChevronRight, History, MousePointer2, Route, ScanLine, ScrollText, Sun, Undo2, X, XCircle } from "lucide-react";
 
 import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
@@ -139,10 +139,15 @@ const [annotationModels, setAnnotationModels] = useState([]);
 const [annotationModelId, setAnnotationModelId] = useState("");
 const [annotationEnvironments, setAnnotationEnvironments] = useState([]);
 const [annotationEnvironmentId, setAnnotationEnvironmentId] = useState("");
+const [annotationAssetLinks, setAnnotationAssetLinks] = useState([]);
 const [annotationSession, setAnnotationSession] = useState(null);
 const [annotationTask, setAnnotationTask] = useState(null);
 const [annotationMessage, setAnnotationMessage] = useState("");
 const [annotationSuggestions, setAnnotationSuggestions] = useState([]);
+const [showTaskHistory, setShowTaskHistory] = useState(false);
+const [annotationTaskHistory, setAnnotationTaskHistory] = useState([]);
+const [annotationTaskLogs, setAnnotationTaskLogs] = useState([]);
+const [annotationLastCommit, setAnnotationLastCommit] = useState(null);
 
 const [tool, setTool] = useState("select");
 
@@ -215,6 +220,9 @@ useEffect(() => {
   fetch("/api/ml/python-envs?scope=all")
     .then((response) => response.ok ? response.json() : ({ envs: [] }))
     .then((data) => setAnnotationEnvironments(data.envs || []));
+  fetch("/api/ml/asset-links?scope=all")
+    .then((response) => response.ok ? response.json() : ({ links: [] }))
+    .then((data) => setAnnotationAssetLinks(data.links || []));
 }, [annotationAlgorithms.length]);
 
 useEffect(() => {
@@ -227,13 +235,16 @@ useEffect(() => {
 }, [annotationMode, annotationAlgorithms, annotationAlgorithmId]);
 
 const selectedAnnotationAlgorithm = annotationAlgorithms.find((algorithm) => String(algorithm.id) === String(annotationAlgorithmId));
+const linkedAnnotationAssets = annotationAssetLinks.filter((link) => String(link.algorithm_asset_id || "") === String(annotationAlgorithmId || ""));
 const compatibleAnnotationModels = annotationModels.filter((model) => {
+  if (linkedAnnotationAssets.length) return linkedAnnotationAssets.some((link) => String(link.model_version_id || "") === String(model.id));
   const framework = String(model.model_framework || "").toLowerCase();
   const selectedFramework = String(selectedAnnotationAlgorithm?.framework || "").toLowerCase();
   if (["sam2", "samurai"].includes(selectedFramework)) return ["sam2", "samurai"].includes(framework);
   return !selectedFramework || framework === selectedFramework;
 });
 const compatibleAnnotationEnvironments = annotationEnvironments.filter((environment) => {
+  if (linkedAnnotationAssets.length) return linkedAnnotationAssets.some((link) => String(link.python_env_id || "") === String(environment.id));
   if (!selectedAnnotationAlgorithm) return true;
   const name = String(environment.name || "").toLowerCase();
   return name.includes("samurai") || name.includes("sam2");
@@ -246,7 +257,7 @@ useEffect(() => {
   if (!compatibleAnnotationEnvironments.some((environment) => String(environment.id) === String(annotationEnvironmentId))) {
     setAnnotationEnvironmentId(compatibleAnnotationEnvironments[0]?.id || "");
   }
-}, [annotationAlgorithmId, annotationModels, annotationEnvironments]);
+}, [annotationAlgorithmId, annotationModels, annotationEnvironments, annotationAssetLinks]);
 
 useEffect(() => {
   if (!annotationTask?.id || !annotationSession?.id || ["done", "failed", "cancelled"].includes(annotationTask.status)) return undefined;
@@ -255,6 +266,7 @@ useEffect(() => {
     try {
       const response = await fetch(`/api/compute/tasks?purpose=annotation&sessionKey=${annotationSession.id}`);
       const data = await response.json();
+      setAnnotationTaskHistory(data.tasks || []);
       const current = (data.tasks || []).find((row) => row.id === annotationTask.id);
       if (!current || stopped) return;
       setAnnotationTask(current);
@@ -272,6 +284,14 @@ useEffect(() => {
   const timer = window.setInterval(poll, 900);
   return () => { stopped = true; window.clearInterval(timer); };
 }, [annotationTask?.id, annotationTask?.status, annotationSession?.id]);
+
+useEffect(() => {
+  if (!showTaskHistory) return;
+  fetch("/api/compute/tasks?purpose=annotation")
+    .then((response) => response.json())
+    .then((data) => setAnnotationTaskHistory(data.tasks || []))
+    .catch(() => setAnnotationTaskHistory([]));
+}, [showTaskHistory, annotationTask?.status]);
 
 useEffect(() => {
   if (!editMode || !annotationSuggestions.length || !item?.id) return;
@@ -471,13 +491,14 @@ const runAnnotationAlgorithm = async () => {
       trackId: selectedAnn.track_id || `track-${String(selectedAnn.id).replace(/^tmp_/, "")}`,
     };
     const operation = annotationMode === "segmentation" ? "segment" : "propagate";
+    const selectedSequence = viewerItems.slice(index);
     const input = annotationMode === "segmentation"
       ? { projectImageId: item.id, prompt }
-      : { imageIds: viewerItems.map((row) => row.id), startFrame: index, prompts: [prompt] };
+      : { imageIds: selectedSequence.map((row) => row.id), startFrame: 0, frameOffset: index, prompts: [prompt] };
     const operationResponse = await fetch(`/api/annotation/sessions/${session.id}/operations`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ operation, input, parameters: annotationMode === "tracking" ? { direction: "forward" } : {} }),
+      body: JSON.stringify({ operation, input, parameters: {} }),
     });
     const operationData = await operationResponse.json();
     if (!operationResponse.ok) throw new Error(operationData.error || "提交标注任务失败");
@@ -505,9 +526,42 @@ const commitAlgorithmSuggestions = async () => {
   const data = await response.json();
   if (!response.ok) { setAnnotationMessage(data.error || "确认算法标注失败"); return; }
   setAnnotationMessage(`已确认 ${data.accepted} 条标注，并生成新标签版本`);
+  setAnnotationLastCommit(data.labelVersion || null);
   setAnnotationSuggestions([]);
   setAnnotationTask(null);
   onSaved?.();
+};
+
+const reviewAlgorithmSuggestions = async (status, suggestionIds = []) => {
+  if (!annotationSession?.id) return;
+  const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/suggestions`, {
+    method: "PATCH", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status, suggestionIds }),
+  });
+  const data = await response.json();
+  if (!response.ok) { setAnnotationMessage(data.error || "审核标注建议失败"); return; }
+  if (status === "rejected") {
+    const changed = new Set((data.suggestions || []).map((row) => row.id));
+    setAnnotationSuggestions((rows) => rows.filter((row) => !changed.has(row.id)));
+    setSelectedAnnId(null);
+  }
+  setAnnotationMessage(status === "rejected" ? `已拒绝 ${data.suggestions?.length || 0} 条建议` : `已恢复 ${data.suggestions?.length || 0} 条建议`);
+};
+
+const undoAnnotationCommit = async () => {
+  if (!annotationSession?.id || !annotationLastCommit) return;
+  const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/undo-commit`, { method: "POST" });
+  const data = await response.json();
+  if (!response.ok) { setAnnotationMessage(data.error || "撤销提交失败"); return; }
+  setAnnotationLastCommit(null);
+  setAnnotationMessage("已撤销最近一次智能标注提交");
+  onSaved?.();
+};
+
+const loadAnnotationTaskLogs = async (taskId) => {
+  const response = await fetch(`/api/compute/tasks/${taskId}/logs`);
+  const data = await response.json();
+  setAnnotationTaskLogs(response.ok ? (data.logs || []) : []);
 };
 
 const correctTrackingFromCurrentFrame = async () => {
@@ -527,7 +581,7 @@ const correctTrackingFromCurrentFrame = async () => {
     if (!correctionResponse.ok) throw new Error(correctionData.error || "创建修正关键帧失败");
     const operationResponse = await fetch(`/api/annotation/sessions/${annotationSession.id}/operations`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ operation: "correct", input: { imageIds: viewerItems.map((row) => row.id), startFrame: index, prompts: [prompt] }, parameters: { direction: "forward", revision: correctionData.revision.revision } }),
+      body: JSON.stringify({ operation: "correct", input: { imageIds: viewerItems.slice(index).map((row) => row.id), startFrame: 0, frameOffset: index, prompts: [prompt] }, parameters: { revision: correctionData.revision.revision } }),
     });
     const operationData = await operationResponse.json();
     if (!operationResponse.ok) throw new Error(operationData.error || "提交重新跟踪任务失败");
@@ -605,6 +659,7 @@ return (
 <button disabled={!selectedAnnId} onClick={() => { setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId)); setSelectedAnnId(null); }}>删除</button>
 
 <button className="save-ann" onClick={save}>保存</button>
+<button title="计算任务记录" onClick={() => setShowTaskHistory((value) => !value)}><History size={15} /></button>
 
 </div>
 
@@ -619,8 +674,21 @@ return (
 {annotationTask.status === "paused" && <button onClick={() => controlAnnotationTask("resume")}>继续</button>}
 {!["done", "failed", "cancelled"].includes(annotationTask.status) && <button onClick={() => controlAnnotationTask("cancel")}>取消</button>}
 {annotationSuggestions.length > 0 && <button className="primary" onClick={commitAlgorithmSuggestions}>确认结果</button>}
+{annotationSuggestions.length > 0 && <button onClick={() => reviewAlgorithmSuggestions("rejected")}><XCircle size={14} />全部拒绝</button>}
+{selectedAnn?.algorithmSuggestion && <button onClick={() => reviewAlgorithmSuggestions("rejected", [selectedAnn.id])}><XCircle size={14} />拒绝当前</button>}
+{annotationLastCommit && <button onClick={undoAnnotationCommit}><Undo2 size={14} />撤销提交</button>}
 {annotationMode === "tracking" && annotationSession && selectedAnn && <button onClick={correctTrackingFromCurrentFrame}>从此帧修正</button>}
 </div>}
+
+{editMode && showTaskHistory && <aside className="annotation-task-history">
+<header><div><History size={15} /><b>计算任务</b></div><button title="关闭任务记录" onClick={() => setShowTaskHistory(false)}><X size={14} /></button></header>
+<div className="annotation-task-history-list">
+{annotationTaskHistory.length ? annotationTaskHistory.map((task) => <button key={task.id} className={annotationTaskLogs.length && annotationTaskLogs[0]?.task_id === task.id ? "active" : ""} onClick={() => loadAnnotationTaskLogs(task.id)}>
+<span><i className={`task-state ${task.status}`} />{task.operation}</span><em>{task.progress}% · {task.status}</em><small>{task.message}</small>
+</button>) : <p>暂无计算任务</p>}
+</div>
+<div className="annotation-task-log"><b><ScrollText size={14} />任务日志</b>{annotationTaskLogs.length ? annotationTaskLogs.slice(-80).map((row) => <code key={row.id}>{row.line}</code>) : <p>选择任务查看日志</p>}</div>
+</aside>}
 
 <button className="viewer-page-button viewer-page-prev" title="上一张" disabled={sequenceUrl ? index <= 0 : (loadingPage || (!loadPage && index <= 0) || (loadPage && viewerPage <= 1 && index <= 0))} onClick={prev}><ChevronRight size={28} /></button>
 

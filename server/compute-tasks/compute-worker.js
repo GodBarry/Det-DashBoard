@@ -21,7 +21,8 @@ function createComputeWorker({
   }
 
   async function appendLog(taskId, stream, text) {
-    for (const line of String(text || "").split(/\r?\n/).filter(Boolean)) {
+    const cleanText = String(text || "").replace(/\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, "");
+    for (const line of cleanText.split(/[\r\n]+/).filter(Boolean)) {
       await query("INSERT INTO compute_task_logs(task_id,stream,line) VALUES ($1,$2,$3)", [taskId, stream, line.slice(0, 4000)]).catch(() => {});
     }
   }
@@ -84,12 +85,32 @@ function createComputeWorker({
     await query("UPDATE compute_tasks SET progress=20,message='算法资源已就绪',updated_at=now() WHERE id=$1", [task.id]);
     const beforeRun = (await query("SELECT status FROM compute_tasks WHERE id=$1", [task.id])).rows[0];
     if (beforeRun?.status !== "running") return;
+    let lastAdapterProgress = 20;
+    let lastProgressUpdateAt = 0;
+    const reportAdapterProgress = (text) => {
+      const matches = [...String(text || "").matchAll(/propagate in video:\s*(\d{1,3})%/gi)];
+      if (!matches.length) return;
+      const algorithmPercent = Math.max(0, Math.min(100, Number(matches.at(-1)[1])));
+      const progress = Math.min(95, 20 + Math.round(algorithmPercent * 0.75));
+      const now = Date.now();
+      if (progress <= lastAdapterProgress || (progress < 95 && now - lastProgressUpdateAt < 350)) return;
+      lastAdapterProgress = progress;
+      lastProgressUpdateAt = now;
+      query(
+        "UPDATE compute_tasks SET progress=$1,message=$2,updated_at=now() WHERE id=$3 AND status='running'",
+        [progress, `向后跟踪 ${algorithmPercent}%`, task.id],
+      ).catch(() => {});
+    };
+    const handleOutput = (stream, text) => {
+      reportAdapterProgress(text);
+      return appendLog(task.id, stream, text);
+    };
     await runChildProcess(env.python_path, [adapterPath, "--det-dashboard-task", requestPath, "--output", outputPath], {
       cwd: source?.cacheRoot || taskRoot,
       env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [source?.cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
       onSpawn: (child) => query("UPDATE compute_tasks SET process_pid=$1 WHERE id=$2", [child.pid || null, task.id]).catch(() => {}),
-      onStdout: (text) => appendLog(task.id, "stdout", text),
-      onStderr: (text) => appendLog(task.id, "stderr", text),
+      onStdout: (text) => handleOutput("stdout", text),
+      onStderr: (text) => handleOutput("stderr", text),
     });
     const afterRun = (await query("SELECT status FROM compute_tasks WHERE id=$1", [task.id])).rows[0];
     if (afterRun?.status !== "running") return;
@@ -114,6 +135,23 @@ function createComputeWorker({
         `UPDATE compute_tasks SET status='done',progress=100,output_json=$1,message='计算完成',
          process_pid=NULL,finished_at=now(),updated_at=now() WHERE id=$2`, [output, task.id],
       );
+      if (task.adapter_id && task.model_asset_id && task.environment_asset_id) {
+        const model = (await client.query("SELECT model_id FROM model_revisions WHERE id=$1", [task.model_asset_id])).rows[0];
+        await client.query(
+          `INSERT INTO runtime_asset_links
+           (algorithm_asset_id,model_id,model_version_id,python_env_id,dataset_project_id,last_success_job_id,success_count,last_metrics_json,last_success_at)
+           VALUES ($1,$2,$3,$4,$5,$6,1,$7,now())
+           ON CONFLICT (
+             COALESCE(algorithm_asset_id,'00000000-0000-0000-0000-000000000000'::uuid),
+             COALESCE(model_version_id,'00000000-0000-0000-0000-000000000000'::uuid),
+             COALESCE(python_env_id,'00000000-0000-0000-0000-000000000000'::uuid),
+             COALESCE(dataset_project_id,'00000000-0000-0000-0000-000000000000'::uuid)
+           ) DO UPDATE SET success_count=runtime_asset_links.success_count+1,last_success_job_id=EXCLUDED.last_success_job_id,
+             last_metrics_json=EXCLUDED.last_metrics_json,last_success_at=now()`,
+          [task.adapter_id, model?.model_id || null, task.model_asset_id, task.environment_asset_id,
+            input.projectId || null, task.id, { purpose: task.purpose, operation: task.operation, suggestionCount: output.suggestions?.length || 0 }],
+        ).catch(() => {});
+      }
     });
   }
 

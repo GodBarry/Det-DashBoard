@@ -24,9 +24,18 @@ function createAnnotationRoutes({ readBody, sendJson, annotationService, compute
       sendJson(res, { suggestions: await annotationService.suggestions(suggestionsMatch[1], actor) });
       return true;
     }
+    if (method === "PATCH" && suggestionsMatch) {
+      sendJson(res, { suggestions: await annotationService.reviewSuggestions(suggestionsMatch[1], await readBody(req), actor) });
+      return true;
+    }
     const commitMatch = pathname.match(/^\/api\/annotation\/sessions\/([^/]+)\/commit$/);
     if (method === "POST" && commitMatch) {
       sendJson(res, await annotationService.commitSuggestions(commitMatch[1], await readBody(req), actor));
+      return true;
+    }
+    const undoCommitMatch = pathname.match(/^\/api\/annotation\/sessions\/([^/]+)\/undo-commit$/);
+    if (method === "POST" && undoCommitMatch) {
+      sendJson(res, await annotationService.undoCommit(undoCommitMatch[1], actor));
       return true;
     }
     if (method === "GET" && pathname === "/api/compute/tasks") {

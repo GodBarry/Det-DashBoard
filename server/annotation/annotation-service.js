@@ -69,16 +69,28 @@ function createAnnotationService({ query, transaction, computeTaskService, resou
     });
   }
 
-    async function suggestions(sessionId, actor) {
+  async function suggestions(sessionId, actor) {
       await assertSession(sessionId, actor);
       return (await query(
       `SELECT * FROM (
          SELECT DISTINCT ON (project_image_id, track_id) *
          FROM annotation_suggestions
-         WHERE session_id=$1 AND status <> 'superseded'
+         WHERE session_id=$1 AND status IN ('suggested','accepted')
          ORDER BY project_image_id, track_id, revision DESC, created_at DESC
        ) latest ORDER BY frame_index, track_id`, [sessionId],
       )).rows;
+  }
+
+  async function reviewSuggestions(sessionId, body, actor) {
+    await assertSession(sessionId, actor, "write");
+    const ids = Array.isArray(body.suggestionIds) ? body.suggestionIds.filter(Boolean) : [];
+    const status = body.status === "rejected" ? "rejected" : "suggested";
+    const params = [sessionId, status];
+    const selection = ids.length ? (params.push(ids), "AND id=ANY($3::uuid[])") : "";
+    return (await query(
+      `UPDATE annotation_suggestions SET status=$2,updated_at=now()
+       WHERE session_id=$1 AND status <> 'superseded' ${selection} RETURNING *`, params,
+    )).rows;
   }
 
   async function commitSuggestions(sessionId, body, actor) {
@@ -124,12 +136,36 @@ function createAnnotationService({ query, transaction, computeTaskService, resou
       }
       if (rows.length) await client.query(`UPDATE annotation_suggestions SET status='accepted',updated_at=now() WHERE id=ANY($1::uuid[])`, [rows.map((row) => row.id)]);
       await client.query("UPDATE projects SET active_label_version_id=$1,updated_at=now() WHERE id=$2", [nextVersion.id, session.project_id]);
-      await client.query("UPDATE annotation_sessions SET status='committed',updated_at=now() WHERE id=$1", [sessionId]);
+      await client.query(
+        `UPDATE annotation_sessions SET status='committed',
+         settings_json=COALESCE(settings_json,'{}'::jsonb) || $2::jsonb,updated_at=now() WHERE id=$1`,
+        [sessionId, JSON.stringify({ committedLabelVersionId: nextVersion.id, previousLabelVersionId: project?.active_label_version_id || null })],
+      );
       return { labelVersion: nextVersion, accepted: rows.length };
     });
   }
 
-  return { createSession, runOperation, correctTrack, suggestions, commitSuggestions, assertSession };
+  async function undoCommit(sessionId, actor) {
+    const session = await assertSession(sessionId, actor, "write");
+    const settings = typeof session.settings_json === "string" ? JSON.parse(session.settings_json || "{}") : (session.settings_json || {});
+    const committedId = settings.committedLabelVersionId;
+    if (!committedId) throw httpError(409, "该会话没有可撤销的提交");
+    return transaction(async (client) => {
+      const project = (await client.query("SELECT active_label_version_id FROM projects WHERE id=$1 FOR UPDATE", [session.project_id])).rows[0];
+      if (String(project?.active_label_version_id || "") !== String(committedId)) throw httpError(409, "项目已切换到其他标签版本，不能直接撤销");
+      await client.query("UPDATE projects SET active_label_version_id=$1,updated_at=now() WHERE id=$2", [settings.previousLabelVersionId || null, session.project_id]);
+      await client.query("DELETE FROM label_versions WHERE id=$1 AND project_id=$2", [committedId, session.project_id]);
+      await client.query("UPDATE annotation_suggestions SET status='suggested',updated_at=now() WHERE session_id=$1 AND status='accepted'", [sessionId]);
+      await client.query(
+        `UPDATE annotation_sessions SET status='active',
+         settings_json=(COALESCE(settings_json,'{}'::jsonb) - 'committedLabelVersionId' - 'previousLabelVersionId'),updated_at=now() WHERE id=$1`,
+        [sessionId],
+      );
+      return { restoredLabelVersionId: settings.previousLabelVersionId || null };
+    });
+  }
+
+  return { createSession, runOperation, correctTrack, suggestions, reviewSuggestions, commitSuggestions, undoCommit, assertSession };
 }
 
 module.exports = { createAnnotationService };
