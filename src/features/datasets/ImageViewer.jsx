@@ -5,7 +5,6 @@ import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { prefetchViewerWindow, setViewerAnnotations, useViewerAnnotations } from "../media/viewerMediaRepository.js";
-import { useViewerNavigation } from "../media/useViewerNavigation.js";
 function labelColor(label = "") {
 return categoryColor(label);
 }
@@ -159,12 +158,17 @@ const [showTaskHistory, setShowTaskHistory] = useState(false);
 const [annotationTaskHistory, setAnnotationTaskHistory] = useState([]);
 const [annotationTaskLogs, setAnnotationTaskLogs] = useState([]);
 const [annotationLastCommit, setAnnotationLastCommit] = useState(null);
-const [autoSave, setAutoSave] = useState(false);
 const [replaceOverlaps, setReplaceOverlaps] = useState(false);
 const [overlapIou, setOverlapIou] = useState(0.5);
-const autoSavedDraftRef = useRef("");
 const [showSupplementDialog, setShowSupplementDialog] = useState(false);
 const [supplementCount, setSupplementCount] = useState(3);
+const [operationStatus, setOperationStatus] = useState("浏览图片");
+const [draftDirty, setDraftDirty] = useState(false);
+const draftRevisionRef = useRef(0);
+const lastWheelScaleRef = useRef(1.5);
+const lastTrackingAnchorRef = useRef(null);
+const pendingNavigationStatusRef = useRef("");
+const navigationBusyRef = useRef(false);
 
 const [tool, setTool] = useState("select");
 
@@ -198,32 +202,17 @@ useEffect(() => {
 
 useEffect(() => {
 
-setScale(1);
-
-setPan({ x: 0, y: 0 });
-
-setEditMode(false);
-
-setAnnotationMode("");
-
-setAnnotationSession(null);
-
-setAnnotationTask(null);
-
-setAnnotationMessage("");
-setAnnotationSuggestions([]);
-
-setTool("select");
-
-setDraft([]);
+setDraft(annotations.map((annotation) => ({ ...annotation })));
+setDraftDirty(false);
+draftRevisionRef.current = 0;
 
 setSelectedAnnId(null);
 setSelectedAnnIds([]);
 
-setDefaultLabel("");
-
 setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.image_height || 1) });
 setLoadedItemId(null);
+setOperationStatus(pendingNavigationStatusRef.current || (editMode ? "选择或调整已有标签；按 B 开始画框" : "浏览图片；A / D 或方向键切换"));
+pendingNavigationStatusRef.current = "";
 
 }, [item?.id]);
 
@@ -294,6 +283,7 @@ useEffect(() => {
         const suggestionResponse = await fetch(`/api/annotation/sessions/${annotationSession.id}/suggestions`);
         const suggestionData = await suggestionResponse.json();
         if (!stopped) setAnnotationSuggestions(suggestionData.suggestions || []);
+        if (!stopped) setOperationStatus(`计算完成，生成 ${suggestionData.suggestions?.length || 0} 个标注结果`);
       }
     } catch (error) {
       if (!stopped) setAnnotationMessage(error.message);
@@ -327,48 +317,62 @@ useEffect(() => {
 }, [annotationSuggestions, item?.id, editMode, replaceOverlaps, overlapIou]);
 
 useEffect(() => {
-  if (editMode) return;
+  if (editMode && draftDirty) return;
   setDraft(annotations.map((annotation) => ({ ...annotation })));
-  setDefaultLabel(annotations[0]?.label || "");
-}, [annotations, editMode, item?.id]);
-
-useViewerNavigation({
-  enabled: !editMode,
-  length: viewerItems.length,
-  setIndex,
-  onEscape: () => editMode ? setSelectedAnnId(null) : (onPageChange?.(viewerPage), onClose()),
-});
+  if (!defaultLabel) setDefaultLabel(annotations[0]?.label || "");
+}, [annotations, editMode, draftDirty, item?.id]);
 
 useEffect(() => {
   const onDelete = (event) => {
     if (!editMode || !selectedAnnId || !["Delete", "Backspace"].includes(event.key)) return;
     const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId];
+    markDraftDirty();
     setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id)));
     setSelectedAnnId(null);
     setSelectedAnnIds([]);
+    setOperationStatus(`已删除 ${ids.length} 个标签，正在保存`);
   };
   window.addEventListener("keydown", onDelete);
   return () => window.removeEventListener("keydown", onDelete);
 }, [editMode, selectedAnnId, selectedAnnIds]);
 
-useEffect(() => {
-  const onModeEscape = (event) => {
-    if (event.key !== "Escape" || !editMode) return;
-    setAnnotationMode("");
-    setTool("select");
-    setAnnotationMessage("");
-  };
-  window.addEventListener("keydown", onModeEscape);
-  return () => window.removeEventListener("keydown", onModeEscape);
-}, [editMode]);
+const zoom = (delta) => setScale((value) => {
+  const nextScale = Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2))));
+  if (nextScale !== 1) lastWheelScaleRef.current = nextScale;
+  setOperationStatus(`缩放比例 ${Math.round(nextScale * 100)}%`);
+  return nextScale;
+});
 
-const zoom = (delta) => setScale((value) => Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2)))));
+const fitImage = () => {
+  setScale(1);
+  setPan({ x: 0, y: 0 });
+  setOperationStatus("已恢复适应窗口显示");
+};
+
+const toggleZoomMode = () => {
+  if (Math.abs(scale - 1) > 0.01) fitImage();
+  else {
+    const nextScale = Math.max(1.1, lastWheelScaleRef.current || 1.5);
+    setScale(nextScale);
+    setOperationStatus(`已恢复滚轮缩放比例 ${Math.round(nextScale * 100)}%`);
+  }
+};
+
+const persistBeforeNavigation = async () => {
+  if (!editMode || !draftDirty) return true;
+  const count = draft.filter((ann) => !ann.promptOnly).length;
+  const name = item.display_name;
+  const saved = await save({ exit: false, announce: false });
+  if (saved) pendingNavigationStatusRef.current = `已保存标签 ${count} 个到图片 ${name}`;
+  return saved;
+};
 
 const movePage = async (delta) => {
   if (sequenceUrl) return;
   const targetPage = viewerPage + delta;
   const totalPages = Math.max(1, Math.ceil(Number(totalItems || 0) / Math.max(1, Number(pageSize) || 48)));
   if (!loadPage || targetPage < 1 || targetPage > totalPages || loadingPage) return;
+  if (!await persistBeforeNavigation()) return;
   setLoadingPage(true);
   try {
     const nextItems = await loadPage(targetPage);
@@ -379,8 +383,20 @@ const movePage = async (delta) => {
     }
   } finally { setLoadingPage(false); }
 };
-const prev = () => index > 0 ? setIndex(index - 1) : movePage(-1);
-const next = () => index < viewerItems.length - 1 ? setIndex(index + 1) : movePage(1);
+const navigateBy = async (delta) => {
+  if (navigationBusyRef.current) return;
+  navigationBusyRef.current = true;
+  try {
+  if (delta < 0 && index <= 0) return movePage(-1);
+  if (delta > 0 && index >= viewerItems.length - 1) return movePage(1);
+  if (!await persistBeforeNavigation()) return;
+  setIndex((value) => Math.max(0, Math.min(viewerItems.length - 1, value + delta)));
+  } finally {
+    navigationBusyRef.current = false;
+  }
+};
+const prev = () => navigateBy(-1);
+const next = () => navigateBy(1);
 
 const width = Number(item.image_width || naturalSize.width || 1);
 
@@ -396,6 +412,29 @@ const metadata = imageMetadata(item, shownAnnotations);
 
 const selectedAnn = draft.find((ann) => ann.id === selectedAnnId);
 const selectedAnnRows = draft.filter((ann) => selectedAnnIds.includes(ann.id));
+
+useEffect(() => {
+  if (annotationMode !== "tracking" || scale <= 1.01) return undefined;
+  const tracked = selectedAnn || [...draft].reverse().find((ann) => ann.algorithmSuggestion && ann.track_id);
+  if (!tracked) return undefined;
+  const frame = window.requestAnimationFrame(() => {
+    const stage = document.querySelector(".dataset-image-dialog .viewer-stage")?.getBoundingClientRect();
+    const imageRect = document.querySelector(".dataset-image-dialog .viewer-image-wrap")?.getBoundingClientRect();
+    if (!stage || !imageRect) return;
+    const box = {
+      left: imageRect.left + (Number(tracked.bbox_x) / width) * imageRect.width,
+      top: imageRect.top + (Number(tracked.bbox_y) / height) * imageRect.height,
+      right: imageRect.left + ((Number(tracked.bbox_x) + Number(tracked.bbox_w)) / width) * imageRect.width,
+      bottom: imageRect.top + ((Number(tracked.bbox_y) + Number(tracked.bbox_h)) / height) * imageRect.height,
+    };
+    if (box.left < stage.left || box.top < stage.top || box.right > stage.right || box.bottom > stage.bottom) {
+      setScale(1);
+      setPan({ x: 0, y: 0 });
+      setOperationStatus("跟踪框超出可视区域，已自动恢复适应窗口");
+    }
+  });
+  return () => window.cancelAnimationFrame(frame);
+}, [index, annotationSuggestions.length]);
 
 const pointFromEvent = (event) => {
 
@@ -415,7 +454,15 @@ y: Math.max(0, Math.min(height, ((event.clientY - rect.top) / rect.height) * hei
 
 };
 
-const updateAnn = (id, patch) => setDraft((rows) => rows.map((ann) => ann.id === id ? { ...ann, ...patch } : ann));
+const markDraftDirty = () => {
+  draftRevisionRef.current += 1;
+  setDraftDirty(true);
+};
+
+const updateAnn = (id, patch) => {
+  if (!draft.find((ann) => ann.id === id)?.promptOnly) markDraftDirty();
+  setDraft((rows) => rows.map((ann) => ann.id === id ? { ...ann, ...patch } : ann));
+};
 
 const updateSelectedGeometry = (patch) => {
   if (!selectedAnnId) return;
@@ -436,48 +483,45 @@ return { bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(
 
 };
 
-const save = async ({ exit = true } = {}) => {
+const save = async ({ exit = false, announce = true } = {}) => {
+
+const savedRows = draft.filter((ann) => !ann.promptOnly);
+const savedRevision = draftRevisionRef.current;
 
 if (saveAnnotations) {
 
 try {
 
-const data = await saveAnnotations(draft.filter((ann) => !ann.promptOnly));
+const data = await saveAnnotations(savedRows);
 
 const annotations = data?.annotations || draft;
 
 setViewerAnnotations(item.id, annotations);
-setDraft(annotations.map((ann) => ({ ...ann })));
+if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
-
-setAnnotationMode("");
-
-setAnnotationSession(null);
-
-setAnnotationTask(null);
-
-setAnnotationMessage("");
+if (draftRevisionRef.current === savedRevision) setDraftDirty(false);
+if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
+return true;
 
 } catch (error) {
 
 window.alert("提交失败: " + error.message);
+return false;
 
 }
 
-return;
-
 }
 
-fetch(`/api/project-images/${item.id}/annotations/save`, {
+return fetch(`/api/project-images/${item.id}/annotations/save`, {
 
 method: "POST",
 
 headers: { "content-type": "application/json" },
 
-body: JSON.stringify({ annotations: draft.filter((ann) => !ann.promptOnly) }),
+body: JSON.stringify({ annotations: savedRows }),
 
 })
 
@@ -488,25 +532,26 @@ body: JSON.stringify({ annotations: draft.filter((ann) => !ann.promptOnly) }),
 const annotations = data.annotations || [];
 
 setViewerAnnotations(item.id, annotations);
-setDraft(annotations.map((ann) => ({ ...ann })));
+if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
+if (draftRevisionRef.current === savedRevision) setDraftDirty(false);
+if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
+return true;
 
 })
 
-.catch((error) => window.alert("保存失败: " + error.message));
+.catch((error) => { window.alert("保存失败: " + error.message); return false; });
 
 };
 
 useEffect(() => {
-  if (!autoSave || !editMode || !draft.length) return undefined;
-  const serialized = JSON.stringify(draft.filter((ann) => !ann.promptOnly));
-  if (serialized === autoSavedDraftRef.current) return undefined;
-  const timer = window.setTimeout(() => { autoSavedDraftRef.current = serialized; save({ exit: false }); }, 700);
+  if (!editMode || !draftDirty || editDrag || annotationSuggestions.length) return undefined;
+  const timer = window.setTimeout(() => save({ exit: false }), 650);
   return () => window.clearTimeout(timer);
-}, [autoSave, editMode, draft]);
+}, [editMode, draftDirty, editDrag, draft, annotationSuggestions.length]);
 
 const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation = null } = {}) => {
   if (annotationMode === "manual") return;
@@ -516,6 +561,7 @@ const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation =
   const projectId = item.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
   if (!projectId) { setAnnotationMessage("无法确定当前数据集项目"); return; }
   setAnnotationMessage("正在创建标注计算任务...");
+  setOperationStatus(annotationMode === "segmentation" ? "正在根据提示框生成分割结果" : "正在启动目标跟踪");
   try {
     let session = annotationSession;
     if (!session || session.mode !== annotationMode
@@ -558,8 +604,11 @@ const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation =
     if (!operationResponse.ok) throw new Error(operationData.error || "提交标注任务失败");
     setAnnotationTask(operationData.task);
     setAnnotationMessage(operation === "segment" ? "分割任务已提交" : "跟踪任务已提交");
+    setOperationStatus(operation === "segment" ? "分割任务运行中，结果返回后将自动保存" : "目标跟踪运行中；按空格暂停");
+    if (operation === "propagate") lastTrackingAnchorRef.current = { imageId: item.id, annotationId: activePrompt.id, index };
   } catch (error) {
     setAnnotationMessage(error.message);
+    setOperationStatus(`操作失败：${error.message}`);
   }
 };
 
@@ -570,6 +619,7 @@ const controlAnnotationTask = async (action) => {
   if (!response.ok) { setAnnotationMessage(data.error || "任务操作失败"); return; }
   setAnnotationTask(data.task);
   setAnnotationMessage(data.task.message);
+  setOperationStatus(action === "pause" ? "跟踪已暂停；空格继续，或选择其他框后空格重新跟踪" : action === "resume" ? "跟踪已继续；按空格暂停" : data.task.message);
 };
 
 const commitAlgorithmSuggestions = async () => {
@@ -580,6 +630,7 @@ const commitAlgorithmSuggestions = async () => {
   const data = await response.json();
   if (!response.ok) { setAnnotationMessage(data.error || "确认算法标注失败"); return; }
   setAnnotationMessage(`已确认 ${data.accepted} 条标注，并生成新标签版本`);
+  setOperationStatus(`已自动保存分割或跟踪结果 ${data.accepted} 个`);
   setAnnotationLastCommit(data.labelVersion || null);
   setAnnotationSuggestions([]);
   setAnnotationTask(null);
@@ -587,9 +638,9 @@ const commitAlgorithmSuggestions = async () => {
 };
 
 useEffect(() => {
-  if (!autoSave || !annotationSession?.id || !annotationSuggestions.length) return;
+  if (!annotationSession?.id || !annotationSuggestions.length) return;
   commitAlgorithmSuggestions();
-}, [autoSave, annotationSession?.id, annotationSuggestions.length]);
+}, [annotationSession?.id, annotationSuggestions.length]);
 
 const reviewAlgorithmSuggestions = async (status, suggestionIds = []) => {
   if (!annotationSession?.id) return;
@@ -652,6 +703,110 @@ const correctTrackingFromCurrentFrame = async () => {
   }
 };
 
+const selectAnnotationMode = (mode) => {
+  const leaving = annotationMode === mode;
+  setAnnotationMode(leaving ? "" : mode);
+  setTool("select");
+  setEditDrag(null);
+  setOperationStatus(leaving
+    ? "已退出当前标注模式，可继续选择和调整标签"
+    : `已进入${mode === "manual" ? "手动" : mode === "segmentation" ? "分割" : "跟踪"}标注模式；按 B 开始${mode === "manual" ? "画框" : "绘制提示框"}`);
+};
+
+const toggleDrawTool = () => {
+  if (!annotationMode) return;
+  if (tool === "draw") {
+    if (editDrag?.type === "draw") {
+      setDraft((rows) => rows.filter((row) => row.id !== editDrag.id));
+      setSelectedAnnId(null);
+      setSelectedAnnIds([]);
+      setEditDrag(null);
+    }
+    setTool("select");
+    setOperationStatus(annotationMode === "manual" ? "已取消画框" : "已取消提示框");
+    return;
+  }
+  setTool("draw");
+  setOperationStatus(annotationMode === "manual" ? "画框已启用：在图像上按下并拖动" : "提示框已启用：框选目标后自动计算");
+};
+
+const toggleTrackingBySpace = async () => {
+  if (!editMode || annotationMode !== "tracking") return;
+  if (["pending", "running"].includes(annotationTask?.status)) {
+    await controlAnnotationTask("pause");
+    return;
+  }
+  if (annotationTask?.status === "paused") {
+    const anchor = lastTrackingAnchorRef.current;
+    const selectedChanged = selectedAnn && (!anchor || anchor.imageId !== item.id || anchor.annotationId !== selectedAnn.id);
+    if (selectedChanged) await runAnnotationAlgorithm();
+    else await controlAnnotationTask("resume");
+    return;
+  }
+  if (selectedAnn) await runAnnotationAlgorithm();
+  else setOperationStatus("请先选择一个标签框，再按空格开始跟踪");
+};
+
+const exitEditing = async () => {
+  if (draftDirty && !await save({ exit: false })) return;
+  setEditMode(false);
+  setAnnotationMode("");
+  setTool("select");
+  setOperationStatus("已退出编辑");
+};
+
+useEffect(() => {
+  const onKeyDown = (event) => {
+    const target = event.target;
+    const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+    const key = String(event.key || "").toLowerCase();
+    if (editMode && event.ctrlKey && key === "s") {
+      event.preventDefault();
+      save({ exit: false });
+      return;
+    }
+    if (!typing && (["arrowleft", "a"].includes(key) || ["arrowright", "d"].includes(key))) {
+      event.preventDefault();
+      navigateBy(["arrowright", "d"].includes(key) ? 1 : -1);
+      return;
+    }
+    if (typing) return;
+    if (key === "b" && editMode && annotationMode) {
+      event.preventDefault();
+      toggleDrawTool();
+      return;
+    }
+    if (key === "v") {
+      event.preventDefault();
+      toggleZoomMode();
+      return;
+    }
+    if (event.code === "Space" && editMode && annotationMode === "tracking") {
+      event.preventDefault();
+      toggleTrackingBySpace();
+      return;
+    }
+    if (key === "escape") {
+      if (tool === "draw") toggleDrawTool();
+      else if (annotationMode) selectAnnotationMode(annotationMode);
+      else if (!editMode) { onPageChange?.(viewerPage); onClose(); }
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
+  return () => window.removeEventListener("keydown", onKeyDown);
+}, [editMode, annotationMode, tool, editDrag, annotationTask?.status, selectedAnnId, item?.id, index, scale, draftDirty, draft]);
+
+const shortcutItems = [
+  ["上一张图片", "A / ←"],
+  ["下一张图片", "D / →"],
+  [Math.abs(scale - 1) > 0.01 ? "适应窗口" : "恢复滚轮比例", "V"],
+  ["缩放图片", "鼠标滚轮"],
+  ...(editMode ? [["立即保存标签", "Ctrl + S"]] : []),
+  ...(editMode && annotationMode ? [[tool === "draw" ? (annotationMode === "manual" ? "取消画框" : "取消提示框") : (annotationMode === "manual" ? "开始画框" : "开始提示框"), "B"], ["退出当前模式", "Esc"]] : []),
+  ...(editMode && annotationMode === "tracking" ? [[annotationTask?.status === "running" ? "暂停跟踪" : "开始或继续跟踪", "空格"]] : []),
+  ...(editMode && selectedAnnId ? [["删除选中标签", "Delete"], ["多选标签", "Ctrl + 单击"]] : []),
+];
+
 return (
 
 <div className={`viewer-overlay dataset-image-dialog viewer-${viewerTheme} ${editMode ? "viewer-editing" : ""}`} onMouseUp={() => { setDrag(null); setEditDrag(null); }} onMouseLeave={() => { setDrag(null); setEditDrag(null); }}>
@@ -660,7 +815,7 @@ return (
 
 <div className="viewer-context-row">
 
-{!readOnly && !editMode && <button className="edit-toggle" onClick={() => setEditMode(true)}>编辑</button>}
+{!readOnly && !editMode && <button className="edit-toggle" onClick={() => { setEditMode(true); setTool("select"); setOperationStatus("编辑已开启：可选择和调整标签；请选择模式后按 B 画框"); }}>编辑</button>}
 
 <div className="viewer-file-identity">
 
@@ -675,9 +830,9 @@ return (
 <div className="viewer-utility-actions">
 <button onClick={() => zoom(-0.25)}>-</button>
 <button onClick={() => zoom(0.25)}>+</button>
-<button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}>重置</button>
+<button onClick={fitImage}>重置</button>
 <button onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换明暗模式"><Sun size={16} /></button>
-<button onClick={() => { onPageChange?.(viewerPage); onClose(); }}><X size={16} /></button>
+<button onClick={async () => { if (editMode && draftDirty && !await save({ exit: false })) return; onPageChange?.(viewerPage); onClose(); }}><X size={16} /></button>
 </div>
 
 </div>
@@ -687,15 +842,15 @@ return (
 <div className="annotation-action-row">
 
 <div className="annotation-mode-control" role="tablist" aria-label="标注模式">
-<button className={annotationMode === "manual" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "manual" ? "" : "manual"); setTool("draw"); }}><MousePointer2 size={15} />手动标注</button>
-<button className={annotationMode === "segmentation" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "segmentation" ? "" : "segmentation"); setTool("draw"); }}><ScanLine size={15} />分割标注</button>
-<button className={annotationMode === "tracking" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "tracking" ? "" : "tracking"); setTool("draw"); }}><Route size={15} />跟踪标注</button>
+<button className={annotationMode === "manual" ? "active-tool" : ""} onClick={() => selectAnnotationMode("manual")}><MousePointer2 size={15} />手动标注</button>
+<button className={annotationMode === "segmentation" ? "active-tool" : ""} onClick={() => selectAnnotationMode("segmentation")}><ScanLine size={15} />分割标注</button>
+<button className={annotationMode === "tracking" ? "active-tool" : ""} onClick={() => selectAnnotationMode("tracking")}><Route size={15} />跟踪标注</button>
 </div>
 
 {annotationMode && <>
-{annotationMode === "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={() => setTool("draw")}>画框</button>}
+{annotationMode === "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={toggleDrawTool}>画框</button>}
 
-{annotationMode && annotationMode !== "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={() => setTool("draw")}>提示框</button>}
+{annotationMode && annotationMode !== "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={toggleDrawTool}>提示框</button>}
 
 <input className="label-input" value={defaultLabel} onChange={(event) => setDefaultLabel(event.target.value)} placeholder="标签" />
 
@@ -714,19 +869,18 @@ return (
 {compatibleAnnotationEnvironments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
 </select>}
 
-{annotationMode === "tracking" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => runAnnotationAlgorithm()}>开始跟踪</button>}
+{annotationMode === "tracking" && <button className="run-annotation-method" disabled={(!selectedAnn && !["pending", "running", "paused"].includes(annotationTask?.status)) || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={toggleTrackingBySpace}>{["pending", "running"].includes(annotationTask?.status) ? "暂停跟踪" : annotationTask?.status === "paused" ? "继续跟踪" : "开始跟踪"}</button>}
 {annotationMode === "tracking" && <button title="从原视频补充过渡帧后重新跟踪" disabled={!selectedAnn || index >= viewerItems.length - 1 || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => setShowSupplementDialog(true)}><Film size={15} />补帧跟踪</button>}
 
-<button disabled={!selectedAnnId} onClick={() => { const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]; setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id))); setSelectedAnnId(null); setSelectedAnnIds([]); }}>删除</button>
+<button disabled={!selectedAnnId} onClick={() => { const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]; markDraftDirty(); setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id))); setSelectedAnnId(null); setSelectedAnnIds([]); setOperationStatus(`已删除 ${ids.length} 个标签，正在保存`); }}>删除</button>
 
-<label className="annotation-inline-toggle"><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} />自动保存</label>
 <label className="annotation-inline-toggle"><input type="checkbox" checked={replaceOverlaps} onChange={(event) => setReplaceOverlaps(event.target.checked)} />覆盖重叠</label>
 <label className="annotation-iou-control">IoU <input type="number" min="0" max="1" step="0.05" value={overlapIou} onChange={(event) => setOverlapIou(Math.max(0, Math.min(1, Number(event.target.value) || 0)))} /></label>
 
-<button className="save-ann" onClick={() => save()}>保存</button>
+<button className="save-ann" onClick={() => save()}>立即保存</button>
 <button title="计算任务记录" onClick={() => setShowTaskHistory((value) => !value)}><History size={15} /></button>
 </>}
-<button className="edit-exit-button" onClick={() => setEditMode(false)}>退出编辑</button>
+<button className="edit-exit-button" onClick={exitEditing}>退出编辑</button>
 
 </div>
 
@@ -734,7 +888,12 @@ return (
 
 </div>
 
-{editMode && annotationMessage && <div className="annotation-task-status" title={annotationTask?.id || ""}>{annotationMessage}{annotationTask ? ` · ${annotationTask.status}` : ""}</div>}
+<div className={`viewer-operation-status ${editMode ? "editing" : ""}`} role="status"><b>当前操作</b><span>{operationStatus}</span>{annotationTask && <em>{annotationTask.progress || 0}% · {annotationTask.status}</em>}</div>
+
+<aside className="viewer-shortcuts-panel" aria-label="当前可用快捷键">
+<strong>快捷键</strong>
+{shortcutItems.map(([action, key]) => <div key={`${action}-${key}`}><span>{action}</span><kbd>{key}</kbd></div>)}
+</aside>
 
 {editMode && annotationTask && <div className="annotation-task-actions">
 {["pending", "running"].includes(annotationTask.status) && <button onClick={() => controlAnnotationTask("pause")}>暂停</button>}
@@ -775,11 +934,16 @@ return (
 className="viewer-stage"
 
 onWheel={(event) => {
-
-if (!event.ctrlKey) return;
-event.preventDefault();
-
-zoom(event.deltaY < 0 ? 0.2 : -0.2);
+const nextScale = Math.min(6, Math.max(0.25, Number((scale * (event.deltaY < 0 ? 1.12 : 0.89)).toFixed(2))));
+const stageRect = event.currentTarget.getBoundingClientRect();
+const cursor = { x: event.clientX - stageRect.left - stageRect.width / 2, y: event.clientY - stageRect.top - stageRect.height / 2 };
+setPan((current) => ({
+  x: cursor.x - (nextScale / scale) * (cursor.x - current.x),
+  y: cursor.y - (nextScale / scale) * (cursor.y - current.y),
+}));
+setScale(nextScale);
+if (nextScale !== 1) lastWheelScaleRef.current = nextScale;
+setOperationStatus(`滚轮缩放 ${Math.round(nextScale * 100)}%；按 V 切换适应窗口`);
 
 }}
 
@@ -837,12 +1001,21 @@ updateAnn={updateAnn}
 normalizeBox={normalizeBox}
 
 pointFromEvent={pointFromEvent}
+markDraftDirty={markDraftDirty}
+setOperationStatus={setOperationStatus}
 onDrawComplete={(annotation) => {
   if (!annotation) return;
   if (annotationMode === "manual" && replaceOverlaps) {
     setDraft((rows) => rows.filter((row) => row.id === annotation.id || row.promptOnly || annotationIou(row, annotation) < overlapIou));
   }
-  if (annotationMode === "segmentation") runAnnotationAlgorithm({ promptAnnotation: annotation });
+  if (annotationMode === "manual") {
+    markDraftDirty();
+    setOperationStatus(`已完成标签 ${annotation.label}，正在保存到 ${item.display_name}`);
+  }
+  if (annotationMode === "segmentation") {
+    setOperationStatus("提示框已完成，正在生成分割结果");
+    runAnnotationAlgorithm({ promptAnnotation: annotation });
+  }
 }}
 
 />
@@ -879,8 +1052,10 @@ onDrawComplete={(annotation) => {
 <div className="geometry-grid">
 <GeometryField label="X" value={selectedAnn.bbox_x} max={width} onCommit={(value) => updateSelectedGeometry({ bbox_x: value })} />
 <GeometryField label="Y" value={selectedAnn.bbox_y} max={height} onCommit={(value) => updateSelectedGeometry({ bbox_y: value })} />
+{!(editDrag?.type === "draw" && editDrag.id === selectedAnn.id && Number(selectedAnn.bbox_w) <= 1 && Number(selectedAnn.bbox_h) <= 1) && <>
 <GeometryField label="W" value={selectedAnn.bbox_w} max={width} min={1} onCommit={(value) => updateSelectedGeometry({ bbox_w: value })} />
 <GeometryField label="H" value={selectedAnn.bbox_h} max={height} min={1} onCommit={(value) => updateSelectedGeometry({ bbox_h: value })} />
+</>}
 </div>
 
 </div>
@@ -900,7 +1075,7 @@ function GeometryField({ label, value, onCommit, min = 0, max }) {
   return <label>{label}<input type="number" min={min} max={max} step="0.1" value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { commit(); event.currentTarget.blur(); } }} /></label>;
 }
 
-function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete }) {
+function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete, markDraftDirty, setOperationStatus }) {
 
 const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
@@ -937,6 +1112,8 @@ const label = defaultLabel.trim() || "unknown";
 setDefaultLabel(label);
 
 setDraft((rows) => [...rows, { id, label, bbox_x: p.x, bbox_y: p.y, bbox_w: 1, bbox_h: 1, shape_type: "rectangle", promptOnly: annotationMode !== "manual" }]);
+if (annotationMode === "manual") markDraftDirty();
+setOperationStatus(`${annotationMode === "manual" ? "开始画框" : "开始提示框"}：X ${p.x.toFixed(1)}，Y ${p.y.toFixed(1)}`);
 
 setSelectedId(id);
 setSelectedIds([id]);
@@ -959,7 +1136,9 @@ if (!ann) return;
 
 if (editDrag.type === "draw") {
 
-updateAnn(editDrag.id, normalizeBox({ x1: editDrag.start.x, y1: editDrag.start.y, x2: p.x, y2: p.y }));
+const nextBox = normalizeBox({ x1: editDrag.start.x, y1: editDrag.start.y, x2: p.x, y2: p.y });
+updateAnn(editDrag.id, nextBox);
+setOperationStatus(`${annotationMode === "manual" ? "正在画框" : "正在绘制提示框"}：X ${nextBox.bbox_x.toFixed(1)}，Y ${nextBox.bbox_y.toFixed(1)}，W ${nextBox.bbox_w.toFixed(1)}，H ${nextBox.bbox_h.toFixed(1)}`);
 
 }
 
@@ -999,7 +1178,11 @@ updateAnn(editDrag.id, normalizeBox({ x1: left, y1: top, x2: right, y2: bottom }
 
 return (
 
-<svg className="ann-layer editable" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => { if (editDrag?.type === "draw") onDrawComplete?.(annotations.find((ann) => ann.id === editDrag.id)); setEditDrag(null); }}>
+<svg className="ann-layer editable" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => {
+  if (editDrag?.type === "draw") onDrawComplete?.(annotations.find((ann) => ann.id === editDrag.id));
+  if (["move", "resize"].includes(editDrag?.type)) setOperationStatus("标签调整完成，正在保存");
+  setEditDrag(null);
+}}>
 
 {annotations.map((ann) => {
 
@@ -1040,12 +1223,14 @@ if (event.ctrlKey) {
   const nextIds = selectedIds.includes(ann.id) ? selectedIds.filter((id) => id !== ann.id) : [...selectedIds, ann.id];
   setSelectedIds(nextIds);
   setSelectedId(nextIds.at(-1) || null);
+  setOperationStatus(`已选择 ${nextIds.length} 个标签框`);
   return;
 }
 setSelectedIds([ann.id]);
 setSelectedId(ann.id);
 
 setEditDrag({ type: "move", id: ann.id, start: p, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y) } });
+setOperationStatus(`已选择标签 ${ann.label}；拖动调整位置，Ctrl + 单击多选`);
 
 }}
 
@@ -1086,6 +1271,7 @@ event.stopPropagation();
 const start = pointFromEvent(event);
 
 setEditDrag({ type: "resize", id: ann.id, handle, start, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y), w: Number(ann.bbox_w), h: Number(ann.bbox_h) } });
+setOperationStatus(`正在调整标签 ${ann.label} 的尺寸`);
 
 }}
 
