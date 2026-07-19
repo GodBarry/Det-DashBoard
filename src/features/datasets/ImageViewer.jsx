@@ -190,6 +190,10 @@ const [tool, setTool] = useState("select");
 const [draft, setDraft] = useState([]);
 const draftRef = useRef(draft);
 draftRef.current = draft;
+const undoStackRef = useRef([]);
+const undoActionRef = useRef({ key: "", time: 0 });
+const saveQueueRef = useRef(Promise.resolve(true));
+const lastSavedRevisionRef = useRef(0);
 
 const [selectedAnnId, setSelectedAnnId] = useState(null);
 const [selectedAnnIds, setSelectedAnnIds] = useState([]);
@@ -229,6 +233,9 @@ const recoveredRows = Array.isArray(recoveredDraft?.annotations) ? recoveredDraf
 setDraft((recoveredRows || annotations).map((annotation) => ({ ...annotation })));
 setDraftDirty(Boolean(recoveredRows));
 draftRevisionRef.current = recoveredRows ? Number(recoveredDraft.revision || 1) : 0;
+lastSavedRevisionRef.current = recoveredRows ? Math.max(0, draftRevisionRef.current - 1) : 0;
+undoStackRef.current = [];
+undoActionRef.current = { key: "", time: 0 };
 
 setSelectedAnnId(null);
 setSelectedAnnIds([]);
@@ -397,6 +404,7 @@ useEffect(() => {
   const onDelete = (event) => {
     if (!editMode || !selectedAnnId || !["Delete", "Backspace"].includes(event.key)) return;
     const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId];
+    pushUndoSnapshot(`delete:${ids.join(",")}`);
     markDraftDirty();
     setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id)));
     setSelectedAnnId(null);
@@ -430,7 +438,9 @@ const toggleZoomMode = () => {
 };
 
 const persistBeforeNavigation = async () => {
-  if (!editMode || !draftDirty) return true;
+  if (!editMode) return true;
+  if (!await saveQueueRef.current.catch(() => false)) return false;
+  if (draftRevisionRef.current <= lastSavedRevisionRef.current) return true;
   const count = draft.filter((ann) => !ann.promptOnly).length;
   const name = item.display_name;
   const saved = await save({ exit: false, announce: false });
@@ -566,6 +576,33 @@ const markDraftDirty = () => {
   setDraftDirty(true);
 };
 
+const pushUndoSnapshot = (actionKey = "edit") => {
+  const now = Date.now();
+  const previous = undoActionRef.current;
+  if (previous.key === actionKey && now - previous.time < 700) {
+    undoActionRef.current = { key: actionKey, time: now };
+    return;
+  }
+  undoStackRef.current = [...undoStackRef.current.slice(-49), draftRef.current.map((ann) => ({ ...ann }))];
+  undoActionRef.current = { key: actionKey, time: now };
+};
+
+const undoDraft = () => {
+  const previous = undoStackRef.current.at(-1);
+  if (!previous) {
+    setOperationStatus("当前图片没有可撤销的操作");
+    return;
+  }
+  undoStackRef.current = undoStackRef.current.slice(0, -1);
+  undoActionRef.current = { key: "", time: 0 };
+  draftRevisionRef.current += 1;
+  setDraft(previous.map((ann) => ({ ...ann })));
+  setDraftDirty(true);
+  setSelectedAnnId(null);
+  setSelectedAnnIds([]);
+  setOperationStatus("已撤销当前图片的上一步操作，正在保存");
+};
+
 const updateAnn = (id, patch) => {
   const currentRows = draftRef.current;
   const current = currentRows.find((ann) => ann.id === id);
@@ -582,7 +619,10 @@ const updateSelectedLabels = (label) => {
   const ids = selectedAnnIds.length ? selectedAnnIds : (selectedAnnId ? [selectedAnnId] : []);
   if (!ids.length) return;
   const persistent = draft.some((ann) => ids.includes(ann.id) && !ann.promptOnly);
-  if (persistent) markDraftDirty();
+  if (persistent) {
+    pushUndoSnapshot(`labels:${ids.join(",")}`);
+    markDraftDirty();
+  }
   setDraft((rows) => rows.map((ann) => ids.includes(ann.id)
     ? { ...ann, label, ...(ann.algorithmSuggestion ? { algorithmSuggestion: false } : {}) }
     : ann));
@@ -591,6 +631,7 @@ const updateSelectedLabels = (label) => {
 
 const updateSelectedGeometry = (patch) => {
   if (!selectedAnnId) return;
+  pushUndoSnapshot(`geometry:${selectedAnnId}`);
   updateAnn(selectedAnnId, patch);
 };
 
@@ -616,7 +657,7 @@ return { bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(
 
 };
 
-const save = async ({ exit = false, announce = true } = {}) => {
+const performSave = async ({ exit = false, announce = true } = {}) => {
 
 const currentDraft = draftRef.current;
 const savedRows = currentDraft.filter((ann) => !ann.promptOnly && !ann.algorithmSuggestion);
@@ -660,6 +701,7 @@ if (draftRevisionRef.current === savedRevision) {
   setDraftDirty(false);
   if (!transientRows.length) window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
 }
+lastSavedRevisionRef.current = Math.max(lastSavedRevisionRef.current, savedRevision);
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
 
@@ -701,6 +743,7 @@ if (draftRevisionRef.current === savedRevision) {
   setDraftDirty(false);
   if (!transientRows.length) window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
 }
+lastSavedRevisionRef.current = Math.max(lastSavedRevisionRef.current, savedRevision);
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
 
@@ -708,6 +751,12 @@ return true;
 
 .catch((error) => { window.alert("保存失败: " + error.message); return false; });
 
+};
+
+const save = (options = {}) => {
+  const queued = saveQueueRef.current.catch(() => true).then(() => performSave(options));
+  saveQueueRef.current = queued;
+  return queued;
 };
 
 useEffect(() => {
@@ -949,6 +998,11 @@ useEffect(() => {
     const target = event.target;
     const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
     const key = String(event.key || "").toLowerCase();
+    if (editMode && event.ctrlKey && key === "z") {
+      event.preventDefault();
+      undoDraft();
+      return;
+    }
     if (editMode && event.ctrlKey && key === "s") {
       event.preventDefault();
       save({ exit: false });
@@ -990,6 +1044,7 @@ const shortcutItems = [
   ["下一张图片", "D / →"],
   [Math.abs(scale - 1) > 0.01 ? "适应窗口" : "恢复滚轮比例", "V"],
   ["缩放图片", "鼠标滚轮"],
+  ...(editMode ? [["撤销当前图片操作", "Ctrl + Z"]] : []),
   ...(editMode ? [["立即保存标签", "Ctrl + S"]] : []),
   ...(editMode && annotationMode ? [[tool === "draw" ? (annotationMode === "manual" ? "取消画框" : "取消提示框") : (annotationMode === "manual" ? "开始画框" : "开始提示框"), "B"], ["退出当前模式", "Esc"]] : []),
   ...(editMode && annotationMode === "tracking" ? [[annotationTask?.status === "running" ? "暂停跟踪" : "开始或继续跟踪", "空格"]] : []),
@@ -1064,7 +1119,7 @@ return (
 {annotationMode === "tracking" && <button className="run-annotation-method" disabled={(!selectedAnn && !["pending", "running", "paused"].includes(annotationTask?.status)) || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={toggleTrackingBySpace}>{["pending", "running"].includes(annotationTask?.status) ? "暂停跟踪" : annotationTask?.status === "paused" ? "继续跟踪" : "开始跟踪"}</button>}
 {annotationMode === "tracking" && <button title="从原视频补充过渡帧后重新跟踪" disabled={!selectedAnn || index >= viewerItems.length - 1 || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => setShowSupplementDialog(true)}><Film size={15} />补帧跟踪</button>}
 
-<button disabled={!selectedAnnId} onClick={() => { const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]; markDraftDirty(); setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id))); setSelectedAnnId(null); setSelectedAnnIds([]); setOperationStatus(`已删除 ${ids.length} 个标签，正在保存`); }}>删除</button>
+<button disabled={!selectedAnnId} onClick={() => { const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]; pushUndoSnapshot(`delete:${ids.join(",")}`); markDraftDirty(); setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id))); setSelectedAnnId(null); setSelectedAnnIds([]); setOperationStatus(`已删除 ${ids.length} 个标签，正在保存`); }}>删除</button>
 
 <label className="annotation-inline-toggle"><input type="checkbox" checked={replaceOverlaps} onChange={(event) => setReplaceOverlaps(event.target.checked)} />覆盖重叠</label>
 <label className="annotation-iou-control">IoU <input type="number" min="0" max="1" step="0.05" value={overlapIou} onChange={(event) => setOverlapIou(Math.max(0, Math.min(1, Number(event.target.value) || 0)))} /></label>
@@ -1194,6 +1249,7 @@ normalizeBox={normalizeBox}
 
 pointFromEvent={pointFromEvent}
 markDraftDirty={markDraftDirty}
+pushUndoSnapshot={pushUndoSnapshot}
 setOperationStatus={setOperationStatus}
 onSelectAnnotation={selectExistingAnnotation}
 onAdjustComplete={(annotation) => {
@@ -1255,9 +1311,9 @@ onDrawComplete={(annotation) => {
 {selectedAnnRows.length > 1 ? <>
 <label className="bulk-label-field">批量命名<input value={bulkLabel} onChange={(event) => { setBulkLabel(event.target.value); updateSelectedLabels(event.target.value); }} /></label>
 <div className="selected-label-list">
-{selectedAnnRows.map((annotation, rowIndex) => <label key={annotation.id}><span>{rowIndex + 1}</span><input value={annotation.label || ""} onChange={(event) => updateAnn(annotation.id, { label: event.target.value })} /></label>)}
+{selectedAnnRows.map((annotation, rowIndex) => <label key={annotation.id}><span>{rowIndex + 1}</span><input value={annotation.label || ""} onChange={(event) => { pushUndoSnapshot(`label:${annotation.id}`); updateAnn(annotation.id, { label: event.target.value }); }} /></label>)}
 </div>
-</> : <label>标签<input value={selectedAnn.label || ""} onChange={(event) => { updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>}
+</> : <label>标签<input value={selectedAnn.label || ""} onChange={(event) => { pushUndoSnapshot(`label:${selectedAnn.id}`); updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>}
 <div className="geometry-grid">
 <GeometryField label="X" value={selectedAnn.bbox_x} max={width} onCommit={(value) => updateSelectedGeometry({ bbox_x: value })} />
 <GeometryField label="Y" value={selectedAnn.bbox_y} max={height} onCommit={(value) => updateSelectedGeometry({ bbox_y: value })} />
@@ -1284,7 +1340,7 @@ function GeometryField({ label, value, onCommit, min = 0, max }) {
   return <label>{label}<input type="number" min={min} max={max} step="0.1" value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { commit(); event.currentTarget.blur(); } }} /></label>;
 }
 
-function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete, onAdjustComplete, onSelectAnnotation, markDraftDirty, setOperationStatus }) {
+function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete, onAdjustComplete, onSelectAnnotation, markDraftDirty, pushUndoSnapshot, setOperationStatus }) {
 
 const resizeEdges = (ann) => {
   const x = Number(ann.bbox_x || 0);
@@ -1310,6 +1366,8 @@ const p = pointFromEvent(event);
 const id = `tmp_${Date.now()}`;
 
 const label = defaultLabel.trim() || "unknown";
+
+pushUndoSnapshot(annotationMode === "manual" ? "draw" : "prompt");
 
 setDefaultLabel(label);
 
@@ -1418,7 +1476,7 @@ stroke={color}
 
 strokeDasharray={ann.promptOnly ? `${Math.max(4, width / 220)} ${Math.max(5, width / 180)}` : (ann.algorithmSuggestion ? `${Math.max(10, width / 120)} ${Math.max(7, width / 170)}` : undefined)}
 
-strokeWidth={selected ? Math.max(5, width / 550) : Math.max(3, width / 900)}
+strokeWidth={selected ? Math.max(2, width / 1050) : Math.max(1.25, width / 1750)}
 
 onMouseDown={(event) => {
 
@@ -1436,6 +1494,7 @@ if (event.ctrlKey) {
 setSelectedIds([ann.id]);
 setSelectedId(ann.id);
 
+pushUndoSnapshot(`move:${ann.id}`);
 setEditDrag({ type: "move", id: ann.id, start: p, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y) } });
 setOperationStatus(`已选择标签 ${ann.label}；拖动调整位置，Ctrl + 单击多选`);
 
@@ -1471,6 +1530,7 @@ event.stopPropagation();
 
 const start = pointFromEvent(event);
 
+pushUndoSnapshot(`resize:${ann.id}`);
 setEditDrag({ type: "resize", id: ann.id, handle: edge.handle, start, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y), w: Number(ann.bbox_w), h: Number(ann.bbox_h) } });
 setOperationStatus(`正在调整标签 ${ann.label} 的尺寸`);
 

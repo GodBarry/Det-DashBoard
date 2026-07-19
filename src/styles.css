@@ -1381,7 +1381,7 @@ button {
   cursor: default;
 }
 .edit-box.selected {
-  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px rgba(255, 255, 255, .28));
+  filter: drop-shadow(0 0 2px currentColor) drop-shadow(0 0 4px rgba(255, 255, 255, .18));
 }
 .resize-edge.n,
 .resize-edge.s { cursor: ns-resize; }

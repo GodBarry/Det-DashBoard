@@ -408,6 +408,10 @@ function createMultiUserRouter(deps = {}) {
     if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
     return { category: await annotationStandardService.saveCategory(params.categoryId, body, user) };
   });
+  router.put("/api/admin/annotation-standard/terms/:termId", { access: "admin" }, async ({ params, body, user }) => {
+    if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
+    return { term: await annotationStandardService.saveTerm(params.termId, body, user) };
+  });
 
   router.get("/api/annotation-tasks", async ({ query, user }) => collaborationService.listTasks(query, user));
   router.post("/api/annotation-tasks", async ({ body, user }) => collaborationService.createTask(body, user));

@@ -3,6 +3,7 @@ import { ChevronRight, Image as ImageIcon, RotateCcw, Sun, X, ZoomIn, ZoomOut } 
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { prefetchImageWindow } from "../media/viewerMediaRepository.js";
 import { useViewerNavigation } from "../media/useViewerNavigation.js";
+import { useImageViewerTransform } from "../media/useImageViewerTransform.js";
 import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 import { evaluationErrorDescriptions } from "./evaluationPresentation.js";
 
@@ -17,19 +18,15 @@ export function EvaluationSampleViewer({
   const [index, setIndex] = useState(() => Math.max(0, Math.min(rows.length - 1, initialIndex)));
   const [imageFailed, setImageFailed] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [scale, setScale] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [drag, setDrag] = useState(null);
   const [viewerTheme, setViewerTheme] = useState(() => document.querySelector(".app-shell")?.classList.contains("dark") ? "dark" : "light");
   const previousIndexRef = useRef(initialIndex);
   const row = rows[index];
+  const { scale, pan, zoom, fit, stageHandlers } = useImageViewerTransform({ resetKey: row?.project_image_id || row?.projectImageId || row?.id || index });
   const move = (delta) => setIndex((value) => Math.max(0, Math.min(rows.length - 1, value + delta)));
 
   useEffect(() => {
     setImageFailed(false);
     setImageLoaded(false);
-    setScale(1);
-    setPan({ x: 0, y: 0 });
   }, [index]);
 
   useEffect(() => {
@@ -45,7 +42,6 @@ export function EvaluationSampleViewer({
   const imageId = row.project_image_id || row.projectImageId || row.id;
   const imageSrc = imageId ? `/api/project-images/${imageId}/preview?size=1920` : (row.image_url || row.thumb_url || "");
   const boxes = getErrorBoxes(row, filter);
-  const zoom = (delta) => setScale((current) => Math.max(.5, Math.min(6, Number((current + delta).toFixed(2)))));
 
   return (
     <div className={`viewer-overlay evaluation-sample-dialog viewer-${viewerTheme}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -53,13 +49,13 @@ export function EvaluationSampleViewer({
         <div><b>错误样本检查</b><span>{row.display_name || "未命名图像"}</span></div>
         <span className="viewer-counter">{index + 1} / {rows.length}</span>
         <em>{filter === "false_negative" ? "漏检" : filter === "false_positive" ? "误检（虚警）" : filter === "localization" ? "定位偏差" : "类别错误"}</em>
-        <span className="viewer-zoom-tools"><button onClick={() => zoom(-.25)} title="缩小"><ZoomOut size={16} /></button><button onClick={() => zoom(.25)} title="放大"><ZoomIn size={16} /></button><button onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }} title="重置"><RotateCcw size={16} /></button></span>
+        <span className="viewer-zoom-tools"><button onClick={() => zoom(-.25)} title="缩小"><ZoomOut size={16} /></button><button onClick={() => zoom(.25)} title="放大"><ZoomIn size={16} /></button><button onClick={fit} title="重置（V 切换视图）"><RotateCcw size={16} /></button></span>
         <button className="viewer-theme-toggle" onClick={() => setViewerTheme((value) => value === "dark" ? "light" : "dark")} title="切换查看器明暗模式"><Sun size={17} /></button>
         <button onClick={onClose} title="关闭"><X size={18} /></button>
       </div>
       <p className="evaluation-viewer-description">{evaluationErrorDescriptions[filter]}</p>
       <button className="viewer-page-button viewer-page-prev" disabled={index <= 0} onClick={() => move(-1)} title="上一"><ChevronRight size={28} /></button>
-      <div className="viewer-stage shared-image-viewport" onWheel={(event) => { if (!event.ctrlKey) return; event.preventDefault(); zoom(event.deltaY < 0 ? .2 : -.2); }} onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY, pan })} onMouseMove={(event) => drag && setPan({ x: drag.pan.x + event.clientX - drag.x, y: drag.pan.y + event.clientY - drag.y })} onMouseUp={() => setDrag(null)} onMouseLeave={() => setDrag(null)}>
+      <div className="viewer-stage shared-image-viewport" {...stageHandlers}>
         <div className="shared-image-canvas evaluation-sample-large" style={{ "--image-ratio": Number(row.image_width || 16) / Number(row.image_height || 9), aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
           {imageSrc && !imageFailed ? <AuthenticatedImage src={imageSrc} draggable="false" alt={row.display_name || "错误样本"} onLoad={() => setImageLoaded(true)} onError={() => { setImageLoaded(false); setImageFailed(true); }} /> : <div className="evaluation-sample-load-error"><ImageIcon size={34} /><b>图片加载失败</b><span>{imageId ? `图片索引：${imageId}` : "该记录没有关联图片索引"}</span></div>}
           {imageLoaded && boxes.map((box, boxIndex) => {

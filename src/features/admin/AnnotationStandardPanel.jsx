@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BookOpen, Check, ChevronDown, ChevronRight, Image, Save } from "lucide-react";
+import { BookOpen, Check, ChevronDown, ChevronRight, Image, Save, Tags } from "lucide-react";
 
 async function requestJson(url, options) {
   const response = await fetch(url, options);
@@ -57,8 +57,20 @@ const DEFINITION_FIELDS = [
   ["role", "作战角色"], ["dimensions", "尺寸参考"], ["examples", "经典车型"],
 ];
 
+function TermEditor({ term, disabled, onSave }) {
+  const [draft, setDraft] = useState(term);
+  useEffect(() => setDraft(term), [term]);
+  const domainLabel = term.domain === "view" ? "视角" : term.domain === "scene" ? "场景/地点" : "目标";
+  return <article className="standard-term-row">
+    <div><span>{domainLabel}</span><code>{term.code}</code></div>
+    <input aria-label={`${term.code} 标准名称`} value={draft.display_name || ""} onChange={(event) => setDraft({ ...draft, display_name: event.target.value })} />
+    <input aria-label={`${term.code} 别名`} value={(draft.aliases_json || []).join("、")} onChange={(event) => setDraft({ ...draft, aliases_json: event.target.value.split(/[、,，]/).map((value) => value.trim()).filter(Boolean) })} />
+    <button type="button" disabled={disabled} onClick={() => onSave(term, draft)} title="保存术语映射"><Save size={13} /></button>
+  </article>;
+}
+
 export function AnnotationStandardPanel() {
-  const [payload, setPayload] = useState({ version: null, categories: [], examples: [] });
+  const [payload, setPayload] = useState({ version: null, categories: [], examples: [], terms: [] });
   const [selectedId, setSelectedId] = useState("");
   const [form, setForm] = useState(null);
   const [principles, setPrinciples] = useState([]);
@@ -85,7 +97,7 @@ export function AnnotationStandardPanel() {
   const selected = payload.categories.find((row) => row.id === selectedId) || null;
   useEffect(() => {
     if (!selected) return setForm(null);
-    setForm({ nameZh: selected.name_zh, nameEn: selected.name_en, definition: selected.definition_json || {}, rules: selected.rules_json || {} });
+    setForm({ nameZh: selected.name_zh, nameEn: selected.name_en, aliases: selected.aliases_json || [], definition: selected.definition_json || {}, rules: selected.rules_json || {} });
   }, [selectedId, selected]);
 
   const saveCategory = async () => {
@@ -97,6 +109,17 @@ export function AnnotationStandardPanel() {
       });
       setPayload((current) => ({ ...current, categories: current.categories.map((row) => row.id === selected.id ? result.category : row) }));
       setMessage(`已保存“${form.nameZh}”的规范定义`);
+    } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
+  };
+
+  const saveTerm = async (term, patch) => {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await requestJson(`/api/admin/annotation-standard/terms/${term.id}`, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: patch.display_name, aliases: patch.aliases_json || [] }),
+      });
+      setPayload((current) => ({ ...current, terms: current.terms.map((row) => row.id === term.id ? result.term : row) }));
+      setMessage(`已保存术语“${result.term.display_name}”的标准映射`);
     } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
   };
 
@@ -116,7 +139,7 @@ export function AnnotationStandardPanel() {
   return (
     <section className="annotation-standard-panel" aria-label="标注规范管理">
       <header className="standard-summary">
-        <div><h3>典型目标标注规范</h3><p>维护公共类别层级、识别定义和标注示范。当前尚未接入数据导入流程。</p></div>
+        <div><h3>标注规范与术语库</h3><p>维护类别层级、标注规则，以及视角、场景和目标别名到数据库标准代码的映射。</p></div>
         <span className="standard-version"><Check size={14} />{payload.version?.version || "--"} · {payload.version?.status === "published" ? "已发布" : "草稿"}</span>
       </header>
       {error ? <div className="standard-feedback error">{error}</div> : null}
@@ -133,6 +156,7 @@ export function AnnotationStandardPanel() {
               <label><span>中文名称</span><input value={form.nameZh} onChange={(event) => setForm({ ...form, nameZh: event.target.value })} /></label>
               <label><span>英文名称</span><input value={form.nameEn} onChange={(event) => setForm({ ...form, nameEn: event.target.value })} /></label>
             </div>
+            <label className="standard-alias-field"><span>目标别名</span><input value={(form.aliases || []).join("、")} onChange={(event) => setForm({ ...form, aliases: event.target.value.split(/[、,，]/).map((value) => value.trim()).filter(Boolean) })} placeholder="多个别名以顿号分隔" /></label>
             <div className="standard-definition-grid">
               {DEFINITION_FIELDS.map(([key, label]) => <label key={key}><span>{label}</span><textarea value={form.definition[key] || ""} onChange={(event) => setForm({ ...form, definition: { ...form.definition, [key]: event.target.value } })} /></label>)}
             </div>
@@ -149,6 +173,11 @@ export function AnnotationStandardPanel() {
             </label>)}
             <button type="button" className="standard-secondary" disabled={busy || !payload.version} onClick={savePrinciples}><Save size={14} />保存通用原则</button>
           </section>
+          <section className="standard-terms">
+            <h4><Tags size={14} />标准术语映射</h4>
+            <p>数据库保存稳定代码；界面名称与导入别名统一映射到该代码。</p>
+            {(payload.terms || []).map((term) => <TermEditor key={term.id} term={term} disabled={busy} onSave={saveTerm} />)}
+          </section>
           <section className="standard-examples">
             <h4>类别图例 <b>{categoryExamples.length}</b></h4>
             {categoryExamples.length ? categoryExamples.map((example) => <article key={example.id}><strong>{example.title}</strong><small>{example.explanation}</small></article>) : <div className="standard-empty compact">暂无图例。图例对象与正确/错误类型的数据结构已建立，后续接入 MinIO 图片上传。</div>}
@@ -158,4 +187,3 @@ export function AnnotationStandardPanel() {
     </section>
   );
 }
-

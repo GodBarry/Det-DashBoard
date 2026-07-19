@@ -133,7 +133,7 @@ export function useViewerAnnotations(imageId, inlineAnnotations) {
   );
   useEffect(() => {
     if (!imageId) return;
-    if (Array.isArray(inlineAnnotations)) rememberAnnotations(imageId, inlineAnnotations);
+    if (Array.isArray(inlineAnnotations) && !annotationCache.has(imageId)) rememberAnnotations(imageId, inlineAnnotations);
     else loadCurrentAnnotations(imageId).catch(() => {});
   }, [imageId, inlineAnnotations]);
   return cached;

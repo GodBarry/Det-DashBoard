@@ -59,6 +59,18 @@ const DEFINITIONS = {
   },
 };
 
+const TERM_SEED = [
+  ["view", "oblique", "斜视", ["oblique view", "倾斜视角"]],
+  ["view", "nadir", "正射俯视", ["俯视", "正射", "top-down"]],
+  ["view", "aerial", "航拍视角", ["航拍", "aerial view"]],
+  ["view", "ground", "地面视角", ["地面", "ground view"]],
+  ["scene", "urban", "城市", ["city", "城区", "城市场景"]],
+  ["scene", "rural", "乡村", ["countryside", "乡村场景"]],
+  ["scene", "road", "道路", ["公路", "道路场景"]],
+  ["scene", "forest", "森林", ["林地", "woodland"]],
+  ["scene", "desert", "荒漠", ["沙漠", "desert area"]],
+];
+
 function createAnnotationStandardService({ query, audit }) {
   async function ensureSchema() {
     await query(`CREATE TABLE IF NOT EXISTS annotation_standard_versions (
@@ -99,6 +111,22 @@ function createAnnotationStandardService({ query, audit }) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+    await query("ALTER TABLE annotation_standard_categories ADD COLUMN IF NOT EXISTS aliases_json JSONB NOT NULL DEFAULT '[]'::jsonb");
+    await query(`CREATE TABLE IF NOT EXISTS annotation_standard_terms (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      domain TEXT NOT NULL,
+      code TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      aliases_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(domain, code)
+    )`);
+    for (const [domain, code, displayName, aliases] of TERM_SEED) {
+      await query(`INSERT INTO annotation_standard_terms (domain,code,display_name,aliases_json)
+        VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (domain,code) DO NOTHING`, [domain, code, displayName, JSON.stringify(aliases)]);
+    }
     await seedInitialStandard();
   }
 
@@ -140,7 +168,8 @@ function createAnnotationStandardService({ query, audit }) {
        WHERE c.version_id=$1 ORDER BY e.sort_order,e.created_at`,
       [version.id],
     )).rows;
-    return { version, categories, examples };
+    const terms = (await query("SELECT * FROM annotation_standard_terms WHERE active=true ORDER BY domain,display_name")).rows;
+    return { version, categories, examples, terms };
   }
 
   async function updatePrinciples(body, actor) {
@@ -161,11 +190,12 @@ function createAnnotationStandardService({ query, audit }) {
       `UPDATE annotation_standard_categories SET
        name_zh=COALESCE($1,name_zh),name_en=COALESCE($2,name_en),
        definition_json=COALESCE($3::jsonb,definition_json),rules_json=COALESCE($4::jsonb,rules_json),
-       active=COALESCE($5,active),updated_at=now()
-       WHERE id=$6 RETURNING *`,
+       aliases_json=COALESCE($5::jsonb,aliases_json),active=COALESCE($6,active),updated_at=now()
+       WHERE id=$7 RETURNING *`,
       [body.nameZh ?? body.name_zh ?? null, body.nameEn ?? body.name_en ?? null,
         body.definition ? JSON.stringify(body.definition) : null,
         body.rules ? JSON.stringify(body.rules) : null,
+        body.aliases ? JSON.stringify(body.aliases) : null,
         body.active === undefined ? null : Boolean(body.active), categoryId],
     )).rows[0];
     if (!row) throw Object.assign(new Error("annotation category not found"), { statusCode: 404 });
@@ -173,7 +203,17 @@ function createAnnotationStandardService({ query, audit }) {
     return row;
   }
 
-  return { ensureSchema, getStandard, updatePrinciples, saveCategory };
+  async function saveTerm(termId, body, actor) {
+    const aliases = Array.isArray(body.aliases) ? body.aliases.map((value) => String(value).trim()).filter(Boolean) : [];
+    const row = (await query(`UPDATE annotation_standard_terms SET
+      display_name=COALESCE($1,display_name),aliases_json=$2::jsonb,active=COALESCE($3,active),updated_at=now()
+      WHERE id=$4 RETURNING *`, [body.displayName ?? body.display_name ?? null, JSON.stringify(aliases), body.active === undefined ? null : Boolean(body.active), termId])).rows[0];
+    if (!row) throw Object.assign(new Error("annotation term not found"), { statusCode: 404 });
+    await audit?.(actor, "term.update", row.id, { domain: row.domain, code: row.code });
+    return row;
+  }
+
+  return { ensureSchema, getStandard, updatePrinciples, saveCategory, saveTerm };
 }
 
 module.exports = { createAnnotationStandardService };

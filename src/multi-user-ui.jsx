@@ -827,7 +827,7 @@ export function AdminCenter({
     { value: "assets", label: "公共资产", icon: Database, count: assets.length },
     { value: "acl", label: "资产 ACL", icon: KeyRound, count: aclRows.length },
     { value: "audit", label: "审计日志", icon: ListChecks, count: auditLogs.length },
-    { value: "standards", label: "标注规范", icon: BookOpen, count: 1 },
+    { value: "standards", label: "标注规范与术语库", icon: BookOpen, count: 1 },
   ];
 
   return (
