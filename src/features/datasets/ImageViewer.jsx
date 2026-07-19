@@ -188,6 +188,8 @@ const restoredTrackingProjectRef = useRef("");
 const [tool, setTool] = useState("select");
 
 const [draft, setDraft] = useState([]);
+const draftRef = useRef(draft);
+draftRef.current = draft;
 
 const [selectedAnnId, setSelectedAnnId] = useState(null);
 const [selectedAnnIds, setSelectedAnnIds] = useState([]);
@@ -511,7 +513,12 @@ const annotationCounts = shownAnnotations.reduce((rows, annotation) => {
 const metadata = imageMetadata(item, shownAnnotations);
 
 const selectedAnn = draft.find((ann) => ann.id === selectedAnnId);
-const selectedAnnRows = draft.filter((ann) => selectedAnnIds.includes(ann.id));
+const selectedAnnRows = draft.filter((ann) => (selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]).includes(ann.id));
+const [bulkLabel, setBulkLabel] = useState("");
+
+useEffect(() => {
+  setBulkLabel(selectedAnnRows[0]?.label || "");
+}, [selectedAnnIds.join("|"), selectedAnnId]);
 
 useEffect(() => {
   if (annotationMode !== "tracking" || scale <= 1.01) return undefined;
@@ -560,13 +567,39 @@ const markDraftDirty = () => {
 };
 
 const updateAnn = (id, patch) => {
-  if (!draft.find((ann) => ann.id === id)?.promptOnly) markDraftDirty();
-  setDraft((rows) => rows.map((ann) => ann.id === id ? { ...ann, ...patch } : ann));
+  const currentRows = draftRef.current;
+  const current = currentRows.find((ann) => ann.id === id);
+  const relabelGenerated = current?.promptOnly && patch.label !== undefined && currentRows.some((ann) => ann.algorithmSuggestion);
+  if (!current?.promptOnly || relabelGenerated) markDraftDirty();
+  setDraft((rows) => rows.map((ann) => {
+    if (ann.id === id) return { ...ann, ...patch, ...(ann.algorithmSuggestion ? { algorithmSuggestion: false } : {}) };
+    if (relabelGenerated && ann.algorithmSuggestion) return { ...ann, label: patch.label, algorithmSuggestion: false };
+    return ann;
+  }));
+};
+
+const updateSelectedLabels = (label) => {
+  const ids = selectedAnnIds.length ? selectedAnnIds : (selectedAnnId ? [selectedAnnId] : []);
+  if (!ids.length) return;
+  const persistent = draft.some((ann) => ids.includes(ann.id) && !ann.promptOnly);
+  if (persistent) markDraftDirty();
+  setDraft((rows) => rows.map((ann) => ids.includes(ann.id)
+    ? { ...ann, label, ...(ann.algorithmSuggestion ? { algorithmSuggestion: false } : {}) }
+    : ann));
+  setDefaultLabel(label);
 };
 
 const updateSelectedGeometry = (patch) => {
   if (!selectedAnnId) return;
   updateAnn(selectedAnnId, patch);
+};
+
+const selectExistingAnnotation = (annotation) => {
+  if (!annotationMode) {
+    setAnnotationMode("manual");
+    setTool("select");
+    setOperationStatus(`已进入手动标注模式并选择标签 ${annotation.label || "unknown"}`);
+  }
 };
 
 const normalizeBox = (box) => {
@@ -585,8 +618,26 @@ return { bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(
 
 const save = async ({ exit = false, announce = true } = {}) => {
 
-const savedRows = draft.filter((ann) => !ann.promptOnly);
+const currentDraft = draftRef.current;
+const savedRows = currentDraft.filter((ann) => !ann.promptOnly && !ann.algorithmSuggestion);
+const transientRows = currentDraft.filter((ann) => ann.promptOnly || ann.algorithmSuggestion);
 const savedRevision = draftRevisionRef.current;
+const selectedBeforeSave = currentDraft.filter((ann) => (selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]).includes(ann.id));
+const restoreSelection = (annotations) => {
+  const used = new Set();
+  const matchedIds = selectedBeforeSave.map((source) => {
+    const match = annotations.find((target) => !used.has(target.id)
+      && target.label === source.label
+      && Number(target.bbox_x) === Number(source.bbox_x)
+      && Number(target.bbox_y) === Number(source.bbox_y)
+      && Number(target.bbox_w) === Number(source.bbox_w)
+      && Number(target.bbox_h) === Number(source.bbox_h));
+    if (match) used.add(match.id);
+    return match?.id;
+  }).filter(Boolean);
+  setSelectedAnnIds(matchedIds);
+  setSelectedAnnId(matchedIds.at(-1) || null);
+};
 
 if (saveAnnotations) {
 
@@ -597,14 +648,17 @@ const data = await saveAnnotations(savedRows);
 const annotations = data?.annotations || draft;
 
 setViewerAnnotations(item.id, annotations);
-if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) => ({ ...ann })));
+if (draftRevisionRef.current === savedRevision) {
+  setDraft([...annotations.map((ann) => ({ ...ann })), ...transientRows]);
+  restoreSelection(annotations);
+}
 
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
 if (draftRevisionRef.current === savedRevision) {
   setDraftDirty(false);
-  window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
+  if (!transientRows.length) window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
 }
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
@@ -635,14 +689,17 @@ body: JSON.stringify({ annotations: savedRows }),
 const annotations = data.annotations || [];
 
 setViewerAnnotations(item.id, annotations);
-if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) => ({ ...ann })));
+if (draftRevisionRef.current === savedRevision) {
+  setDraft([...annotations.map((ann) => ({ ...ann })), ...transientRows]);
+  restoreSelection(annotations);
+}
 
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
 if (draftRevisionRef.current === savedRevision) {
   setDraftDirty(false);
-  window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
+  if (!transientRows.length) window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
 }
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
@@ -654,14 +711,14 @@ return true;
 };
 
 useEffect(() => {
-  if (!editMode || !draftDirty || editDrag || annotationSuggestions.length) return undefined;
-  const timer = window.setTimeout(() => save({ exit: false }), 650);
+  if (!editMode || !draftDirty || editDrag) return undefined;
+  const timer = window.setTimeout(() => save({ exit: false }), 260);
   return () => window.clearTimeout(timer);
-}, [editMode, draftDirty, editDrag, draft, annotationSuggestions.length]);
+}, [editMode, draftDirty, editDrag, draft]);
 
 useEffect(() => {
-  if (!editMode || !draftDirty || !item?.id) return;
-  const annotations = draft.filter((ann) => !ann.promptOnly);
+  if (!editMode || (!draftDirty && !draft.some((ann) => ann.promptOnly)) || !item?.id) return;
+  const annotations = draft;
   writeStoredJson(`${VIEWER_DRAFT_PREFIX}${item.id}`, {
     imageId: item.id,
     imageName: item.display_name,
@@ -1138,6 +1195,15 @@ normalizeBox={normalizeBox}
 pointFromEvent={pointFromEvent}
 markDraftDirty={markDraftDirty}
 setOperationStatus={setOperationStatus}
+onSelectAnnotation={selectExistingAnnotation}
+onAdjustComplete={(annotation) => {
+  if (annotation?.promptOnly && annotationMode === "segmentation") {
+    setOperationStatus("提示框已调整，正在重新生成分割结果");
+    runAnnotationAlgorithm({ promptAnnotation: annotation });
+  } else {
+    setOperationStatus("标签调整完成，正在保存");
+  }
+}}
 onDrawComplete={(annotation) => {
   if (!annotation) return;
   if (annotationMode === "manual" && replaceOverlaps) {
@@ -1186,7 +1252,12 @@ onDrawComplete={(annotation) => {
 <div className="edit-sidecar">
 
 <header><b>{selectedAnnRows.length > 1 ? `已选择 ${selectedAnnRows.length} 个框` : (selectedAnn.promptOnly ? "分割提示框" : "标注框")}</b><small>Ctrl 多选</small></header>
-<label>标签<input value={selectedAnn.label || ""} onChange={(event) => { updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>
+{selectedAnnRows.length > 1 ? <>
+<label className="bulk-label-field">批量命名<input value={bulkLabel} onChange={(event) => { setBulkLabel(event.target.value); updateSelectedLabels(event.target.value); }} /></label>
+<div className="selected-label-list">
+{selectedAnnRows.map((annotation, rowIndex) => <label key={annotation.id}><span>{rowIndex + 1}</span><input value={annotation.label || ""} onChange={(event) => updateAnn(annotation.id, { label: event.target.value })} /></label>)}
+</div>
+</> : <label>标签<input value={selectedAnn.label || ""} onChange={(event) => { updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>}
 <div className="geometry-grid">
 <GeometryField label="X" value={selectedAnn.bbox_x} max={width} onCommit={(value) => updateSelectedGeometry({ bbox_x: value })} />
 <GeometryField label="Y" value={selectedAnn.bbox_y} max={height} onCommit={(value) => updateSelectedGeometry({ bbox_y: value })} />
@@ -1213,26 +1284,19 @@ function GeometryField({ label, value, onCommit, min = 0, max }) {
   return <label>{label}<input type="number" min={min} max={max} step="0.1" value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { commit(); event.currentTarget.blur(); } }} /></label>;
 }
 
-function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete, markDraftDirty, setOperationStatus }) {
+function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete, onAdjustComplete, onSelectAnnotation, markDraftDirty, setOperationStatus }) {
 
-const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-
-const handlePoint = (ann, handle) => {
-
-const x = Number(ann.bbox_x || 0);
-
-const y = Number(ann.bbox_y || 0);
-
-const w = Number(ann.bbox_w || 1);
-
-const h = Number(ann.bbox_h || 1);
-
-const xs = { w: x, n: x + w / 2, s: x + w / 2, e: x + w, nw: x, sw: x, ne: x + w, se: x + w };
-
-const ys = { n: y, w: y + h / 2, e: y + h / 2, s: y + h, nw: y, ne: y, sw: y + h, se: y + h };
-
-return { x: xs[handle], y: ys[handle] };
-
+const resizeEdges = (ann) => {
+  const x = Number(ann.bbox_x || 0);
+  const y = Number(ann.bbox_y || 0);
+  const w = Number(ann.bbox_w || 1);
+  const h = Number(ann.bbox_h || 1);
+  return [
+    { handle: "n", x1: x, y1: y, x2: x + w, y2: y },
+    { handle: "e", x1: x + w, y1: y, x2: x + w, y2: y + h },
+    { handle: "s", x1: x, y1: y + h, x2: x + w, y2: y + h },
+    { handle: "w", x1: x, y1: y, x2: x, y2: y + h },
+  ];
 };
 
 const beginDraw = (event) => {
@@ -1316,9 +1380,10 @@ updateAnn(editDrag.id, normalizeBox({ x1: left, y1: top, x2: right, y2: bottom }
 
 return (
 
-<svg className="ann-layer editable" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => {
-  if (editDrag?.type === "draw") onDrawComplete?.(annotations.find((ann) => ann.id === editDrag.id));
-  if (["move", "resize"].includes(editDrag?.type)) setOperationStatus("标签调整完成，正在保存");
+<svg className={`ann-layer editable ${tool === "draw" ? "drawing" : "selecting"}`} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => {
+  const completed = annotations.find((ann) => ann.id === editDrag?.id);
+  if (editDrag?.type === "draw") onDrawComplete?.(completed);
+  if (["move", "resize"].includes(editDrag?.type)) onAdjustComplete?.(completed);
   setEditDrag(null);
 }}>
 
@@ -1327,10 +1392,13 @@ return (
 const selected = ann.id === selectedId || selectedIds.includes(ann.id);
 
 const color = labelColor(ann.label);
+const initialDraw = editDrag?.type === "draw" && editDrag.id === ann.id && Number(ann.bbox_w) <= 2 && Number(ann.bbox_h) <= 2;
 
 return (
 
 <g key={ann.id}>
+
+{!initialDraw && <>
 
 <rect
 
@@ -1357,6 +1425,7 @@ onMouseDown={(event) => {
 event.stopPropagation();
 
 const p = pointFromEvent(event);
+onSelectAnnotation?.(ann);
 if (event.ctrlKey) {
   const nextIds = selectedIds.includes(ann.id) ? selectedIds.filter((id) => id !== ann.id) : [...selectedIds, ann.id];
   setSelectedIds(nextIds);
@@ -1376,31 +1445,25 @@ setOperationStatus(`已选择标签 ${ann.label}；拖动调整位置，Ctrl + �
 
 <text x={Number(ann.bbox_x || 0)} y={Math.max(18, Number(ann.bbox_y || 0) - 6)} fill={color} fontSize={Math.max(22, width / 85)}>{ann.label}</text>
 
-{selected && handles.map((handle) => {
+{selected && resizeEdges(ann).map((edge) => (
 
-const p = handlePoint(ann, handle);
+<line
 
-return (
+key={edge.handle}
 
-<rect
+className={`resize-edge ${edge.handle}`}
 
-key={handle}
+x1={edge.x1}
 
-className={`resize-handle ${handle}`}
+y1={edge.y1}
 
-x={p.x - width / 160}
+x2={edge.x2}
 
-y={p.y - width / 160}
+y2={edge.y2}
 
-width={width / 80}
+stroke="transparent"
 
-height={width / 80}
-
-fill="#fff"
-
-stroke={color}
-
-strokeWidth={Math.max(2, width / 1200)}
+strokeWidth={Math.max(12, width / 90)}
 
 onMouseDown={(event) => {
 
@@ -1408,16 +1471,16 @@ event.stopPropagation();
 
 const start = pointFromEvent(event);
 
-setEditDrag({ type: "resize", id: ann.id, handle, start, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y), w: Number(ann.bbox_w), h: Number(ann.bbox_h) } });
+setEditDrag({ type: "resize", id: ann.id, handle: edge.handle, start, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y), w: Number(ann.bbox_w), h: Number(ann.bbox_h) } });
 setOperationStatus(`正在调整标签 ${ann.label} 的尺寸`);
 
 }}
 
 />
 
-);
+))}
 
-})}
+</>}
 
 </g>
 

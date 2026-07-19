@@ -136,5 +136,5 @@ export function useViewerAnnotations(imageId, inlineAnnotations) {
     if (Array.isArray(inlineAnnotations)) rememberAnnotations(imageId, inlineAnnotations);
     else loadCurrentAnnotations(imageId).catch(() => {});
   }, [imageId, inlineAnnotations]);
-  return Array.isArray(inlineAnnotations) ? inlineAnnotations : cached;
+  return cached;
 }

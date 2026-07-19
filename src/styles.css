@@ -1355,6 +1355,8 @@ button {
   cursor: grab;
 }
 .viewer-stage:active { cursor: grabbing; }
+.viewer-editing .viewer-stage,
+.viewer-editing .viewer-stage:active { cursor: default; }
 .viewer-image-wrap {
   position: relative;
   max-width: 92vw;
@@ -1372,22 +1374,19 @@ button {
 }
 .ann-layer.editable {
   pointer-events: auto;
+  cursor: default;
 }
+.ann-layer.editable.drawing { cursor: crosshair; }
 .edit-box {
-  cursor: move;
+  cursor: default;
 }
 .edit-box.selected {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, .38));
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 7px rgba(255, 255, 255, .28));
 }
-.resize-handle {
-  cursor: nwse-resize;
-}
-.resize-handle.n,
-.resize-handle.s { cursor: ns-resize; }
-.resize-handle.e,
-.resize-handle.w { cursor: ew-resize; }
-.resize-handle.ne,
-.resize-handle.sw { cursor: nesw-resize; }
+.resize-edge.n,
+.resize-edge.s { cursor: ns-resize; }
+.resize-edge.e,
+.resize-edge.w { cursor: ew-resize; }
 .edit-sidecar {
   position: fixed;
   right: 16px;
@@ -2734,6 +2733,12 @@ button:disabled:hover {
     grid-template-columns: 260px 276px minmax(700px, 1fr) 340px;
   }
 }
+.edit-sidecar .bulk-label-field input { border-color: rgba(45, 212, 191, .55); box-shadow: 0 0 0 2px rgba(45, 212, 191, .08); }
+.selected-label-list { max-height: 150px; padding-right: 3px; display: grid; gap: 5px; overflow: auto; scrollbar-width: thin; }
+.selected-label-list label { grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 6px; }
+.selected-label-list label > span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; background: rgba(148,163,184,.12); color: #8fa3ae; font-size: 10px; }
+.selected-label-list input { height: 30px; }
+.viewer-light .selected-label-list label > span { background: #eaf1f4; color: #526b78; }
 .edit-sidecar header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid rgba(148,163,184,.18); }
 .edit-sidecar header b { color: #edf4f7; font-size: 13px; }
 .edit-sidecar header small { color: #8fa3ae; font-size: 10px; }
