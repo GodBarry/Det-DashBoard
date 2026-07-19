@@ -46,6 +46,7 @@ const { createMlRoutes } = require("./routes/ml-routes");
 const { createAnnotationRoutes } = require("./routes/annotation-routes");
 const { createComputeTaskService } = require("./compute-tasks/compute-task-service");
 const { createAnnotationService } = require("./annotation/annotation-service");
+const { createAnnotationStandardService } = require("./annotation/annotation-standard-service");
 const { createComputeWorker } = require("./compute-tasks/compute-worker");
 const { createVideoFrameExecutor } = require("./compute-tasks/video-frame-executor");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
@@ -121,6 +122,7 @@ let mlRoutes;
 let annotationRoutes;
 let computeTaskService;
 let annotationService;
+let annotationStandardService;
 let computeWorkerController;
 let videoFrameExecutor;
 let inferenceSubmissionService;
@@ -681,6 +683,17 @@ async function main() {
     }),
   });
   await collaborationService.ensureSchema();
+  annotationStandardService = createAnnotationStandardService({
+    query,
+    audit: (actor, action, resourceId, details) => accessControl.writeAudit({
+      actorUserId: actor.id,
+      action: `annotation_standard.${action}`,
+      resourceType: "annotation_standard",
+      resourceId,
+      details,
+    }),
+  });
+  await annotationStandardService.ensureSchema();
   multiUserRouter = createMultiUserRouter({
     accessControl,
     collaborationService,
@@ -711,6 +724,7 @@ async function main() {
       return (await query("SELECT permission FROM user_permissions WHERE user_id=$1 ORDER BY permission", [userId])).rows.map((item) => item.permission);
     },
     updateUserPermissions: accessControl.setUserPermissions,
+    annotationStandardService,
   });
   await cleanupLegacyHistoryProjects();
   await backfillUnknownScenes();

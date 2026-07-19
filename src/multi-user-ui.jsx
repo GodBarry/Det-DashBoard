@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   Ban,
+  BookOpen,
   Check,
   CheckCircle2,
   ChevronLeft,
@@ -29,6 +30,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { AnnotationStandardPanel } from "./features/admin/AnnotationStandardPanel.jsx";
 
 const DEFAULT_ENDPOINTS = {
   shares: "/api/shares",
@@ -825,6 +827,7 @@ export function AdminCenter({
     { value: "assets", label: "公共资产", icon: Database, count: assets.length },
     { value: "acl", label: "资产 ACL", icon: KeyRound, count: aclRows.length },
     { value: "audit", label: "审计日志", icon: ListChecks, count: auditLogs.length },
+    { value: "standards", label: "标注规范", icon: BookOpen, count: 1 },
   ];
 
   return (
@@ -969,6 +972,7 @@ export function AdminCenter({
           </div>
         </div>
       ) : null}
+      {!loading && section === "standards" ? <AnnotationStandardPanel /> : null}
       {!loading && section === "audit" ? (
         <div className="multi-user-audit" style={ui.table}>
           <div style={{ ...ui.tableRow, ...ui.tableHeader, gridTemplateColumns: "150px minmax(160px, .8fr) minmax(180px, 1fr) minmax(220px, 1.4fr)" }}>
@@ -1434,7 +1438,7 @@ const ui = {
   status_active: { color: "#175cd3", background: "rgba(47, 128, 237, .12)" },
   status_pending: { color: "#b54708", background: "rgba(247, 144, 9, .12)" },
   adminTabs: { minWidth: 0, display: "flex", gap: 2, overflowX: "auto", borderBottom: "1px solid var(--border, #d9e1ea)" },
-  adminTab: { minHeight: 42, padding: "0 13px", border: 0, borderBottom: "2px solid transparent", borderRadius: 0, display: "inline-flex", alignItems: "center", gap: 7, color: "var(--muted, #667085)", background: "transparent", boxShadow: "none", whiteSpace: "nowrap" },
+  adminTab: { minHeight: 42, padding: "0 13px", borderTop: 0, borderRight: 0, borderBottom: "2px solid transparent", borderLeft: 0, borderRadius: 0, display: "inline-flex", alignItems: "center", gap: 7, color: "var(--muted, #667085)", background: "transparent", boxShadow: "none", whiteSpace: "nowrap" },
   adminTabActive: { color: "var(--accent, #0f9d97)", borderBottomColor: "var(--accent, #0f9d97)", fontWeight: 700 },
   table: { minWidth: 0, overflowX: "auto", borderTop: "1px solid var(--border-soft, #e8edf3)" },
   tableRow: { minWidth: 760, minHeight: 58, padding: "10px 12px", display: "grid", alignItems: "center", gap: 14, borderBottom: "1px solid var(--border-soft, #e8edf3)" },
