@@ -11074,24 +11074,29 @@ button:disabled:hover {
   position: absolute;
   z-index: 6;
   top: 50%;
-  width: 46px;
-  height: 64px;
+  width: 72px;
+  height: 160px;
   padding: 0;
   display: grid;
   place-items: center;
   transform: translateY(-50%);
-  border: 1px solid var(--viewer-border);
+  border: 1px solid transparent;
   border-radius: 7px;
-  background: var(--viewer-toolbar);
+  background: transparent;
   color: var(--viewer-text);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+  box-shadow: none;
+  opacity: .06;
+  transition: opacity .2s ease, background-color .2s ease, border-color .2s ease, color .2s ease;
 }
-.viewer-page-button:hover:not(:disabled) {
+.viewer-page-button:hover:not(:disabled),
+.viewer-page-button:focus-visible:not(:disabled) {
+  opacity: .96;
+  border-color: var(--viewer-border);
   background: var(--viewer-control-hover);
   color: #0f9d97;
 }
 .viewer-page-button:disabled {
-  opacity: .28;
+  opacity: 0;
   cursor: not-allowed;
 }
 .viewer-page-prev { left: 18px; }
@@ -12880,6 +12885,9 @@ body.resizing-table-column {
 .viewer-utility-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .viewer-context-row { width: 100%; }
 .viewer-context-row .viewer-file-identity { flex: 1 1 auto; }
+.viewer-sequence-counter { height: 30px; display: inline-flex; align-items: center; gap: 5px; flex: none; color: #8fa3ae; font-size: 11px; white-space: nowrap; }
+.viewer-sequence-counter input { width: 54px; height: 28px; padding: 0 5px; border: 1px solid rgba(151,174,188,.28); border-radius: 5px; background: #10232e; color: #d8e5eb; text-align: right; font: inherit; }
+.viewer-light .viewer-sequence-counter input { border-color: #cedae0; background: #f7fafb; color: #27414f; }
 .viewer-utility-actions { margin-left: auto; flex: none; }
 .annotation-action-row { width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .annotation-action-row .edit-exit-button { position: sticky; right: 0; margin-left: auto; flex: none; min-width: 76px; border-color: rgba(248,113,113,.45); background: #10232e; color: #fca5a5; box-shadow: -10px 0 14px rgba(7,18,25,.9); }

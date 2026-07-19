@@ -5,6 +5,17 @@ import { categoryColor } from "../../shared/presentation.js";
 import { modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { prefetchViewerWindow, setViewerAnnotations, useViewerAnnotations } from "../media/viewerMediaRepository.js";
+const VIEWER_DRAFT_PREFIX = "det-dashboard:viewer-draft:";
+const TRACKING_STATE_PREFIX = "det-dashboard:tracking-state:";
+
+function readStoredJson(key) {
+  try { return JSON.parse(window.localStorage.getItem(key) || "null"); } catch { return null; }
+}
+
+function writeStoredJson(key, value) {
+  try { window.localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
+}
+
 function labelColor(label = "") {
 return categoryColor(label);
 }
@@ -115,6 +126,9 @@ const index = sequenceUrl ? sequenceIndex : externalIndex;
 const setIndex = sequenceUrl ? setSequenceIndex : setExternalIndex;
 const item = viewerItems[index];
 const annotations = useViewerAnnotations(item?.id, item?.annotations);
+const viewerProjectId = item?.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1] || "";
+const viewerTotal = sequenceUrl ? viewerItems.length : Number(totalItems || viewerItems.length || 0);
+const [ordinalText, setOrdinalText] = useState(String((sequenceUrl ? sequenceIndex : (viewerPage - 1) * pageSize + externalIndex) + 1));
 
 useEffect(() => {
   if (!sequenceUrl) return undefined;
@@ -169,6 +183,7 @@ const lastWheelScaleRef = useRef(1.5);
 const lastTrackingAnchorRef = useRef(null);
 const pendingNavigationStatusRef = useRef("");
 const navigationBusyRef = useRef(false);
+const restoredTrackingProjectRef = useRef("");
 
 const [tool, setTool] = useState("select");
 
@@ -197,21 +212,28 @@ useEffect(() => {
 }, [index, item?.id, viewerItems, sequenceUrl]);
 
 useEffect(() => {
+  const ordinal = sequenceUrl ? index + 1 : (viewerPage - 1) * pageSize + index + 1;
+  setOrdinalText(String(ordinal));
+}, [index, viewerPage, pageSize, sequenceUrl]);
+
+useEffect(() => {
   if (!loadPage) setViewerItems(items);
 }, [items, loadPage]);
 
 useEffect(() => {
 
-setDraft(annotations.map((annotation) => ({ ...annotation })));
-setDraftDirty(false);
-draftRevisionRef.current = 0;
+const recoveredDraft = readStoredJson(`${VIEWER_DRAFT_PREFIX}${item?.id || ""}`);
+const recoveredRows = Array.isArray(recoveredDraft?.annotations) ? recoveredDraft.annotations : null;
+setDraft((recoveredRows || annotations).map((annotation) => ({ ...annotation })));
+setDraftDirty(Boolean(recoveredRows));
+draftRevisionRef.current = recoveredRows ? Number(recoveredDraft.revision || 1) : 0;
 
 setSelectedAnnId(null);
 setSelectedAnnIds([]);
 
 setNaturalSize({ width: Number(item?.image_width || 1), height: Number(item?.image_height || 1) });
 setLoadedItemId(null);
-setOperationStatus(pendingNavigationStatusRef.current || (editMode ? "选择或调整已有标签；按 B 开始画框" : "浏览图片；A / D 或方向键切换"));
+setOperationStatus(pendingNavigationStatusRef.current || (recoveredRows ? `已恢复图片 ${item?.display_name} 的未保存标签草稿` : editMode ? "选择或调整已有标签；按 B 开始画框" : "浏览图片；A / D 或方向键切换"));
 pendingNavigationStatusRef.current = "";
 
 }, [item?.id]);
@@ -266,6 +288,53 @@ useEffect(() => {
     setAnnotationEnvironmentId(compatibleAnnotationEnvironments[0]?.id || "");
   }
 }, [annotationAlgorithmId, annotationModels, annotationEnvironments, annotationAssetLinks]);
+
+useEffect(() => {
+  if (!viewerProjectId || !annotationAlgorithms.length || restoredTrackingProjectRef.current === viewerProjectId) return;
+  restoredTrackingProjectRef.current = viewerProjectId;
+  const stored = readStoredJson(`${TRACKING_STATE_PREFIX}${viewerProjectId}`);
+  if (!stored?.session?.id || stored.taskStatus === "done") return;
+  setAnnotationMode("tracking");
+  setTool("select");
+  setAnnotationAlgorithmId(stored.algorithmId || "");
+  setAnnotationModelId(stored.modelId || "");
+  setAnnotationEnvironmentId(stored.environmentId || "");
+  setAnnotationSession(stored.session);
+  lastTrackingAnchorRef.current = stored.anchor || null;
+  setOperationStatus("已恢复上次跟踪会话，正在关联后台任务");
+  fetch(`/api/compute/tasks?purpose=annotation&sessionKey=${stored.session.id}`)
+    .then((response) => response.json())
+    .then((data) => {
+      const tasks = data.tasks || [];
+      const task = tasks.find((row) => row.id === stored.taskId) || tasks[0] || null;
+      setAnnotationTaskHistory(tasks);
+      setAnnotationTask(task);
+      setOperationStatus(task
+        ? `已恢复跟踪任务：${task.status}；${["paused", "failed", "cancelled"].includes(task.status) ? "按空格继续" : "按空格暂停"}`
+        : "已恢复跟踪配置，请选择框后按空格开始");
+    })
+    .catch(() => setOperationStatus("已恢复跟踪配置，但后台任务状态读取失败"));
+}, [viewerProjectId, annotationAlgorithms.length]);
+
+useEffect(() => {
+  if (!viewerProjectId || annotationMode !== "tracking" || !annotationSession?.id) return;
+  if (annotationTask?.status === "done") {
+    window.localStorage.removeItem(`${TRACKING_STATE_PREFIX}${viewerProjectId}`);
+    return;
+  }
+  writeStoredJson(`${TRACKING_STATE_PREFIX}${viewerProjectId}`, {
+    session: annotationSession,
+    taskId: annotationTask?.id || null,
+    taskStatus: annotationTask?.status || null,
+    algorithmId: annotationAlgorithmId,
+    modelId: annotationModelId,
+    environmentId: annotationEnvironmentId,
+    anchor: lastTrackingAnchorRef.current,
+    imageId: item?.id,
+    imageIndex: index,
+    updatedAt: new Date().toISOString(),
+  });
+}, [viewerProjectId, annotationMode, annotationSession?.id, annotationTask?.id, annotationTask?.status, annotationAlgorithmId, annotationModelId, annotationEnvironmentId, item?.id, index]);
 
 useEffect(() => {
   if (!annotationTask?.id || !annotationSession?.id || ["done", "failed", "cancelled"].includes(annotationTask.status)) return undefined;
@@ -398,6 +467,37 @@ const navigateBy = async (delta) => {
 const prev = () => navigateBy(-1);
 const next = () => navigateBy(1);
 
+const jumpToOrdinal = async () => {
+  const targetOrdinal = Math.max(1, Math.min(viewerTotal, Math.trunc(Number(ordinalText) || 1)));
+  setOrdinalText(String(targetOrdinal));
+  const targetIndex = targetOrdinal - 1;
+  if (navigationBusyRef.current) return;
+  navigationBusyRef.current = true;
+  try {
+    if (!await persistBeforeNavigation()) return;
+    if (sequenceUrl || !loadPage) {
+      setIndex(Math.max(0, Math.min(viewerItems.length - 1, targetIndex)));
+      return;
+    }
+    const targetPage = Math.floor(targetIndex / pageSize) + 1;
+    const pageIndex = targetIndex % pageSize;
+    if (targetPage === viewerPage) {
+      setIndex(Math.min(viewerItems.length - 1, pageIndex));
+      return;
+    }
+    setLoadingPage(true);
+    const nextItems = await loadPage(targetPage);
+    if (nextItems?.length) {
+      setViewerPage(targetPage);
+      setViewerItems(nextItems);
+      setIndex(Math.min(nextItems.length - 1, pageIndex));
+    }
+  } finally {
+    setLoadingPage(false);
+    navigationBusyRef.current = false;
+  }
+};
+
 const width = Number(item.image_width || naturalSize.width || 1);
 
 const height = Number(item.image_height || naturalSize.height || 1);
@@ -502,7 +602,10 @@ if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) =
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
-if (draftRevisionRef.current === savedRevision) setDraftDirty(false);
+if (draftRevisionRef.current === savedRevision) {
+  setDraftDirty(false);
+  window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
+}
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
 
@@ -537,7 +640,10 @@ if (draftRevisionRef.current === savedRevision) setDraft(annotations.map((ann) =
 onSaved?.(item.id, annotations);
 
 if (exit) setEditMode(false);
-if (draftRevisionRef.current === savedRevision) setDraftDirty(false);
+if (draftRevisionRef.current === savedRevision) {
+  setDraftDirty(false);
+  window.localStorage.removeItem(`${VIEWER_DRAFT_PREFIX}${item.id}`);
+}
 if (announce) setOperationStatus(`已保存标签 ${annotations.length} 个到图片 ${item.display_name}`);
 return true;
 
@@ -553,12 +659,25 @@ useEffect(() => {
   return () => window.clearTimeout(timer);
 }, [editMode, draftDirty, editDrag, draft, annotationSuggestions.length]);
 
-const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation = null } = {}) => {
+useEffect(() => {
+  if (!editMode || !draftDirty || !item?.id) return;
+  const annotations = draft.filter((ann) => !ann.promptOnly);
+  writeStoredJson(`${VIEWER_DRAFT_PREFIX}${item.id}`, {
+    imageId: item.id,
+    imageName: item.display_name,
+    revision: draftRevisionRef.current,
+    updatedAt: new Date().toISOString(),
+    annotations,
+  });
+}, [editMode, draftDirty, draft, item?.id]);
+
+const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation = null, startIndex = index } = {}) => {
   if (annotationMode === "manual") return;
   if (!annotationAlgorithmId) { setAnnotationMessage("请先选择可用的标注方法"); return; }
   const activePrompt = promptAnnotation || selectedAnn;
   if (!activePrompt) { setAnnotationMessage("请先绘制一个目标区域作为提示"); return; }
-  const projectId = item.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
+  const startItem = viewerItems[startIndex] || item;
+  const projectId = startItem.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
   if (!projectId) { setAnnotationMessage("无法确定当前数据集项目"); return; }
   setAnnotationMessage("正在创建标注计算任务...");
   setOperationStatus(annotationMode === "segmentation" ? "正在根据提示框生成分割结果" : "正在启动目标跟踪");
@@ -585,13 +704,13 @@ const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation =
       trackId: activePrompt.track_id || `track-${String(activePrompt.id).replace(/^tmp_/, "")}`,
     };
     const operation = annotationMode === "segmentation" ? "segment" : "propagate";
-    const selectedSequence = viewerItems.slice(index);
+    const selectedSequence = viewerItems.slice(startIndex);
     const input = annotationMode === "segmentation"
-      ? { projectImageId: item.id, prompt }
+      ? { projectImageId: startItem.id, prompt }
       : {
         imageIds: selectedSequence.map((row) => row.id),
         startFrame: 0,
-        frameOffset: index,
+        frameOffset: startIndex,
         prompts: [prompt],
         ...(supplementFrames > 0 ? { supplementCount: supplementFrames } : {}),
       };
@@ -605,7 +724,13 @@ const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation =
     setAnnotationTask(operationData.task);
     setAnnotationMessage(operation === "segment" ? "分割任务已提交" : "跟踪任务已提交");
     setOperationStatus(operation === "segment" ? "分割任务运行中，结果返回后将自动保存" : "目标跟踪运行中；按空格暂停");
-    if (operation === "propagate") lastTrackingAnchorRef.current = { imageId: item.id, annotationId: activePrompt.id, index };
+    if (operation === "propagate") lastTrackingAnchorRef.current = {
+      imageId: startItem.id,
+      imageName: startItem.display_name,
+      annotationId: activePrompt.id,
+      index: startIndex,
+      annotation: { ...activePrompt, promptOnly: true },
+    };
   } catch (error) {
     setAnnotationMessage(error.message);
     setOperationStatus(`操作失败：${error.message}`);
@@ -737,14 +862,21 @@ const toggleTrackingBySpace = async () => {
     return;
   }
   if (annotationTask?.status === "paused") {
-    const anchor = lastTrackingAnchorRef.current;
-    const selectedChanged = selectedAnn && (!anchor || anchor.imageId !== item.id || anchor.annotationId !== selectedAnn.id);
-    if (selectedChanged) await runAnnotationAlgorithm();
+    if (selectedAnn) {
+      setOperationStatus("正在从当前框重新分割目标并向后跟踪");
+      await runAnnotationAlgorithm();
+    }
     else await controlAnnotationTask("resume");
     return;
   }
-  if (selectedAnn) await runAnnotationAlgorithm();
-  else setOperationStatus("请先选择一个标签框，再按空格开始跟踪");
+  if (selectedAnn) {
+    setOperationStatus("正在从当前框分割目标并向后跟踪");
+    await runAnnotationAlgorithm();
+  }
+  else if (lastTrackingAnchorRef.current?.annotation) {
+    const anchor = lastTrackingAnchorRef.current;
+    await runAnnotationAlgorithm({ promptAnnotation: anchor.annotation, startIndex: Number(anchor.index || 0) });
+  } else setOperationStatus("请先选择一个标签框，再按空格开始跟踪");
 };
 
 const exitEditing = async () => {
@@ -825,7 +957,10 @@ return (
 
 </div>
 
-<span>{sequenceUrl ? `${index + 1} / ${viewerItems.length}` : (loadPage ? `${(viewerPage - 1) * pageSize + index + 1} / ${totalItems}` : `${index + 1} / ${viewerItems.length}`)}</span>
+<label className="viewer-sequence-counter" title="输入图片序号并按回车跳转">
+<input aria-label="当前图片序号" inputMode="numeric" value={ordinalText} onChange={(event) => setOrdinalText(event.target.value.replace(/\D/g, ""))} onBlur={() => setOrdinalText(String(sequenceUrl ? index + 1 : (viewerPage - 1) * pageSize + index + 1))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); jumpToOrdinal(); event.currentTarget.blur(); } }} />
+<span>/ {viewerTotal}</span>
+</label>
 
 <div className="viewer-utility-actions">
 <button onClick={() => zoom(-0.25)}>-</button>
@@ -1015,6 +1150,9 @@ onDrawComplete={(annotation) => {
   if (annotationMode === "segmentation") {
     setOperationStatus("提示框已完成，正在生成分割结果");
     runAnnotationAlgorithm({ promptAnnotation: annotation });
+  }
+  if (annotationMode === "tracking") {
+    setOperationStatus("跟踪提示框已完成；按空格从当前框分割目标并向后跟踪");
   }
 }}
 
