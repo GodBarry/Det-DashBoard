@@ -2734,6 +2734,12 @@ button:disabled:hover {
     grid-template-columns: 260px 276px minmax(700px, 1fr) 340px;
   }
 }
+.edit-sidecar header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 7px; border-bottom: 1px solid rgba(148,163,184,.18); }
+.edit-sidecar header b { color: #edf4f7; font-size: 13px; }
+.edit-sidecar header small { color: #8fa3ae; font-size: 10px; }
+.edit-sidecar .geometry-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.edit-sidecar .geometry-grid label { grid-template-columns: 16px minmax(0,1fr); align-items: center; gap: 5px; }
+.edit-sidecar .geometry-grid input { width: 100%; min-width: 0; }
 
 /* Unified recycle-bin and queue action controls. */
 .home-trash-panel .compact-title {
@@ -12874,6 +12880,13 @@ body.resizing-table-column {
 .viewer-context-row .viewer-file-identity { flex: 1 1 auto; }
 .viewer-utility-actions { margin-left: auto; flex: none; }
 .annotation-action-row { width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.annotation-action-row .edit-exit-button { position: sticky; right: 0; margin-left: auto; flex: none; min-width: 76px; border-color: rgba(248,113,113,.45); background: #10232e; color: #fca5a5; box-shadow: -10px 0 14px rgba(7,18,25,.9); }
+.viewer-light .annotation-action-row .edit-exit-button { background: #f7fafb; color: #b42318; box-shadow: -10px 0 14px rgba(247,250,251,.96); }
+.annotation-inline-toggle { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; border: 1px solid rgba(151,174,188,.24); border-radius: 6px; white-space: nowrap; font-size: 11px; }
+.annotation-inline-toggle input { width: 14px; height: 14px; accent-color: #16b8b0; }
+.annotation-iou-control { display: inline-flex; align-items: center; gap: 5px; height: 32px; white-space: nowrap; font-size: 11px; }
+.annotation-iou-control input { width: 58px; height: 30px; padding: 0 5px; border: 1px solid rgba(151,174,188,.28); border-radius: 5px; background: #10232e; color: #d8e5eb; }
+.viewer-light .annotation-iou-control input { background: #f7fafb; color: #27414f; }
 .annotation-mode-control {
   display: inline-flex;
   align-items: center;
@@ -12888,6 +12901,8 @@ body.resizing-table-column {
   gap: 5px;
   white-space: nowrap;
 }
+.annotation-mode-control button.active-tool { color: #5eead4; background: rgba(20,184,166,.16); border-color: rgba(45,212,191,.55); }
+.viewer-light .annotation-mode-control button.active-tool { color: #087f7a; background: #dff7f4; border-color: #71cfc7; }
 .viewer-topbar .annotation-method-select {
   width: 174px;
   height: 32px;
@@ -12901,6 +12916,19 @@ body.resizing-table-column {
   background: #f7fafb;
   border-color: #cedae0;
   color: #27414f;
+}
+@media (max-width: 1450px) {
+  .dataset-image-dialog .annotation-editor-topbar { width: 96vw; padding-inline: 8px; }
+  .annotation-action-row { gap: 4px; }
+  .annotation-action-row > button,
+  .annotation-mode-control button { padding-inline: 7px; white-space: nowrap; }
+  .annotation-mode-control button { gap: 3px; }
+  .annotation-action-row .label-input { width: 84px; min-width: 84px; }
+  .viewer-topbar .annotation-method-select { width: 146px; min-width: 0; padding-left: 7px; }
+  .viewer-topbar .annotation-model-select { width: 174px; }
+  .viewer-topbar .annotation-env-select { width: 158px; }
+  .annotation-inline-toggle { padding-inline: 6px; }
+  .annotation-iou-control input { width: 50px; }
 }
 .viewer-topbar .run-annotation-method {
   color: #16b8b0;

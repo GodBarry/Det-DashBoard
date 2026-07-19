@@ -1,5 +1,12 @@
 "use strict";
 
+function boxIou(a, b) {
+  const intersection = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+    * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const union = a.w * a.h + b.w * b.h - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
 function createAnnotationService({ query, transaction, computeTaskService, resourceAccess, httpError }) {
   async function assertSession(sessionId, actor, permission = "read") {
     const session = (await query("SELECT * FROM annotation_sessions WHERE id=$1", [sessionId])).rows[0];
@@ -96,6 +103,8 @@ function createAnnotationService({ query, transaction, computeTaskService, resou
   async function commitSuggestions(sessionId, body, actor) {
     const session = await assertSession(sessionId, actor, "write");
     const requestedIds = Array.isArray(body.suggestionIds) ? body.suggestionIds.filter(Boolean) : [];
+    const replaceOverlaps = body.replaceOverlaps === true;
+    const overlapIou = Math.max(0, Math.min(1, Number(body.overlapIou ?? 0.5)));
     return transaction(async (client) => {
       const project = (await client.query("SELECT active_label_version_id FROM projects WHERE id=$1 FOR UPDATE", [session.project_id])).rows[0];
       const nextVersion = (await client.query(
@@ -126,6 +135,19 @@ function createAnnotationService({ query, transaction, computeTaskService, resou
         const geometry = typeof row.geometry_json === "string" ? JSON.parse(row.geometry_json || "{}") : (row.geometry_json || {});
         const [x1, y1, x2, y2] = geometry.bbox || [];
         if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+        if (replaceOverlaps) {
+          const existing = (await client.query(
+            `SELECT id,bbox_x,bbox_y,bbox_w,bbox_h FROM image_annotations
+             WHERE label_version_id=$1 AND project_image_id=$2`,
+            [nextVersion.id, row.project_image_id],
+          )).rows;
+          const generatedBox = { x: x1, y: y1, w: Math.max(1, x2 - x1), h: Math.max(1, y2 - y1) };
+          const replacedIds = existing.filter((item) => boxIou(
+            { x: Number(item.bbox_x), y: Number(item.bbox_y), w: Number(item.bbox_w), h: Number(item.bbox_h) },
+            generatedBox,
+          ) >= overlapIou).map((item) => item.id);
+          if (replacedIds.length) await client.query("DELETE FROM image_annotations WHERE id=ANY($1::uuid[])", [replacedIds]);
+        }
         await client.query(
           `INSERT INTO image_annotations
            (label_version_id,project_image_id,label,bbox_x,bbox_y,bbox_w,bbox_h,shape_type,difficult,score,attributes_json)

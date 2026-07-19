@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 import torch
 
+_SEGMENT_PREDICTORS = {}
+
 
 def bbox_from_mask(mask):
     ys, xs = np.where(mask)
@@ -41,10 +43,18 @@ def model_config(request):
     if configured:
         return configured
     root = (request.get("assets") or {}).get("algorithmRoot") or os.getcwd()
+    model_path = str((request.get("assets") or {}).get("modelPath") or "").lower()
+    variant = "t" if "tiny" in model_path else "s" if "small" in model_path else "b+" if "base_plus" in model_path or "base-plus" in model_path else "l"
+    config_name = {
+        "t": "sam2.1_hiera_t.yaml",
+        "s": "sam2.1_hiera_s.yaml",
+        "b+": "sam2.1_hiera_b+.yaml",
+        "l": "sam2.1_hiera_l.yaml",
+    }[variant]
     candidates = [
-        os.path.join(root, "configs", "samurai", "sam2.1_hiera_l.yaml"),
-        os.path.join(root, "samurai_sam2", "configs", "samurai", "sam2.1_hiera_l.yaml"),
-        "configs/samurai/sam2.1_hiera_l.yaml",
+        os.path.join(root, "configs", "samurai", config_name),
+        os.path.join(root, "samurai_sam2", "configs", "samurai", config_name),
+        os.path.join("configs", "samurai", config_name),
     ]
     return next((value for value in candidates if os.path.isfile(value)), candidates[-1])
 
@@ -60,7 +70,12 @@ def segment(request):
     if not assets.get("modelPath"):
         raise RuntimeError("segment requires a registered SAM2 model weight")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    predictor = SAM2ImagePredictor(build_sam2(model_config(request), assets["modelPath"], device=device))
+    config = model_config(request)
+    cache_key = (config, assets["modelPath"], str(device))
+    predictor = _SEGMENT_PREDICTORS.get(cache_key)
+    if predictor is None:
+        predictor = SAM2ImagePredictor(build_sam2(config, assets["modelPath"], device=device))
+        _SEGMENT_PREDICTORS[cache_key] = predictor
     image = cv2.cvtColor(cv2.imread(images[0]["path"]), cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
     box = np.asarray(prompt.get("bbox"), dtype=np.float32) if prompt.get("bbox") else None
@@ -112,9 +127,28 @@ def propagate(request):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--det-dashboard-task", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--det-dashboard-task")
+    parser.add_argument("--output")
+    parser.add_argument("--serve", action="store_true")
     args = parser.parse_args()
+    if args.serve:
+        for line in sys.stdin:
+            message = json.loads(line)
+            request_path = message["requestPath"]
+            output_path = message["outputPath"]
+            request_id = message.get("requestId", "")
+            try:
+                with open(request_path, "r", encoding="utf-8") as handle:
+                    request = json.load(handle)
+                result = segment(request)
+                with open(output_path, "w", encoding="utf-8") as handle:
+                    json.dump(result, handle, ensure_ascii=False)
+                print("DET_DASHBOARD_RESULT:" + request_id + ":ok", flush=True)
+            except Exception as error:
+                print("DET_DASHBOARD_RESULT:" + request_id + ":error:" + str(error).replace("\n", " "), flush=True)
+        return
+    if not args.det_dashboard_task or not args.output:
+        raise RuntimeError("--det-dashboard-task and --output are required")
     with open(args.det_dashboard_task, "r", encoding="utf-8") as handle:
         request = json.load(handle)
     operation = request.get("operation")

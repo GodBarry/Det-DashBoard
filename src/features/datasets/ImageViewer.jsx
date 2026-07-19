@@ -10,6 +10,17 @@ function labelColor(label = "") {
 return categoryColor(label);
 }
 
+function annotationIou(a, b) {
+  const ax2 = Number(a.bbox_x) + Number(a.bbox_w);
+  const ay2 = Number(a.bbox_y) + Number(a.bbox_h);
+  const bx2 = Number(b.bbox_x) + Number(b.bbox_w);
+  const by2 = Number(b.bbox_y) + Number(b.bbox_h);
+  const intersection = Math.max(0, Math.min(ax2, bx2) - Math.max(Number(a.bbox_x), Number(b.bbox_x)))
+    * Math.max(0, Math.min(ay2, by2) - Math.max(Number(a.bbox_y), Number(b.bbox_y)));
+  const union = Number(a.bbox_w) * Number(a.bbox_h) + Number(b.bbox_w) * Number(b.bbox_h) - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
 function algorithmCapabilities(algorithm) {
   let capabilities = algorithm?.capabilities_json || {};
   if (typeof capabilities === "string") {
@@ -132,7 +143,7 @@ const [pan, setPan] = useState({ x: 0, y: 0 });
 const [drag, setDrag] = useState(null);
 
 const [editMode, setEditMode] = useState(false);
-const [annotationMode, setAnnotationMode] = useState("manual");
+const [annotationMode, setAnnotationMode] = useState("");
 const [annotationAlgorithms, setAnnotationAlgorithms] = useState([]);
 const [annotationAlgorithmId, setAnnotationAlgorithmId] = useState("");
 const [annotationModels, setAnnotationModels] = useState([]);
@@ -148,6 +159,10 @@ const [showTaskHistory, setShowTaskHistory] = useState(false);
 const [annotationTaskHistory, setAnnotationTaskHistory] = useState([]);
 const [annotationTaskLogs, setAnnotationTaskLogs] = useState([]);
 const [annotationLastCommit, setAnnotationLastCommit] = useState(null);
+const [autoSave, setAutoSave] = useState(false);
+const [replaceOverlaps, setReplaceOverlaps] = useState(false);
+const [overlapIou, setOverlapIou] = useState(0.5);
+const autoSavedDraftRef = useRef("");
 const [showSupplementDialog, setShowSupplementDialog] = useState(false);
 const [supplementCount, setSupplementCount] = useState(3);
 
@@ -156,6 +171,7 @@ const [tool, setTool] = useState("select");
 const [draft, setDraft] = useState([]);
 
 const [selectedAnnId, setSelectedAnnId] = useState(null);
+const [selectedAnnIds, setSelectedAnnIds] = useState([]);
 
 const [editDrag, setEditDrag] = useState(null);
 
@@ -188,7 +204,7 @@ setPan({ x: 0, y: 0 });
 
 setEditMode(false);
 
-setAnnotationMode("manual");
+setAnnotationMode("");
 
 setAnnotationSession(null);
 
@@ -202,6 +218,7 @@ setTool("select");
 setDraft([]);
 
 setSelectedAnnId(null);
+setSelectedAnnIds([]);
 
 setDefaultLabel("");
 
@@ -228,7 +245,7 @@ useEffect(() => {
 }, [annotationAlgorithms.length]);
 
 useEffect(() => {
-  if (annotationMode === "manual") { setAnnotationAlgorithmId(""); return; }
+  if (!annotationMode || annotationMode === "manual") { setAnnotationAlgorithmId(""); return; }
   const operation = annotationMode === "segmentation" ? "segment" : "propagate";
   const available = annotationAlgorithms.filter((algorithm) => supportsAnnotationOperation(algorithm, operation));
   if (!available.some((algorithm) => String(algorithm.id) === String(annotationAlgorithmId))) {
@@ -239,7 +256,7 @@ useEffect(() => {
 const selectedAnnotationAlgorithm = annotationAlgorithms.find((algorithm) => String(algorithm.id) === String(annotationAlgorithmId));
 const linkedAnnotationAssets = annotationAssetLinks.filter((link) => String(link.algorithm_asset_id || "") === String(annotationAlgorithmId || ""));
 const compatibleAnnotationModels = annotationModels.filter((model) => {
-  if (linkedAnnotationAssets.length) return linkedAnnotationAssets.some((link) => String(link.model_version_id || "") === String(model.id));
+  if (linkedAnnotationAssets.length) return linkedAnnotationAssets.some((link) => String(link.model_version_id || "") === String(model.id) || String(link.model_id || "") === String(model.model_id || ""));
   const framework = String(model.model_framework || "").toLowerCase();
   const selectedFramework = String(selectedAnnotationAlgorithm?.framework || "").toLowerCase();
   if (["sam2", "samurai"].includes(selectedFramework)) return ["sam2", "samurai"].includes(framework);
@@ -298,15 +315,16 @@ useEffect(() => {
 useEffect(() => {
   if (!editMode || !annotationSuggestions.length || !item?.id) return;
   const current = annotationSuggestions.filter((row) => String(row.project_image_id) === String(item.id));
-  setDraft((rows) => [
-    ...rows.filter((row) => !row.algorithmSuggestion),
-    ...current.map((row) => {
+  const generated = current.map((row) => {
       const geometry = typeof row.geometry_json === "string" ? JSON.parse(row.geometry_json || "{}") : (row.geometry_json || {});
       const [x1, y1, x2, y2] = geometry.bbox || [0, 0, 1, 1];
       return { id: row.id, label: row.label, bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(1, y2 - y1), shape_type: row.shape_type, track_id: row.track_id, algorithmSuggestion: true };
-    }),
-  ]);
-}, [annotationSuggestions, item?.id, editMode]);
+    });
+  setDraft((rows) => {
+    const retained = rows.filter((row) => !row.algorithmSuggestion && !row.promptOnly && (!replaceOverlaps || !generated.some((next) => annotationIou(row, next) >= overlapIou)));
+    return [...retained, ...rows.filter((row) => row.promptOnly), ...generated];
+  });
+}, [annotationSuggestions, item?.id, editMode, replaceOverlaps, overlapIou]);
 
 useEffect(() => {
   if (editMode) return;
@@ -324,12 +342,25 @@ useViewerNavigation({
 useEffect(() => {
   const onDelete = (event) => {
     if (!editMode || !selectedAnnId || !["Delete", "Backspace"].includes(event.key)) return;
-    setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId));
+    const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId];
+    setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id)));
     setSelectedAnnId(null);
+    setSelectedAnnIds([]);
   };
   window.addEventListener("keydown", onDelete);
   return () => window.removeEventListener("keydown", onDelete);
-}, [editMode, selectedAnnId]);
+}, [editMode, selectedAnnId, selectedAnnIds]);
+
+useEffect(() => {
+  const onModeEscape = (event) => {
+    if (event.key !== "Escape" || !editMode) return;
+    setAnnotationMode("");
+    setTool("select");
+    setAnnotationMessage("");
+  };
+  window.addEventListener("keydown", onModeEscape);
+  return () => window.removeEventListener("keydown", onModeEscape);
+}, [editMode]);
 
 const zoom = (delta) => setScale((value) => Math.min(6, Math.max(0.25, Number((value + delta).toFixed(2)))));
 
@@ -364,6 +395,7 @@ const annotationCounts = shownAnnotations.reduce((rows, annotation) => {
 const metadata = imageMetadata(item, shownAnnotations);
 
 const selectedAnn = draft.find((ann) => ann.id === selectedAnnId);
+const selectedAnnRows = draft.filter((ann) => selectedAnnIds.includes(ann.id));
 
 const pointFromEvent = (event) => {
 
@@ -385,6 +417,11 @@ y: Math.max(0, Math.min(height, ((event.clientY - rect.top) / rect.height) * hei
 
 const updateAnn = (id, patch) => setDraft((rows) => rows.map((ann) => ann.id === id ? { ...ann, ...patch } : ann));
 
+const updateSelectedGeometry = (patch) => {
+  if (!selectedAnnId) return;
+  updateAnn(selectedAnnId, patch);
+};
+
 const normalizeBox = (box) => {
 
 const x1 = Math.max(0, Math.min(width, Math.min(box.x1, box.x2)));
@@ -399,13 +436,13 @@ return { bbox_x: x1, bbox_y: y1, bbox_w: Math.max(1, x2 - x1), bbox_h: Math.max(
 
 };
 
-const save = async () => {
+const save = async ({ exit = true } = {}) => {
 
 if (saveAnnotations) {
 
 try {
 
-const data = await saveAnnotations(draft);
+const data = await saveAnnotations(draft.filter((ann) => !ann.promptOnly));
 
 const annotations = data?.annotations || draft;
 
@@ -414,9 +451,9 @@ setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
 
-setEditMode(false);
+if (exit) setEditMode(false);
 
-setAnnotationMode("manual");
+setAnnotationMode("");
 
 setAnnotationSession(null);
 
@@ -440,7 +477,7 @@ method: "POST",
 
 headers: { "content-type": "application/json" },
 
-body: JSON.stringify({ annotations: draft }),
+body: JSON.stringify({ annotations: draft.filter((ann) => !ann.promptOnly) }),
 
 })
 
@@ -455,7 +492,7 @@ setDraft(annotations.map((ann) => ({ ...ann })));
 
 onSaved?.(item.id, annotations);
 
-setEditMode(false);
+if (exit) setEditMode(false);
 
 })
 
@@ -463,10 +500,19 @@ setEditMode(false);
 
 };
 
-const runAnnotationAlgorithm = async ({ supplementFrames = 0 } = {}) => {
+useEffect(() => {
+  if (!autoSave || !editMode || !draft.length) return undefined;
+  const serialized = JSON.stringify(draft.filter((ann) => !ann.promptOnly));
+  if (serialized === autoSavedDraftRef.current) return undefined;
+  const timer = window.setTimeout(() => { autoSavedDraftRef.current = serialized; save({ exit: false }); }, 700);
+  return () => window.clearTimeout(timer);
+}, [autoSave, editMode, draft]);
+
+const runAnnotationAlgorithm = async ({ supplementFrames = 0, promptAnnotation = null } = {}) => {
   if (annotationMode === "manual") return;
   if (!annotationAlgorithmId) { setAnnotationMessage("请先选择可用的标注方法"); return; }
-  if (!selectedAnn) { setAnnotationMessage("请先选择或绘制一个目标区域作为提示"); return; }
+  const activePrompt = promptAnnotation || selectedAnn;
+  if (!activePrompt) { setAnnotationMessage("请先绘制一个目标区域作为提示"); return; }
   const projectId = item.project_id || sequenceUrl?.match(/^\/api\/projects\/([^/]+)\/images/)?.[1];
   if (!projectId) { setAnnotationMessage("无法确定当前数据集项目"); return; }
   setAnnotationMessage("正在创建标注计算任务...");
@@ -488,9 +534,9 @@ const runAnnotationAlgorithm = async ({ supplementFrames = 0 } = {}) => {
     }
     const prompt = {
       type: "box",
-      bbox: [Number(selectedAnn.bbox_x), Number(selectedAnn.bbox_y), Number(selectedAnn.bbox_x) + Number(selectedAnn.bbox_w), Number(selectedAnn.bbox_y) + Number(selectedAnn.bbox_h)],
-      label: selectedAnn.label || defaultLabel || "unknown",
-      trackId: selectedAnn.track_id || `track-${String(selectedAnn.id).replace(/^tmp_/, "")}`,
+      bbox: [Number(activePrompt.bbox_x), Number(activePrompt.bbox_y), Number(activePrompt.bbox_x) + Number(activePrompt.bbox_w), Number(activePrompt.bbox_y) + Number(activePrompt.bbox_h)],
+      label: activePrompt.label || defaultLabel || "unknown",
+      trackId: activePrompt.track_id || `track-${String(activePrompt.id).replace(/^tmp_/, "")}`,
     };
     const operation = annotationMode === "segmentation" ? "segment" : "propagate";
     const selectedSequence = viewerItems.slice(index);
@@ -529,7 +575,7 @@ const controlAnnotationTask = async (action) => {
 const commitAlgorithmSuggestions = async () => {
   if (!annotationSession?.id || !annotationSuggestions.length) return;
   const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/commit`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ replaceOverlaps, overlapIou }),
   });
   const data = await response.json();
   if (!response.ok) { setAnnotationMessage(data.error || "确认算法标注失败"); return; }
@@ -539,6 +585,11 @@ const commitAlgorithmSuggestions = async () => {
   setAnnotationTask(null);
   onSaved?.();
 };
+
+useEffect(() => {
+  if (!autoSave || !annotationSession?.id || !annotationSuggestions.length) return;
+  commitAlgorithmSuggestions();
+}, [autoSave, annotationSession?.id, annotationSuggestions.length]);
 
 const reviewAlgorithmSuggestions = async (status, suggestionIds = []) => {
   if (!annotationSession?.id) return;
@@ -609,7 +660,7 @@ return (
 
 <div className="viewer-context-row">
 
-{!readOnly && <button className={editMode ? "active-tool edit-toggle" : "edit-toggle"} onClick={() => setEditMode((value) => !value)}>{editMode ? "退出编" : "编辑"}</button>}
+{!readOnly && !editMode && <button className="edit-toggle" onClick={() => setEditMode(true)}>编辑</button>}
 
 <div className="viewer-file-identity">
 
@@ -636,39 +687,46 @@ return (
 <div className="annotation-action-row">
 
 <div className="annotation-mode-control" role="tablist" aria-label="标注模式">
-<button className={annotationMode === "manual" ? "active-tool" : ""} onClick={() => setAnnotationMode("manual")}><MousePointer2 size={15} />手动标注</button>
-<button className={annotationMode === "segmentation" ? "active-tool" : ""} onClick={() => setAnnotationMode("segmentation")}><ScanLine size={15} />分割标注</button>
-<button className={annotationMode === "tracking" ? "active-tool" : ""} onClick={() => setAnnotationMode("tracking")}><Route size={15} />跟踪标注</button>
+<button className={annotationMode === "manual" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "manual" ? "" : "manual"); setTool("draw"); }}><MousePointer2 size={15} />手动标注</button>
+<button className={annotationMode === "segmentation" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "segmentation" ? "" : "segmentation"); setTool("draw"); }}><ScanLine size={15} />分割标注</button>
+<button className={annotationMode === "tracking" ? "active-tool" : ""} onClick={() => { setAnnotationMode((value) => value === "tracking" ? "" : "tracking"); setTool("draw"); }}><Route size={15} />跟踪标注</button>
 </div>
 
-<button className={tool === "select" ? "active-tool" : ""} onClick={() => setTool("select")}>选择</button>
+{annotationMode && <>
+{annotationMode === "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={() => setTool("draw")}>画框</button>}
 
-<button className={tool === "draw" ? "active-tool" : ""} onClick={() => setTool("draw")}>画框</button>
+{annotationMode && annotationMode !== "manual" && <button className={tool === "draw" ? "active-tool" : ""} onClick={() => setTool("draw")}>提示框</button>}
 
 <input className="label-input" value={defaultLabel} onChange={(event) => setDefaultLabel(event.target.value)} placeholder="标签" />
 
-{annotationMode !== "manual" && <select className="annotation-method-select" value={annotationAlgorithmId} onChange={(event) => setAnnotationAlgorithmId(event.target.value)}>
+{annotationMode && annotationMode !== "manual" && <select className="annotation-method-select" value={annotationAlgorithmId} onChange={(event) => setAnnotationAlgorithmId(event.target.value)}>
 {!annotationAlgorithms.length && <option value="">正在加载方法...</option>}
 {annotationAlgorithms.filter((algorithm) => supportsAnnotationOperation(algorithm, annotationMode === "segmentation" ? "segment" : "propagate")).map((algorithm) => <option key={algorithm.id} value={algorithm.id}>{algorithm.name}</option>)}
 </select>}
 
-{annotationMode !== "manual" && <select className="annotation-method-select annotation-model-select" value={annotationModelId} onChange={(event) => setAnnotationModelId(event.target.value)} aria-label="模型权重">
+{annotationMode && annotationMode !== "manual" && <select className="annotation-method-select annotation-model-select" value={annotationModelId} onChange={(event) => setAnnotationModelId(event.target.value)} aria-label="模型权重">
 <option value="">选择模型权重</option>
-{compatibleAnnotationModels.map((model) => <option key={model.id} value={model.id}>{model.model_name || model.version_name}</option>)}
+{compatibleAnnotationModels.map((model) => <option key={model.id} value={model.id}>{model.model_name ? `${model.model_name} · ${model.version_name}` : model.version_name}</option>)}
 </select>}
 
-{annotationMode !== "manual" && <select className="annotation-method-select annotation-env-select" value={annotationEnvironmentId} onChange={(event) => setAnnotationEnvironmentId(event.target.value)} aria-label="Python环境">
+{annotationMode && annotationMode !== "manual" && <select className="annotation-method-select annotation-env-select" value={annotationEnvironmentId} onChange={(event) => setAnnotationEnvironmentId(event.target.value)} aria-label="Python环境">
 <option value="">选择运行环境</option>
 {compatibleAnnotationEnvironments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
 </select>}
 
-{annotationMode !== "manual" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => runAnnotationAlgorithm()}>{annotationMode === "segmentation" ? "生成分割" : "开始跟踪"}</button>}
+{annotationMode === "tracking" && <button className="run-annotation-method" disabled={!selectedAnn || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => runAnnotationAlgorithm()}>开始跟踪</button>}
 {annotationMode === "tracking" && <button title="从原视频补充过渡帧后重新跟踪" disabled={!selectedAnn || index >= viewerItems.length - 1 || !annotationAlgorithmId || !annotationModelId || !annotationEnvironmentId} onClick={() => setShowSupplementDialog(true)}><Film size={15} />补帧跟踪</button>}
 
-<button disabled={!selectedAnnId} onClick={() => { setDraft((rows) => rows.filter((ann) => ann.id !== selectedAnnId)); setSelectedAnnId(null); }}>删除</button>
+<button disabled={!selectedAnnId} onClick={() => { const ids = selectedAnnIds.length ? selectedAnnIds : [selectedAnnId]; setDraft((rows) => rows.filter((ann) => !ids.includes(ann.id))); setSelectedAnnId(null); setSelectedAnnIds([]); }}>删除</button>
 
-<button className="save-ann" onClick={save}>保存</button>
+<label className="annotation-inline-toggle"><input type="checkbox" checked={autoSave} onChange={(event) => setAutoSave(event.target.checked)} />自动保存</label>
+<label className="annotation-inline-toggle"><input type="checkbox" checked={replaceOverlaps} onChange={(event) => setReplaceOverlaps(event.target.checked)} />覆盖重叠</label>
+<label className="annotation-iou-control">IoU <input type="number" min="0" max="1" step="0.05" value={overlapIou} onChange={(event) => setOverlapIou(Math.max(0, Math.min(1, Number(event.target.value) || 0)))} /></label>
+
+<button className="save-ann" onClick={() => save()}>保存</button>
 <button title="计算任务记录" onClick={() => setShowTaskHistory((value) => !value)}><History size={15} /></button>
+</>}
+<button className="edit-exit-button" onClick={() => setEditMode(false)}>退出编辑</button>
 
 </div>
 
@@ -758,8 +816,11 @@ annotations={shownAnnotations}
 selectedId={selectedAnnId}
 
 setSelectedId={setSelectedAnnId}
+selectedIds={selectedAnnIds}
+setSelectedIds={setSelectedAnnIds}
 
 tool={tool}
+annotationMode={annotationMode}
 
 defaultLabel={defaultLabel}
 
@@ -776,6 +837,13 @@ updateAnn={updateAnn}
 normalizeBox={normalizeBox}
 
 pointFromEvent={pointFromEvent}
+onDrawComplete={(annotation) => {
+  if (!annotation) return;
+  if (annotationMode === "manual" && replaceOverlaps) {
+    setDraft((rows) => rows.filter((row) => row.id === annotation.id || row.promptOnly || annotationIou(row, annotation) < overlapIou));
+  }
+  if (annotationMode === "segmentation") runAnnotationAlgorithm({ promptAnnotation: annotation });
+}}
 
 />
 
@@ -806,11 +874,14 @@ pointFromEvent={pointFromEvent}
 
 <div className="edit-sidecar">
 
+<header><b>{selectedAnnRows.length > 1 ? `已选择 ${selectedAnnRows.length} 个框` : (selectedAnn.promptOnly ? "分割提示框" : "标注框")}</b><small>Ctrl 多选</small></header>
 <label>标签<input value={selectedAnn.label || ""} onChange={(event) => { updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>
-
-<span>x {Number(selectedAnn.bbox_x).toFixed(1)} · y {Number(selectedAnn.bbox_y).toFixed(1)}</span>
-
-<span>w {Number(selectedAnn.bbox_w).toFixed(1)} · h {Number(selectedAnn.bbox_h).toFixed(1)}</span>
+<div className="geometry-grid">
+<GeometryField label="X" value={selectedAnn.bbox_x} max={width} onCommit={(value) => updateSelectedGeometry({ bbox_x: value })} />
+<GeometryField label="Y" value={selectedAnn.bbox_y} max={height} onCommit={(value) => updateSelectedGeometry({ bbox_y: value })} />
+<GeometryField label="W" value={selectedAnn.bbox_w} max={width} min={1} onCommit={(value) => updateSelectedGeometry({ bbox_w: value })} />
+<GeometryField label="H" value={selectedAnn.bbox_h} max={height} min={1} onCommit={(value) => updateSelectedGeometry({ bbox_h: value })} />
+</div>
 
 </div>
 
@@ -822,7 +893,14 @@ pointFromEvent={pointFromEvent}
 
 }
 
-function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, tool, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent }) {
+function GeometryField({ label, value, onCommit, min = 0, max }) {
+  const [text, setText] = useState(() => Number(value || 0).toFixed(1));
+  useEffect(() => setText(Number(value || 0).toFixed(1)), [value]);
+  const commit = () => onCommit(Math.max(min, Math.min(Number(max || Infinity), Number(text) || 0)));
+  return <label>{label}<input type="number" min={min} max={max} step="0.1" value={text} onChange={(event) => setText(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { commit(); event.currentTarget.blur(); } }} /></label>;
+}
+
+function EditableAnnotationLayer({ width, height, annotations, selectedId, setSelectedId, selectedIds, setSelectedIds, tool, annotationMode, defaultLabel, setDefaultLabel, setDraft, editDrag, setEditDrag, updateAnn, normalizeBox, pointFromEvent, onDrawComplete }) {
 
 const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
@@ -858,9 +936,10 @@ const label = defaultLabel.trim() || "unknown";
 
 setDefaultLabel(label);
 
-setDraft((rows) => [...rows, { id, label, bbox_x: p.x, bbox_y: p.y, bbox_w: 1, bbox_h: 1, shape_type: "rectangle" }]);
+setDraft((rows) => [...rows, { id, label, bbox_x: p.x, bbox_y: p.y, bbox_w: 1, bbox_h: 1, shape_type: "rectangle", promptOnly: annotationMode !== "manual" }]);
 
 setSelectedId(id);
+setSelectedIds([id]);
 
 setEditDrag({ type: "draw", id, start: p });
 
@@ -920,11 +999,11 @@ updateAnn(editDrag.id, normalizeBox({ x1: left, y1: top, x2: right, y2: bottom }
 
 return (
 
-<svg className="ann-layer editable" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => setEditDrag(null)}>
+<svg className="ann-layer editable" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" onMouseDown={beginDraw} onMouseMove={moveDrag} onMouseUp={() => { if (editDrag?.type === "draw") onDrawComplete?.(annotations.find((ann) => ann.id === editDrag.id)); setEditDrag(null); }}>
 
 {annotations.map((ann) => {
 
-const selected = ann.id === selectedId;
+const selected = ann.id === selectedId || selectedIds.includes(ann.id);
 
 const color = labelColor(ann.label);
 
@@ -944,22 +1023,26 @@ width={Math.max(1, Number(ann.bbox_w || 0))}
 
 height={Math.max(1, Number(ann.bbox_h || 0))}
 
-fill="rgba(0,0,0,0.01)"
+fill={ann.promptOnly ? "rgba(79,209,197,.08)" : "rgba(0,0,0,0.01)"}
 
 stroke={color}
 
-strokeDasharray={ann.algorithmSuggestion ? `${Math.max(10, width / 120)} ${Math.max(7, width / 170)}` : undefined}
+strokeDasharray={ann.promptOnly ? `${Math.max(4, width / 220)} ${Math.max(5, width / 180)}` : (ann.algorithmSuggestion ? `${Math.max(10, width / 120)} ${Math.max(7, width / 170)}` : undefined)}
 
 strokeWidth={selected ? Math.max(5, width / 550) : Math.max(3, width / 900)}
 
 onMouseDown={(event) => {
 
-if (tool !== "select") return;
-
 event.stopPropagation();
 
 const p = pointFromEvent(event);
-
+if (event.ctrlKey) {
+  const nextIds = selectedIds.includes(ann.id) ? selectedIds.filter((id) => id !== ann.id) : [...selectedIds, ann.id];
+  setSelectedIds(nextIds);
+  setSelectedId(nextIds.at(-1) || null);
+  return;
+}
+setSelectedIds([ann.id]);
 setSelectedId(ann.id);
 
 setEditDrag({ type: "move", id: ann.id, start: p, origin: { x: Number(ann.bbox_x), y: Number(ann.bbox_y) } });

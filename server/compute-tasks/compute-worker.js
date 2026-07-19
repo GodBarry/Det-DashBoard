@@ -1,5 +1,7 @@
 "use strict";
 
+const { runResidentAnnotation } = require("./annotation-resident-runner");
+
 function createComputeWorker({
   query, transaction, fs, path, storageRoot, store, writeObjectToFile,
   pythonEnvService, modelService, algorithmRuntimeSource, runChildProcess,
@@ -129,7 +131,21 @@ function createComputeWorker({
       return appendLog(task.id, stream, text);
     };
     try {
-      await runChildProcess(env.python_path, [adapterPath, "--det-dashboard-task", requestPath, "--output", outputPath], {
+      if (task.operation === "segment") {
+        await runResidentAnnotation({
+          key: [env.python_path, algorithm.id, modelPath, parameters.model_cfg || parameters.modelConfig || ""].join("|"),
+          requestId: task.id,
+          pythonPath: env.python_path,
+          adapterPath,
+          requestPath,
+          outputPath,
+          cwd: source?.cacheRoot || taskRoot,
+          env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [source?.cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+          onSpawn: (child) => query("UPDATE compute_tasks SET process_pid=$1 WHERE id=$2", [child.pid || null, task.id]).catch(() => {}),
+          onStdout: (text) => handleOutput("stdout", text),
+          onStderr: (text) => handleOutput("stderr", text),
+        });
+      } else await runChildProcess(env.python_path, [adapterPath, "--det-dashboard-task", requestPath, "--output", outputPath], {
         cwd: source?.cacheRoot || taskRoot,
         env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [source?.cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
         onSpawn: (child) => query("UPDATE compute_tasks SET process_pid=$1 WHERE id=$2", [child.pid || null, task.id]).catch(() => {}),
