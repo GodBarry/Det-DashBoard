@@ -13,6 +13,9 @@ async function query(text, params) {
 
 async function transaction(fn) {
   const client = await pool.connect();
+  client.on("error", (error) => {
+    console.error("PostgreSQL transaction client error:", error.message);
+  });
   try {
     await client.query("BEGIN");
     const result = await fn(client);
