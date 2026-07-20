@@ -12,6 +12,12 @@ const client = new Minio.Client({
   secretKey: minio.secretKey,
 });
 
+// Bucket readiness is process-wide. Checking it for every object makes large
+// imports turn one local file into one network round trip and races bucket
+// creation when several imports start together.
+let bucketState = "unknown";
+let bucketReadyPromise = null;
+
 async function ensureBucket() {
   const exists = await client.bucketExists(minio.bucket).catch(() => false);
   if (!exists) await client.makeBucket(minio.bucket);
@@ -134,14 +140,22 @@ function writableFallbackPath(objectKey) {
 }
 
 async function ensureBucketSafe() {
-  try {
-    await ensureBucket();
-    return true;
-  } catch (error) {
-    console.error("MinIO unavailable, using local fallback for new objects:", error.message);
-    fs.mkdirSync(path.join(storageRoot, "object-store-fallback"), { recursive: true });
-    return false;
+  if (bucketState === "ready") return true;
+  if (bucketState === "fallback") return false;
+  if (!bucketReadyPromise) {
+    bucketReadyPromise = ensureBucket()
+      .then(() => {
+        bucketState = "ready";
+        return true;
+      })
+      .catch((error) => {
+        bucketState = "fallback";
+        console.error("MinIO unavailable, using local fallback for new objects:", error.message);
+        fs.mkdirSync(path.join(storageRoot, "object-store-fallback"), { recursive: true });
+        return false;
+      });
   }
+  return bucketReadyPromise;
 }
 
 async function putFile(objectKey, filePath, meta = {}) {
