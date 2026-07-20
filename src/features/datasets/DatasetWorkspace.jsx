@@ -93,6 +93,8 @@ export function DatasetWorkspace({ mode, viewModel }) {
     showImportDialog,
     setShowImportDialog,
     parsedImportPaths,
+    importMode,
+    setImportMode,
     importPath,
     setImportPath,
     browseFolder,
@@ -897,6 +899,14 @@ resolveSelected={resolveSelectedConflicts}
 <label><span>抽帧间隔</span><div className="video-interval-control"><input aria-label="抽帧间隔" type="number" min="1" max="100000" step="1" value={frameInterval} onChange={(event) => setFrameInterval(Math.max(1, Math.floor(Number(event.target.value) || 1)))} /><em>每 N 帧保存 1 张</em></div></label>
 {selectedVideoId && <div className="video-extract-summary">{(() => { const video = projectVideos.find((item) => item.id === selectedVideoId); const metadata = video?.metadata_json || {}; return <><span>已抽取 <b>{video?.extracted_frame_count || 0}</b> 张</span><span>总帧数 <b>{metadata.totalFrames || "待解析"}</b></span><span>帧率 <b>{metadata.fps ? Number(metadata.fps).toFixed(2) : "待解析"}</b></span></>; })()}</div>}
 {!projectVideos.length && <div className="video-extract-empty">当前项目没有视频，请先通过“导入数据”登记视频资产。</div>}
+</div>
+
+<div className="import-profile-block">
+<span>导入方式</span>
+<select value={importMode} onChange={(event) => setImportMode(event.target.value)}>
+<option value="merge_project">合并导入到当前文件夹</option>
+<option value="preserve_structure">保持原来的目录结构</option>
+</select>
 </div>
 <footer><button onClick={() => setShowVideoExtractDialog(false)}>取消</button><button className="primary" disabled={!selectedVideoId} onClick={startVideoExtraction}>创建抽帧任务</button></footer>
 </section>

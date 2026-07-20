@@ -868,11 +868,6 @@ const commitAlgorithmSuggestions = async () => {
   onSaved?.();
 };
 
-useEffect(() => {
-  if (!annotationSession?.id || !annotationSuggestions.length) return;
-  commitAlgorithmSuggestions();
-}, [annotationSession?.id, annotationSuggestions.length]);
-
 const reviewAlgorithmSuggestions = async (status, suggestionIds = []) => {
   if (!annotationSession?.id) return;
   const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/suggestions`, {
@@ -1311,7 +1306,15 @@ onDrawComplete={(annotation) => {
 {selectedAnnRows.length > 1 ? <>
 <label className="bulk-label-field">批量命名<input value={bulkLabel} onChange={(event) => { setBulkLabel(event.target.value); updateSelectedLabels(event.target.value); }} /></label>
 <div className="selected-label-list">
-{selectedAnnRows.map((annotation, rowIndex) => <label key={annotation.id}><span>{rowIndex + 1}</span><input value={annotation.label || ""} onChange={(event) => { pushUndoSnapshot(`label:${annotation.id}`); updateAnn(annotation.id, { label: event.target.value }); }} /></label>)}
+{selectedAnnRows.map((annotation, rowIndex) => <div className="selected-annotation-row" key={annotation.id}>
+<label><span>{rowIndex + 1}</span><input value={annotation.label || ""} onChange={(event) => { pushUndoSnapshot(`label:${annotation.id}`); updateAnn(annotation.id, { label: event.target.value }); }} /></label>
+<div className="selected-annotation-geometry">
+<GeometryField label="X" value={annotation.bbox_x} max={width} onCommit={(value) => updateAnn(annotation.id, { bbox_x: value })} />
+<GeometryField label="Y" value={annotation.bbox_y} max={height} onCommit={(value) => updateAnn(annotation.id, { bbox_y: value })} />
+<GeometryField label="W" value={annotation.bbox_w} max={width} min={1} onCommit={(value) => updateAnn(annotation.id, { bbox_w: value })} />
+<GeometryField label="H" value={annotation.bbox_h} max={height} min={1} onCommit={(value) => updateAnn(annotation.id, { bbox_h: value })} />
+</div>
+</div>)}
 </div>
 </> : <label>标签<input value={selectedAnn.label || ""} onChange={(event) => { pushUndoSnapshot(`label:${selectedAnn.id}`); updateAnn(selectedAnn.id, { label: event.target.value }); setDefaultLabel(event.target.value); }} /></label>}
 <div className="geometry-grid">

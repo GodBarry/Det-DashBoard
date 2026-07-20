@@ -148,8 +148,8 @@ function createImportService(deps) {
       }
       const batchRow = (await client.query(
         `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
-         VALUES ($1,$2,'merge_project','server_path','scanning',0,0,$3) RETURNING *`,
-        [projectId, sourcePaths.map((sourcePath) => toDisplayDataPath(sourcePath)).join(";"), "正在扫描文件"],
+         VALUES ($1,$2,$3,'server_path','scanning',0,0,$4) RETURNING *`,
+        [projectId, sourcePaths.map((sourcePath) => toDisplayDataPath(sourcePath)).join(";"), body.importMode === "preserve_structure" ? "preserve_structure" : "merge_project", "正在扫描文件"],
       )).rows[0];
       return { project: projectRow, batch: batchRow };
     });
