@@ -160,9 +160,20 @@ async function ensureBucketSafe() {
 
 async function putFile(objectKey, filePath, meta = {}) {
   if (await ensureBucketSafe()) {
-    await client.fPutObject(minio.bucket, objectKey, filePath, meta);
-    writeFallbackFile(objectKey, filePath);
-    return objectKey;
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await client.fPutObject(minio.bucket, objectKey, filePath, meta);
+        writeFallbackFile(objectKey, filePath);
+        return objectKey;
+      } catch (error) {
+        lastError = error;
+        bucketState = "unknown";
+        bucketReadyPromise = null;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt)));
+      }
+    }
+    console.error(`MinIO upload failed after retries; using local fallback for ${objectKey}:`, lastError?.message || "unknown error");
   }
   writeFallbackFile(objectKey, filePath);
   return objectKey;

@@ -35,6 +35,11 @@ function createImportService(deps) {
     now = Date.now,
   } = deps;
 
+  // Keep large imports serialized across projects. PostgreSQL and MinIO are
+  // shared services; parallel directory imports otherwise amplify transient
+  // tunnel resets and make recovery ambiguous.
+  let importChain = Promise.resolve();
+
   async function ensureSplitProjects(parentProject, splitPlan, ownerUserId = parentProject.owner_user_id) {
     if (!splitPlan) return {};
     const ids = {};
@@ -158,7 +163,7 @@ function createImportService(deps) {
     body.actorId = actor.id;
     body.splitProjectIds = splitProjectIds;
 
-    const importTask = new Promise((resolve) => defer(resolve))
+    const importTask = importChain
       .then(() => runImportBatch(batch.id, project, body))
       .catch(async (error) => {
         logger.error("import failed", error);
@@ -167,6 +172,7 @@ function createImportService(deps) {
           [error.message || "导入失败", batch.id],
         ).catch(() => {});
       });
+    importChain = importTask.catch(() => {});
     lifecycle.trackImport(importTask);
 
     return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath) };
