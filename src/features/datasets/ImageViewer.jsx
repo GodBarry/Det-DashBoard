@@ -868,6 +868,17 @@ const commitAlgorithmSuggestions = async () => {
   onSaved?.();
 };
 
+useEffect(() => {
+  if (!editMode || annotationMode !== "segmentation" || !annotationSuggestions.length) return undefined;
+  const onConfirmSuggestion = (event) => {
+    if (event.key !== "Enter" || event.isComposing || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    event.preventDefault();
+    commitAlgorithmSuggestions();
+  };
+  window.addEventListener("keydown", onConfirmSuggestion);
+  return () => window.removeEventListener("keydown", onConfirmSuggestion);
+}, [editMode, annotationMode, annotationSuggestions.length, annotationSession?.id, replaceOverlaps, overlapIou]);
+
 const reviewAlgorithmSuggestions = async (status, suggestionIds = []) => {
   if (!annotationSession?.id) return;
   const response = await fetch(`/api/annotation/sessions/${annotationSession.id}/suggestions`, {
