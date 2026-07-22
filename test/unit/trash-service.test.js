@@ -9,12 +9,15 @@ function httpError(statusCode, message) {
   return error;
 }
 
-function createFixture(query) {
+function createFixture(query, objectKeys = []) {
   const removedObjects = [];
   const service = createTrashService({
     query,
     transaction: async (callback) => callback({ query }),
     store: {
+      async listObjectKeys() {
+        return objectKeys;
+      },
       async removeObject(objectKey) {
         removedObjects.push(objectKey);
       },
@@ -44,6 +47,16 @@ test("project tree soft delete and restore preserve recursive SQL boundaries", a
   assert.match(calls[1].sql, /SELECT id FROM descendants\s+UNION\s+SELECT id FROM ancestors/);
   assert.match(calls[1].sql, /UPDATE projects SET deleted_at=NULL/);
   assert.match(calls[1].sql, /WHERE id IN \(SELECT id FROM affected\)/);
+});
+
+test("raw label cleanup removes only objects owned by deleted label versions", async () => {
+  const { removedObjects, service } = createFixture(async () => ({ rows: [], rowCount: 0 }), [
+    "objects/raw-labels/project-1/version-1/one.json",
+    "objects/raw-labels/project-1/version-2/raw-labels.jsonl.gz",
+  ]);
+
+  assert.equal(await service.cleanupRawLabelObjects(["version-1"]), 1);
+  assert.deepEqual(removedObjects, ["objects/raw-labels/project-1/version-1/one.json"]);
 });
 
 test("import soft delete and restore preserve table and status updates", async () => {

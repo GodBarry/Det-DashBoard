@@ -80,6 +80,19 @@ function createTrashService({ query, transaction, store, httpError }) {
     return { image_assets: images.rowCount, video_assets: videos.rowCount };
   }
 
+  async function cleanupRawLabelObjects(labelVersionIds = []) {
+    if (typeof store.listObjectKeys !== "function") return 0;
+    const suffixes = labelVersionIds.map((versionId) => `/${versionId}/`);
+    if (!suffixes.length) return 0;
+    const keys = await store.listObjectKeys("objects/raw-labels/");
+    let removed = 0;
+    for (const key of keys.filter((item) => suffixes.some((suffix) => item.includes(suffix)))) {
+      await store.removeObject(key);
+      removed += 1;
+    }
+    return removed;
+  }
+
   async function emptyImportTrash(projectId) {
     return transaction(async (client) => {
       const batches = await client.query(
@@ -110,6 +123,7 @@ function createTrashService({ query, transaction, store, httpError }) {
         "DELETE FROM label_versions WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
         [ids],
       );
+      await cleanupRawLabelObjects(labelVersions.rows.map((row) => row.id));
       const images = await client.query(
         "DELETE FROM project_images WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
         [ids],
@@ -147,6 +161,7 @@ function createTrashService({ query, transaction, store, httpError }) {
       if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
       await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
       const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+      await cleanupRawLabelObjects(labelVersions.rows.map((row) => row.id));
       const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
@@ -164,6 +179,7 @@ function createTrashService({ query, transaction, store, httpError }) {
 
       await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
       const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+      await cleanupRawLabelObjects(labelVersions.rows.map((row) => row.id));
       const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
@@ -179,6 +195,7 @@ function createTrashService({ query, transaction, store, httpError }) {
     softDeleteImport,
     restoreImport,
     cleanupUnreferencedAssets,
+    cleanupRawLabelObjects,
     emptyImportTrash,
     deleteProjectPermanently,
     emptyProjectTrash,
