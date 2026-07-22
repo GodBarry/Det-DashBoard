@@ -5,6 +5,10 @@ function createTrashService({ query, transaction, store, httpError }) {
   if (typeof httpError !== "function") throw new TypeError("createTrashService requires httpError");
 
   async function removeObjects(keys, concurrency = 24) {
+    if (typeof store.removeObjects === "function") {
+      await store.removeObjects(keys);
+      return;
+    }
     for (let index = 0; index < keys.length; index += concurrency) {
       await Promise.all(keys.slice(index, index + concurrency).map((key) => store.removeObject(key)));
     }

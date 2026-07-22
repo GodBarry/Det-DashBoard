@@ -230,6 +230,24 @@ async function removeObject(objectKey) {
   }
 }
 
+async function removeObjects(objectKeys = []) {
+  const keys = Array.from(new Set(objectKeys.map(String).filter(Boolean)));
+  if (!keys.length) return;
+  if (await ensureBucketSafe()) {
+    for (let index = 0; index < keys.length; index += 1000) {
+      const batch = keys.slice(index, index + 1000);
+      await client.removeObjects(minio.bucket, batch).catch(async () => {
+        await Promise.all(batch.map((key) => client.removeObject(minio.bucket, key).catch(() => {})));
+      });
+    }
+  }
+  for (const key of keys) {
+    for (const filePath of [fallbackPath(key), secondaryFallbackPath(key), legacyFallbackPath(key)]) {
+      fs.rmSync(filePath, { force: true });
+    }
+  }
+}
+
 async function objectSize(objectKey) {
   const files = localObjectFiles(objectKey);
   if (files.length) return files.reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
@@ -293,5 +311,5 @@ function extOf(filePath) {
   return path.extname(filePath).toLowerCase() || ".bin";
 }
 
-module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, removeObjects, extOf, localFallbackPath, bucket: minio.bucket };
 
