@@ -230,9 +230,10 @@ async function removeObject(objectKey) {
   }
 }
 
-async function removeObjects(objectKeys = []) {
+async function removeObjects(objectKeys = [], options = {}) {
   const keys = Array.from(new Set(objectKeys.map(String).filter(Boolean)));
   if (!keys.length) return;
+  const collapsedPrefixes = Array.from(new Set((options.collapsePrefixes || []).map(String).filter(Boolean)));
   if (await ensureBucketSafe()) {
     for (let index = 0; index < keys.length; index += 1000) {
       const batch = keys.slice(index, index + 1000);
@@ -241,7 +242,16 @@ async function removeObjects(objectKeys = []) {
       });
     }
   }
-  for (const key of keys) {
+  for (const prefix of collapsedPrefixes) {
+    for (const root of [
+      path.join(storageRoot, "object-store-fallback"),
+      path.join(fallbackStorageRoot, "object-store-fallback"),
+      path.join(__dirname, "..", "object-store-fallback"),
+    ]) {
+      fs.rmSync(path.join(root, ...prefix.split("/").filter(Boolean)), { recursive: true, force: true });
+    }
+  }
+  for (const key of keys.filter((item) => !collapsedPrefixes.some((prefix) => item.startsWith(prefix)))) {
     for (const filePath of [fallbackPath(key), secondaryFallbackPath(key), legacyFallbackPath(key)]) {
       fs.rmSync(filePath, { force: true });
     }

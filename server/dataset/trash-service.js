@@ -4,9 +4,9 @@ function createTrashService({ query, transaction, store, httpError }) {
   if (!store || typeof store.removeObject !== "function") throw new TypeError("createTrashService requires store");
   if (typeof httpError !== "function") throw new TypeError("createTrashService requires httpError");
 
-  async function removeObjects(keys, concurrency = 24) {
+  async function removeObjects(keys, concurrency = 24, options = {}) {
     if (typeof store.removeObjects === "function") {
-      await store.removeObjects(keys);
+      await store.removeObjects(keys, options);
       return;
     }
     for (let index = 0; index < keys.length; index += concurrency) {
@@ -100,7 +100,10 @@ function createTrashService({ query, transaction, store, httpError }) {
     const keys = (await Promise.all(prefixes.map((prefix) => store.listObjectKeys(prefix)))).flat();
     let removed = 0;
     const matchingKeys = keys.filter((item) => suffixes.some((suffix) => item.includes(suffix)));
-    await removeObjects(matchingKeys);
+    const collapsedPrefixes = versions
+      .filter((item) => item.project_id)
+      .map((item) => `objects/raw-labels/${item.project_id}/${item.id}/`);
+    await removeObjects(matchingKeys, 24, { collapsePrefixes: collapsedPrefixes });
     removed += matchingKeys.length;
     return removed;
   }
