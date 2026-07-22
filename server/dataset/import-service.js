@@ -134,9 +134,9 @@ function createImportService(deps) {
     }
     body.sourcePath = sourcePaths[0];
     body.sourcePaths = sourcePaths;
-    const manifestGroups = sourcePaths.map((sourceRoot) => ({ sourceRoot, files: walk(sourceRoot) }));
-    const splitPlan = discoverDatasetSplitPlan(manifestGroups);
-    body.splitPlan = splitPlan;
+    // Directory traversal belongs to the observable background task. Performing it
+    // here blocked the POST response and scanned large datasets twice.
+    body.splitPlan = null;
 
     const { project, batch } = await transaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [String(projectId)]);
@@ -159,9 +159,8 @@ function createImportService(deps) {
       return { project: projectRow, batch: batchRow };
     });
     await resourceAccess.assignOwner("import_batches", batch.id, actor);
-    const splitProjectIds = await ensureSplitProjects(project, splitPlan, actor.id);
     body.actorId = actor.id;
-    body.splitProjectIds = splitProjectIds;
+    body.splitProjectIds = {};
 
     const importTask = importChain
       .then(() => runImportBatch(batch.id, project, body))
@@ -175,7 +174,7 @@ function createImportService(deps) {
     importChain = importTask.catch(() => {});
     lifecycle.trackImport(importTask);
 
-    return { project, batch, splitResult: serializeSplitPlan(splitPlan, splitProjectIds, toDisplayDataPath) };
+    return { project, batch, splitResult: { detected: false, pending: true, splits: {} } };
   }
 
   async function importCancelled(batchId) {
@@ -201,6 +200,10 @@ function createImportService(deps) {
     try {
       for (const sourceRoot of sourceRoots) {
         const files = await walkAsync(sourceRoot, {
+          onProgress: ({ scannedDirectories, discoveredFiles, pendingDirectories }) => query(
+            "UPDATE import_batches SET status='scanning', processed_files=$1, message=$2 WHERE id=$3",
+            [discoveredFiles, `正在建立文件索引：已扫描 ${scannedDirectories} 个目录，发现 ${discoveredFiles} 个文件，待扫描 ${pendingDirectories} 个目录`, batchId],
+          ),
           shouldStop: async () => {
             if (lifecycle.isShuttingDown()) return true;
             const currentTime = now();
@@ -407,6 +410,23 @@ function createImportService(deps) {
     return result.rows;
   }
 
+  async function listActiveImports(actor, scope = "mine") {
+    const params = [];
+    const scoped = resourceAccess.scopeSql({ table: "import_batches", alias: "b", actor, scope, params });
+    return (await query(
+      `SELECT b.*, p.name AS project_name,
+        CASE WHEN b.total_files > 0 THEN round((b.processed_files::numeric / b.total_files::numeric) * 100)::int
+             WHEN b.status IN ('scanning','preparing') THEN 2 ELSE 0 END AS progress
+       FROM import_batches b
+       JOIN projects p ON p.id=b.project_id
+       WHERE b.deleted_at IS NULL AND b.status IN ('pending','preparing','scanning','running','cancel_requested')
+         AND ${scoped.sql}
+       ORDER BY b.created_at DESC
+       LIMIT 50`,
+      scoped.params,
+    )).rows;
+  }
+
   async function softDeleteProjectImages(projectId, ids = []) {
     const uniqueIds = Array.from(new Set((ids || []).map(String).filter(Boolean)));
     if (!uniqueIds.length) return { deleted: 0 };
@@ -430,6 +450,7 @@ function createImportService(deps) {
     runImportBatch,
     upsertProjectImage,
     listImports,
+    listActiveImports,
     softDeleteProjectImages,
   };
 }

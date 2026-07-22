@@ -115,6 +115,7 @@ function createPathService(options = {}) {
     const root = scope === "data" ? dataRoot : browseRoot;
     const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
     const allDrives = scope === "browse" && browseAllDrives && platform === "win32";
+    if (target === "__drives__" && !allDrives) target = displayRoot;
     if (allDrives && (!target || target === "__drives__")) {
       const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         .split("")
@@ -148,6 +149,27 @@ function createPathService(options = {}) {
           : ""),
       dirs,
     };
+  }
+
+  function listFiles(target, scope = "browse", extensions = []) {
+    const listing = listFolders(target, scope);
+    if (listing.current === "__drives__") return { ...listing, files: [] };
+    const root = scope === "data" ? dataRoot : browseRoot;
+    const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
+    const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
+    const allowed = new Set((Array.isArray(extensions) ? extensions : String(extensions || "").split(","))
+      .map((value) => String(value).trim().toLowerCase())
+      .filter(Boolean)
+      .map((value) => value.startsWith(".") ? value : `.${value}`));
+    const files = fs.readdirSync(current, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && (!allowed.size || allowed.has(path.extname(entry.name).toLowerCase())))
+      .map((entry) => {
+        const fullPath = path.join(current, entry.name);
+        const stat = fs.statSync(fullPath);
+        return { name: entry.name, path: toDisplayDataPath(fullPath), size: stat.size, modifiedAt: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+    return { ...listing, files };
   }
 
   function psQuote(value) {
@@ -228,6 +250,7 @@ function createPathService(options = {}) {
     toDisplayDataPath,
     toScopedInternalPath,
     listFolders,
+    listFiles,
     runFolderDialog,
     selectFolder,
   };

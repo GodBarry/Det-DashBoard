@@ -20,6 +20,7 @@ function createFixture(overrides = {}) {
     resourceAccess: overrides.resourceAccess || {
       async assertProjectWrite() {},
       async assignOwner(...args) { ownerCalls.push(args); },
+      scopeSql({ params }) { return { sql: "TRUE", params }; },
     },
     lifecycle: overrides.lifecycle || {
       isShuttingDown: () => false,
@@ -82,18 +83,41 @@ test("importPath preserves creation transaction, ownership, lifecycle, and respo
 
   const result = await service.importPath(body, actor);
 
-  assert.deepEqual(result, { project, batch, splitResult: { detected: false, splits: {}, ids: {} } });
+  assert.deepEqual(result, { project, batch, splitResult: { detected: false, pending: true, splits: {} } });
   assert.deepEqual(transactionCalls.map(({ params }) => params), [
     ["project-1"],
     ["project-1"],
     ["project-1"],
-    ["project-1", "display:C:\\data", "正在扫描文件"],
+    ["project-1", "display:C:\\data", "merge_project", "正在扫描文件"],
   ]);
   assert.deepEqual(ownerCalls, [["import_batches", "batch-1", actor]]);
   assert.equal(tracked.length, 1);
-  assert.equal(deferred.length, 1);
   assert.deepEqual(body.sourcePaths, ["C:\\data"]);
   assert.equal(body.actorId, "user-1");
+});
+
+test("listActiveImports returns scoped observable import progress", async () => {
+  const calls = [];
+  const rows = [{ id: "batch-1", project_name: "demo", status: "scanning", progress: 2 }];
+  const resourceAccess = {
+    scopeSql({ params, scope }) {
+      assert.equal(scope, "mine");
+      params.push("user-1");
+      return { sql: "b.owner_user_id=$1", params };
+    },
+  };
+  const { service } = createFixture({
+    resourceAccess,
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows };
+    },
+  });
+
+  assert.deepEqual(await service.listActiveImports({ id: "user-1" }, "mine"), rows);
+  assert.match(calls[0].sql, /status IN \('pending','preparing','scanning','running','cancel_requested'\)/);
+  assert.match(calls[0].sql, /b\.owner_user_id=\$1/);
+  assert.deepEqual(calls[0].params, ["user-1"]);
 });
 
 test("cancelImport and importCancelled preserve cancellation SQL and status rules", async () => {

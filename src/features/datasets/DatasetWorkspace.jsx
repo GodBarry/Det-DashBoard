@@ -26,6 +26,7 @@ export function DatasetWorkspace({ mode, viewModel }) {
     openHomeFolder,
     createProject,
     homeStats,
+    refreshHome,
     breadcrumbs,
     datasetScope,
     setDatasetScope,
@@ -403,6 +404,8 @@ restoreAllProjects={restoreAllProjects}
 emptyProjectTrash={emptyProjectTrash}
 
 deleteProjectPermanently={deleteProjectPermanently}
+
+refreshHome={refreshHome}
 
 />
 

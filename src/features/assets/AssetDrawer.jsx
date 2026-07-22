@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronLeft, File, Folder, X } from "lucide-react";
+import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 
 import { getAssetDrawerSubtitle, getAssetDrawerTitle } from "./assetDrawerPresentation.js";
 import { DrawerField } from "./DrawerField.jsx";
@@ -28,6 +29,8 @@ export function AssetDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [analysis, setAnalysis] = useState(null);
+  const [filePicker, setFilePicker] = useState(null);
+  const [filePickerBusy, setFilePickerBusy] = useState(false);
   const previousAutoName = useRef("");
   const selectedModel = mlModels.find((model) => model.id === versionForm.modelId);
   const selectedProject = projects.find((project) => project.id === versionForm.datasetProjectId);
@@ -83,6 +86,20 @@ export function AssetDrawer({
     if (mode === "algorithm") window.alert("算法适配器导入接口待接入，当前已完成界面布局");
   };
 
+  const openServerFilePicker = async (target = "__drives__") => {
+    setFilePickerBusy(true);
+    try {
+      const response = await fetch(`/api/fs/files?path=${encodeURIComponent(target)}&extensions=.pt,.pth,.onnx`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取服务器目录失败");
+      setFilePicker(data);
+    } catch (error) {
+      setSubmitMessage(error.message);
+    } finally {
+      setFilePickerBusy(false);
+    }
+  };
+
   return (
     <aside className="asset-drawer" role="dialog" aria-modal="true" aria-label={drawerTitle}>
       <div className="drawer-head">
@@ -112,9 +129,10 @@ export function AssetDrawer({
           <>
             <DrawerField label="所属模型簇"><select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}><option value="">请选择模型</option>{mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></DrawerField>
             <DrawerField label="版本名称"><input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="yolov8n_ultralytics_8.4.80_cpu" /></DrawerField>
-            <DrawerField label="权重来源"><div className="drawer-segment"><button className="active" type="button">本地路径</button><button type="button">MinIO路径</button><button type="button">训练产物</button></div></DrawerField>
-            <DrawerField label="权重文件路径"><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} placeholder="C:\\Users\\Administrator\\Downloads\\v8_s.pt" /></DrawerField>
-            <DrawerField label="训练数据"><select value={versionForm.datasetProjectId || "unknown"} onChange={(e) => setVersionForm({ ...versionForm, datasetProjectId: e.target.value })}><option value="unknown">未知</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></DrawerField>
+            <DrawerField label="权重来源"><div className="drawer-segment">{[["local", "本地路径"], ["server", "服务器路径"], ["network", "网络路径"]].map(([value, label]) => <button className={(versionForm.sourceType || "local") === value ? "active" : ""} type="button" key={value} onClick={() => { setVersionForm({ ...versionForm, sourceType: value, sourcePath: "" }); setAnalysis(null); }}>{label}</button>)}</div></DrawerField>
+            <DrawerField label={(versionForm.sourceType || "local") === "network" ? "SSH / SCP 路径" : "权重文件路径"}><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} onIconClick={(versionForm.sourceType || "local") === "network" ? undefined : () => openServerFilePicker("__drives__")} iconTitle="浏览服务器权重文件" placeholder={(versionForm.sourceType || "local") === "network" ? "scp://user@server/path/best.pth" : "E:\\models\\best.pth 或 /srv/models/best.pth"} /></DrawerField>
+            {(versionForm.sourceType || "local") === "network" && <p className="drawer-source-hint">{"服务器将使用已配置的 SSH 密钥通过 SCP 下载；支持 scp://user@host/path 或 user@host:/path。"}</p>}
+            <DrawerField label="训练数据"><div className="asset-dataset-picker"><CascadingProjectPicker projects={projects} value={versionForm.datasetProjectId === "unknown" ? "" : versionForm.datasetProjectId} onChange={(value) => setVersionForm({ ...versionForm, datasetProjectId: value || "unknown" })} storageKey="asset-version-dataset" ariaLabel="选择训练数据集" /><button type="button" className={`asset-unknown-dataset ${versionForm.datasetProjectId === "unknown" ? "active" : ""}`} onClick={() => setVersionForm({ ...versionForm, datasetProjectId: "unknown" })}>未知</button></div></DrawerField>
             <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
             <DrawerField label="说明" tall><textarea value={versionForm.description || ""} onChange={(e) => setVersionForm({ ...versionForm, description: e.target.value })} placeholder="请输入说明（可选）" maxLength={500} /></DrawerField>
             <div className={`auto-parse-card ${analysis?.error ? "has-error" : ""}`}><h3>自动解析</h3><p><span>文件大小</span><b>{analysis?.loading ? "解析中..." : analysis?.sizeLabel || "--"}</b></p><p><span>SHA256</span><b title={analysis?.sha256}>{analysis?.sha256 ? `${analysis.sha256.slice(0, 16)}...` : analysis?.sha256Pending ? "登记时计算" : "--"}</b></p><p><span>框架</span><b>{analysis?.framework || selectedModel?.framework || "待解析"}</b></p><p><span>任务</span><b>{analysis?.taskType || selectedModel?.task_type || "detect"}</b></p>{analysis?.error && <p className="drawer-inline-error">{analysis.error}</p>}</div>
@@ -145,6 +163,7 @@ export function AssetDrawer({
           </>
         )}
       </div>
+      {filePicker && <div className="asset-file-picker"><div className="asset-file-picker-head"><button type="button" disabled={!filePicker.parent || filePickerBusy} onClick={() => openServerFilePicker(filePicker.parent)}><ChevronLeft size={14} /></button><b title={filePicker.current}>{filePicker.current}</b><button type="button" onClick={() => setFilePicker(null)}><X size={14} /></button></div><div className="asset-file-picker-list">{(filePicker.dirs || []).map((dir) => <button type="button" key={dir.path} onClick={() => openServerFilePicker(dir.path)}><Folder size={15} /><span>{dir.name}</span></button>)}{(filePicker.files || []).map((file) => <button type="button" key={file.path} onClick={() => { setVersionForm({ ...versionForm, sourcePath: file.path }); setFilePicker(null); }}><File size={15} /><span>{file.name}</span><em>{file.size >= 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.ceil(file.size / 1024)} KB`}</em></button>)}{filePickerBusy && <p>正在读取目录...</p>}{!filePickerBusy && !(filePicker.dirs || []).length && !(filePicker.files || []).length && <p>此目录没有可用的模型文件</p>}</div></div>}
       <div className="drawer-actions">
         {submitMessage && <span className="drawer-submit-message">{submitMessage}</span>}
         <button onClick={onClose}>取消</button>

@@ -79,6 +79,10 @@ function createDatasetRoutes(deps) {
       return true;
     }
 
+    if (method === "GET" && pathname === "/api/imports") {
+      sendJson(res, { imports: await importService.listActiveImports(actor, requestedScope(parsed, actor)) });
+      return true;
+    }
     if (method === "POST" && pathname === "/api/imports") {
       sendJson(res, await importService.importPath(await readBody(req), actor));
       return true;

@@ -83,6 +83,7 @@ function walk(dir, out = []) {
 async function walkAsync(root, options = {}) {
   const files = [];
   const pending = [root];
+  let scannedDirectories = 0;
   while (pending.length) {
     if (options.shouldStop && await options.shouldStop()) {
       const error = new Error("directory scan cancelled");
@@ -96,10 +97,14 @@ async function walkAsync(root, options = {}) {
     } catch {
       continue;
     }
+    scannedDirectories += 1;
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) pending.push(full);
       else if (entry.isFile()) files.push(full);
+    }
+    if (options.onProgress && (scannedDirectories === 1 || scannedDirectories % 20 === 0 || pending.length === 0)) {
+      await options.onProgress({ scannedDirectories, discoveredFiles: files.length, pendingDirectories: pending.length });
     }
   }
   return files;

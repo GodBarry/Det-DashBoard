@@ -1,3 +1,5 @@
+const childProcess = require("node:child_process");
+
 function createModelService({
   query,
   resourceAccess,
@@ -90,11 +92,51 @@ function createModelService({
     return stat;
   }
 
+  function isRemoteWeightPath(value) {
+    return /^(?:scp|ssh):\/\//i.test(value) || /^[^@\s]+@[^:\s]+:.+/.test(value);
+  }
+
+  function downloadRemoteWeight(remotePath) {
+    let source = remotePath;
+    const args = ["-q"];
+    if (/^(?:scp|ssh):\/\//i.test(remotePath)) {
+      const parsed = new URL(remotePath.replace(/^ssh:/i, "scp:"));
+      if (!parsed.username || !parsed.hostname || !parsed.pathname) throw new Error("网络路径格式应为 scp://用户@主机/文件路径");
+      if (parsed.port) args.push("-P", parsed.port);
+      source = `${decodeURIComponent(parsed.username)}@${parsed.hostname}:${decodeURIComponent(parsed.pathname)}`;
+    }
+    const remoteName = path.basename(source.split(":").at(-1) || "weights.pth");
+    const targetDir = path.join(storageRoot, "runtime", "remote-model-imports", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    const targetPath = path.join(targetDir, remoteName);
+    args.push(source, targetPath);
+    return new Promise((resolve, reject) => {
+      const child = childProcess.spawn("scp", args, { windowsHide: true, shell: false });
+      let stderr = "";
+      const timer = setTimeout(() => { child.kill(); reject(new Error("SCP 下载超时")); }, 30 * 60 * 1000);
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", (error) => { clearTimeout(timer); reject(new Error(`无法启动 SCP：${error.message}`)); });
+      child.on("close", (code) => { clearTimeout(timer); if (code === 0) resolve(targetPath); else reject(new Error(stderr.trim() || `SCP 下载失败，退出码 ${code}`)); });
+    });
+  }
+
   async function inspectModelWeight(body = {}) {
     const modelId = body.modelId || body.model_id;
     const sourcePath = String(body.sourcePath || body.source_path || "").trim();
     const model = modelId ? (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0] : null;
     if (!model) throw new Error("请先选择模型簇");
+    if (isRemoteWeightPath(sourcePath)) return {
+      fileName: path.basename(sourcePath.split(":").at(-1) || sourcePath),
+      size: null,
+      sizeLabel: "登记时下载",
+      sha256: null,
+      sha256Pending: true,
+      framework: inferWeightFramework(sourcePath, model),
+      taskType: model.task_type,
+      epoch: Number(path.basename(sourcePath).match(/epoch[_-]?(\d+)/i)?.[1] || 0) || null,
+      remote: true,
+    };
     const stat = validateWeightPath(sourcePath);
     const sha256Pending = stat.size > 128 * 1024 * 1024;
     const sha256 = sha256Pending ? null : await hashFile(sourcePath);
@@ -119,7 +161,8 @@ function createModelService({
     if (!model) throw new Error("模型簇不存在");
     const requestedStage = String(body.stage || "pretrained").trim().toLowerCase();
     const stage = ["pretrained", "training", "candidate", "production"].includes(requestedStage) ? requestedStage : "pretrained";
-    const sourcePath = String(body.sourcePath || body.source_path || "").trim();
+    const importSourcePath = String(body.sourcePath || body.source_path || "").trim();
+    const sourcePath = isRemoteWeightPath(importSourcePath) ? await downloadRemoteWeight(importSourcePath) : importSourcePath;
     const stat = validateWeightPath(sourcePath);
     const datasetProjectId = ["", "unknown", "__unknown__"].includes(String(body.datasetProjectId || body.dataset_project_id || ""))
       ? null
@@ -163,14 +206,14 @@ function createModelService({
         size: stat.size,
         sha256: sha,
         extension: ext,
-        importSourcePath: sourcePath,
+        importSourcePath,
         createdAt: new Date().toISOString(),
       };
       await store.putJson(manifestKey, manifest);
       await query(
         `INSERT INTO model_files (model_version_id, artifact_type, path, size, sha256, metadata_json)
          VALUES ($1,'weights',$2,$3,$4,$5)`,
-        [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath, weightRole: stage === "pretrained" ? "pretrained" : "other" })],
+        [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath, weightRole: stage === "pretrained" ? "pretrained" : "other" })],
       );
       } catch (error) {
         await store.removeObject?.(objectKey).catch(() => {});

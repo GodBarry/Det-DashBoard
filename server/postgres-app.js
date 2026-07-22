@@ -162,6 +162,7 @@ const {
   toInternalDataPath,
   toDisplayDataPath,
   listFolders,
+  listFiles,
   selectFolder,
 } = pathService;
 modelMaintenanceService = createModelMaintenanceService({ query, store, fs, path, storageRoot, isInsideRoot });
@@ -331,6 +332,9 @@ async function route(req, res) {
   }
   if (method === "GET" && parsed.pathname === "/api/fs/dirs") {
     return sendJson(res, listFolders(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse"));
+  }
+  if (method === "GET" && parsed.pathname === "/api/fs/files") {
+    return sendJson(res, listFiles(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse", parsed.query.extensions || ""));
   }
   if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
     if (nativeDialogMode === "disabled") {

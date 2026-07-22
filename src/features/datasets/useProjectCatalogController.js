@@ -114,7 +114,16 @@ export function useProjectCatalogController({
   function deleteProject(projectId) {
     if (!confirm("确定删除该项目或文件夹吗？其下级文件夹会一并进入回收站；可在回收站恢复，清空回收站后将永久删除")) return;
     const projectName = projectById.get(projectId)?.name || projectId;
-    fetchRequest(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => { recordDatasetActivity("删除", `项目已移入回收站：${projectName}`); refreshHome(); }).catch((err) => { recordDatasetActivity("删除", `删除项目失败：${projectName}`, "error", err.message); setError(err.message); });
+    const descendants = new Set([projectId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const project of projects) if (project.parent_id && descendants.has(project.parent_id) && !descendants.has(project.id)) { descendants.add(project.id); changed = true; }
+    }
+    const removedRows = projects.filter((project) => descendants.has(project.id));
+    setProjects((current) => current.filter((project) => !descendants.has(project.id)));
+    if (currentFolderId && descendants.has(currentFolderId)) setCurrentFolderId(null);
+    fetchRequest(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => { recordDatasetActivity("删除", `项目已移入回收站：${projectName}`); refreshHome(); }).catch((err) => { setProjects((current) => [...current, ...removedRows]); recordDatasetActivity("删除", `删除项目失败：${projectName}`, "error", err.message); setError(err.message); });
   }
 
   function startRenameProject(project) {
@@ -174,22 +183,26 @@ export function useProjectCatalogController({
   function deleteProjectPermanently(projectId) {
     if (!confirm("确定永久删除该项目及其子文件夹吗？该操作不可恢复")) return;
 
+    const previousTrash = trashProjects;
+    setTrashProjects((current) => current.filter((project) => project.id !== projectId));
     fetchRequest(`/api/projects/${projectId}/permanent`, { method: "DELETE" })
       .then((response) => response.json().catch(() => ({})).then((data) => {
         if (!response.ok) throw new Error(data.error || "永久删除项目失败");
         refreshHome();
         recordDatasetActivity("永久删除", `已永久删除项目：${projectId}`);
       }))
-      .catch((err) => { recordDatasetActivity("永久删除", `永久删除失败：${projectId}`, "error", err.message); setError(err.message || "永久删除项目失败"); });
+      .catch((err) => { setTrashProjects(previousTrash); recordDatasetActivity("永久删除", `永久删除失败：${projectId}`, "error", err.message); setError(err.message || "永久删除项目失败"); });
   }
 
   function emptyProjectTrash() {
     if (!trashProjects.length) return;
     if (!confirm(`确定清空项目回收站吗？将永久删除 ${trashProjects.length} 个项目及其不再被引用的数据。`)) return;
 
+    const previousTrash = trashProjects;
+    setTrashProjects([]);
     fetchRequest("/api/projects/trash/empty", { method: "DELETE" })
       .then(() => refreshHome())
-      .catch((err) => setError("清空项目回收站失败：" + err.message));
+      .catch((err) => { setTrashProjects(previousTrash); setError("清空项目回收站失败：" + err.message); });
   }
 
   function openProject(project) {

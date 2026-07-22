@@ -337,6 +337,8 @@ createProject,
 
 homeStats,
 
+refreshHome,
+
 breadcrumbs,
 
 datasetScope,
