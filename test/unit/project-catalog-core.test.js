@@ -111,3 +111,11 @@ test("getCreateProjectContext preserves workspace parent and third-level limit i
     parentId: "batch",
   });
 });
+
+test("leaf projects always open a workspace even before assets are imported", async () => {
+  const { shouldOpenProjectWorkspace } = await coreModulePromise;
+
+  assert.equal(shouldOpenProjectWorkspace({ child_count: 0, image_count: 0, video_count: 0 }), true);
+  assert.equal(shouldOpenProjectWorkspace({ child_count: 0, image_count: 86, video_count: 0 }), true);
+  assert.equal(shouldOpenProjectWorkspace({ child_count: 2, image_count: 86, video_count: 0 }), false);
+});

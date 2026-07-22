@@ -6,6 +6,7 @@ import {
   buildProjectById,
   buildProjectLastImportAt,
   getCreateProjectContext,
+  shouldOpenProjectWorkspace,
 } from "./project-catalog-core.js";
 import { recordDatasetActivity } from "./datasetActivityLog.js";
 
@@ -233,10 +234,7 @@ export function useProjectCatalogController({
   }
 
   function openHomeFolder(project) {
-    const hasChildren = Number(project?.child_count || 0) > 0;
-    const hasAssets = Number(project?.image_count || 0) > 0 || Number(project?.video_count || 0) > 0;
-
-    if (!hasChildren && hasAssets) {
+    if (shouldOpenProjectWorkspace(project)) {
       openProject(project);
       return;
     }
