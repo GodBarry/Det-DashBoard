@@ -49,11 +49,12 @@ export function useAssetMutationController({
     }
   }
 
-  const inspectModelWeight = useCallback(async (payload) => {
+  const inspectModelWeight = useCallback(async (payload, signal) => {
     const response = await fetch("/api/ml/model-versions/preflight", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
+      signal,
     });
     const text = await response.text();
     const data = text ? JSON.parse(text) : {};

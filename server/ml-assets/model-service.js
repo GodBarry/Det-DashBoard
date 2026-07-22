@@ -138,15 +138,15 @@ function createModelService({
       remote: true,
     };
     const stat = validateWeightPath(sourcePath);
-    const sha256Pending = stat.size > 128 * 1024 * 1024;
-    const sha256 = sha256Pending ? null : await hashFile(sourcePath);
     const epoch = path.basename(sourcePath).match(/epoch[_-]?(\d+)/i)?.[1] || null;
     return {
       fileName: path.basename(sourcePath),
       size: stat.size,
       sizeLabel: stat.size >= 1024 ** 2 ? `${(stat.size / 1024 ** 2).toFixed(2)} MB` : `${(stat.size / 1024).toFixed(2)} KB`,
-      sha256,
-      sha256Pending,
+      // Preflight must stay constant-time for multi-GB model files. The full
+      // checksum is computed once, while the model is archived to MinIO.
+      sha256: null,
+      sha256Pending: true,
       framework: inferWeightFramework(sourcePath, model),
       taskType: model.task_type,
       epoch: epoch ? Number(epoch) : null,

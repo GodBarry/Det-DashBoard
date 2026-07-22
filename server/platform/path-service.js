@@ -115,6 +115,22 @@ function createPathService(options = {}) {
     const root = scope === "data" ? dataRoot : browseRoot;
     const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
     const allDrives = scope === "browse" && browseAllDrives && platform === "win32";
+    if (scope === "browse" && target === "__roots__") {
+      if (platform === "win32") {
+        const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+          .map((letter) => `${letter}:\\`)
+          .filter((drive) => fs.existsSync(drive))
+          .map((drive) => ({ name: drive, path: drive }));
+        return { root: "__roots__", current: "__roots__", parent: "", platform: "windows", dirs };
+      }
+      if (isWindowsHostPathMode()) {
+        const dirs = fs.readdirSync(root, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory() && /^[A-Za-z]$/.test(entry.name))
+          .map((entry) => ({ name: `${entry.name.toUpperCase()}:\\`, path: `${entry.name.toUpperCase()}:\\` }));
+        return { root: "__roots__", current: "__roots__", parent: "", platform: "windows-mount", dirs };
+      }
+      return { root: "__roots__", current: "__roots__", parent: "", platform: "posix", dirs: [{ name: "文件系统 /", path: "/" }] };
+    }
     if (target === "__drives__" && !allDrives) target = displayRoot;
     if (allDrives && (!target || target === "__drives__")) {
       const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -153,7 +169,7 @@ function createPathService(options = {}) {
 
   function listFiles(target, scope = "browse", extensions = []) {
     const listing = listFolders(target, scope);
-    if (listing.current === "__drives__") return { ...listing, files: [] };
+    if (listing.current === "__drives__" || listing.current === "__roots__") return { ...listing, files: [] };
     const root = scope === "data" ? dataRoot : browseRoot;
     const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
     const current = toScopedInternalPath(target || displayRoot, root, displayRoot);

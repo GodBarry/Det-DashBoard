@@ -173,11 +173,13 @@ test("createModelVersion preserves MinIO key, manifest, metadata, and permission
 
 test("weight preflight validates server paths and infers pth frameworks", async () => {
   const sourcePath = "E:\\best_source_model_epoch50.pth";
+  let hashCalls = 0;
   const query = async (sql) => {
     if (sql.startsWith("SELECT * FROM model_clusters")) return { rows: [{ id: "model-5", framework: "ultralytics", task_type: "detect" }] };
     throw new Error(`Unexpected SQL: ${sql}`);
   };
   const { service } = createFixture(query, {
+    hashFile: async () => { hashCalls += 1; return "sha-256"; },
     fs: {
       existsSync: (target) => target === sourcePath,
       statSync: () => ({ size: 5 * 1024 * 1024, isFile: () => true }),
@@ -188,6 +190,9 @@ test("weight preflight validates server paths and infers pth frameworks", async 
   assert.equal(analysis.framework, "PyTorch");
   assert.equal(analysis.epoch, 50);
   assert.equal(analysis.sizeLabel, "5.00 MB");
+  assert.equal(analysis.sha256, null);
+  assert.equal(analysis.sha256Pending, true);
+  assert.equal(hashCalls, 0);
   await assert.rejects(() => service.inspectModelWeight({ modelId: "model-5", sourcePath: "E:weights.pth" }), /Windows 盘符路径/);
 });
 

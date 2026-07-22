@@ -32,6 +32,7 @@ export function AssetDrawer({
   const [filePicker, setFilePicker] = useState(null);
   const [filePickerBusy, setFilePickerBusy] = useState(false);
   const previousAutoName = useRef("");
+  const analysisSequence = useRef(0);
   const selectedModel = mlModels.find((model) => model.id === versionForm.modelId);
   const selectedProject = projects.find((project) => project.id === versionForm.datasetProjectId);
   const automaticVersionName = useMemo(() => {
@@ -53,25 +54,26 @@ export function AssetDrawer({
       setAnalysis(null);
       return undefined;
     }
+    const controller = new AbortController();
+    const sequence = ++analysisSequence.current;
     const timer = window.setTimeout(async () => {
       try {
         setAnalysis({ loading: true });
-        setAnalysis(await inspectModelWeight({ modelId: versionForm.modelId, sourcePath: versionForm.sourcePath }));
+        const timeout = window.setTimeout(() => controller.abort(), 8000);
+        const result = await inspectModelWeight({ modelId: versionForm.modelId, sourcePath: versionForm.sourcePath }, controller.signal);
+        window.clearTimeout(timeout);
+        if (sequence === analysisSequence.current) setAnalysis(result);
       } catch (error) {
-        setAnalysis({ error: error.message });
+        if (sequence === analysisSequence.current) setAnalysis({ error: error.name === "AbortError" ? "自动解析超时，可直接登记或检查服务器路径" : error.message });
       }
     }, 450);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [inspectModelWeight, mode, versionForm.modelId, versionForm.sourcePath]);
 
   const submit = async () => {
     setSubmitMessage("");
     if (mode === "cluster") createModel();
     if (mode === "version" || mode === "pretrained") {
-      if (analysis?.error) {
-        setSubmitMessage(analysis.error);
-        return;
-      }
       setSubmitting(true);
       try {
         await createModelVersion();
@@ -86,7 +88,7 @@ export function AssetDrawer({
     if (mode === "algorithm") window.alert("算法适配器导入接口待接入，当前已完成界面布局");
   };
 
-  const openServerFilePicker = async (target = "__drives__") => {
+  const openServerFilePicker = async (target = "__roots__") => {
     setFilePickerBusy(true);
     try {
       const response = await fetch(`/api/fs/files?path=${encodeURIComponent(target)}&extensions=.pt,.pth,.onnx`);
@@ -130,7 +132,7 @@ export function AssetDrawer({
             <DrawerField label="所属模型簇"><select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}><option value="">请选择模型</option>{mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></DrawerField>
             <DrawerField label="版本名称"><input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="yolov8n_ultralytics_8.4.80_cpu" /></DrawerField>
             <DrawerField label="权重来源"><div className="drawer-segment">{[["local", "本地路径"], ["server", "服务器路径"], ["network", "网络路径"]].map(([value, label]) => <button className={(versionForm.sourceType || "local") === value ? "active" : ""} type="button" key={value} onClick={() => { setVersionForm({ ...versionForm, sourceType: value, sourcePath: "" }); setAnalysis(null); }}>{label}</button>)}</div></DrawerField>
-            <DrawerField label={(versionForm.sourceType || "local") === "network" ? "SSH / SCP 路径" : "权重文件路径"}><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} onIconClick={(versionForm.sourceType || "local") === "network" ? undefined : () => openServerFilePicker("__drives__")} iconTitle="浏览服务器权重文件" placeholder={(versionForm.sourceType || "local") === "network" ? "scp://user@server/path/best.pth" : "E:\\models\\best.pth 或 /srv/models/best.pth"} /></DrawerField>
+            <DrawerField label={(versionForm.sourceType || "local") === "network" ? "SSH / SCP 路径" : "权重文件路径"}><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} onIconClick={(versionForm.sourceType || "local") === "network" ? undefined : () => openServerFilePicker("__roots__")} iconTitle="浏览服务器权重文件" placeholder={(versionForm.sourceType || "local") === "network" ? "scp://user@server/path/best.pth" : "E:\\models\\best.pth 或 /srv/models/best.pth"} /></DrawerField>
             {(versionForm.sourceType || "local") === "network" && <p className="drawer-source-hint">{"服务器将使用已配置的 SSH 密钥通过 SCP 下载；支持 scp://user@host/path 或 user@host:/path。"}</p>}
             <DrawerField label="训练数据"><div className="asset-dataset-picker"><CascadingProjectPicker projects={projects} value={versionForm.datasetProjectId === "unknown" ? "" : versionForm.datasetProjectId} onChange={(value) => setVersionForm({ ...versionForm, datasetProjectId: value || "unknown" })} storageKey="asset-version-dataset" ariaLabel="选择训练数据集" /><button type="button" className={`asset-unknown-dataset ${versionForm.datasetProjectId === "unknown" ? "active" : ""}`} onClick={() => setVersionForm({ ...versionForm, datasetProjectId: "unknown" })}>未知</button></div></DrawerField>
             <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
@@ -167,7 +169,7 @@ export function AssetDrawer({
       <div className="drawer-actions">
         {submitMessage && <span className="drawer-submit-message">{submitMessage}</span>}
         <button onClick={onClose}>取消</button>
-        <button className="primary" onClick={submit} disabled={submitting || analysis?.loading}>{submitting ? "登记中..." : drawerTitle}</button>
+        <button className="primary" onClick={submit} disabled={submitting}>{submitting ? "登记中..." : drawerTitle}</button>
       </div>
     </aside>
   );
