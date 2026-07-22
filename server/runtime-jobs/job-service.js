@@ -1,3 +1,5 @@
+const { normalizeClassName, normalizeRecognitionClasses, recognitionClassSet } = require("../recognition-classes");
+
 function createRuntimeJobService({
   query,
   scopedSql,
@@ -256,9 +258,10 @@ function createRuntimeJobService({
 
   async function listInferenceResults(jobId) {
     const rows = await query(
-      `SELECT ir.*, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
+      `SELECT ir.*, ij.params_json AS job_params_json, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
               ia.width AS image_width, ia.height AS image_height
        FROM runtime_inference_results ir
+       JOIN runtime_inference_jobs ij ON ij.id=ir.inference_job_id
        LEFT JOIN project_images pi ON pi.id=ir.project_image_id
        LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
        WHERE ir.inference_job_id=$1
@@ -266,11 +269,17 @@ function createRuntimeJobService({
        LIMIT 500`,
       [jobId],
     );
-    return rows.rows.map((row) => ({
-      ...row,
-      thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
-      image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
-    }));
+    return rows.rows.map((row) => {
+      const params = typeof row.job_params_json === "string" ? JSON.parse(row.job_params_json || "{}") : (row.job_params_json || {});
+      const allowed = recognitionClassSet(params.recognitionClasses);
+      return {
+        ...row,
+        predictions_json: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
+          .filter((prediction) => allowed.has(normalizeClassName(prediction.label))),
+        thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
+        image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
+      };
+    });
   }
 
   async function listInferenceLogs(jobId) {
@@ -284,10 +293,14 @@ function createRuntimeJobService({
   async function getInferenceEvaluation(jobId) {
     const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
     if (!job) throw httpError(404, "inference job not found");
+    const jobParams = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    const recognitionClasses = normalizeRecognitionClasses(jobParams.recognitionClasses);
+    const allowedClasses = recognitionClassSet(recognitionClasses);
     const resultRows = await listInferenceResults(jobId);
     const predictionRows = resultRows.map((row) => ({
       projectImageId: row.project_image_id,
-      predictions: Array.isArray(row.predictions_json) ? row.predictions_json : [],
+      predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
+        .filter((prediction) => allowedClasses.has(normalizeClassName(prediction.label))),
     }));
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     const project = job.dataset_project_id
@@ -298,7 +311,7 @@ function createRuntimeJobService({
       groundTruthRows = (await query(
         "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) AND lower(trim(label)) <> 'mosaic'",
         [project.active_label_version_id, imageIds],
-      )).rows;
+      )).rows.filter((row) => allowedClasses.has(normalizeClassName(row.label)));
     }
     const labeledImageIds = new Set(groundTruthRows.map((row) => String(row.project_image_id)));
     const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(String(row.projectImageId)));
@@ -313,6 +326,7 @@ function createRuntimeJobService({
     return {
       ...evaluation,
       jobId,
+      recognitionClasses,
       labelVersionId: project?.active_label_version_id || null,
       reason: groundTruthRows.length
         ? "仅对存在真值标注的图片进行评估；未标注图片的推理结果仍已保存"

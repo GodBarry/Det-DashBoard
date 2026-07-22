@@ -23,6 +23,7 @@ import {
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function TrainingWorkspace({
 
@@ -392,6 +393,10 @@ export function TrainingWorkspace({
             <div className="config-row training-task-name-row"><span className="row-label">任务名称</span><input value={trainingForm.name || ""} onChange={(event) => setField("name", event.target.value)} placeholder="可留空，将按 数据集_算法_时间 自动生成" /></div>
             <div className="training-cascading-splits">
               {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} storageKey={`training-${splitKey}`} ariaLabel={`${label}树形选择`} /></div>)}
+            </div>
+            <div className="config-row recognition-class-row">
+              <span className="row-label">识别类别</span>
+              <RecognitionClassPicker values={trainingForm.recognitionClasses} onChange={(recognitionClasses) => setField("recognitionClasses", recognitionClasses)} />
             </div>
             <div className="training-filter-bar">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>

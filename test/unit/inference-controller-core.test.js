@@ -30,6 +30,7 @@ test("createDefaultInferenceForm returns current defaults and applies restored v
   assert.equal(form.saveVisualization, true);
   assert.equal(form.createLabelVersion, false);
   assert.equal(form.fakeReferenceMode, false);
+  assert.deepEqual(form.recognitionClasses, ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"]);
 });
 
 test("resolveInferenceAlgorithm follows normal and fake-reference selection", async () => {
@@ -119,6 +120,7 @@ test("buildInferencePayload preserves conversions, filters, and fixed request va
   assert.equal(payload.params.iou, 0.6);
   assert.equal(payload.params.imgsz, 512);
   assert.equal(payload.params.batch, 8);
+  assert.deepEqual(payload.params.recognitionClasses, form.recognitionClasses);
   assert.deepEqual(payload.params.input.filters, {
     scenes: ["indoor", "outdoor"],
     views: ["front", "rear"],

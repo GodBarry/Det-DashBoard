@@ -373,12 +373,12 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
   const service = createService(async (sql, params) => {
     calls.push({ sql, params });
     if (sql === "SELECT * FROM runtime_inference_jobs WHERE id=$1") {
-      return { rows: [{ id: "job-1", dataset_project_id: "project-1" }] };
+      return { rows: [{ id: "job-1", dataset_project_id: "project-1", params_json: { recognitionClasses: ["car"] } }] };
     }
     if (sql.includes("FROM runtime_inference_results")) {
       return {
         rows: [
-          { project_image_id: "image-labeled", display_name: "Labeled", predictions_json: [{ label: "car" }] },
+          { project_image_id: "image-labeled", display_name: "Labeled", predictions_json: [{ label: "car" }, { label: "person" }] },
           { project_image_id: "image-unlabeled", display_name: "Unlabeled", predictions_json: [{ label: "bus" }] },
           { project_image_id: null, display_name: "Detached", predictions_json: [{ label: "truck" }] },
         ],
@@ -396,6 +396,13 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
           bbox_y: 2,
           bbox_w: 3,
           bbox_h: 4,
+        }, {
+          project_image_id: "image-labeled",
+          label: "person",
+          bbox_x: 5,
+          bbox_y: 6,
+          bbox_w: 7,
+          bbox_h: 8,
         }],
       };
     }
@@ -418,6 +425,7 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
     predictions: [{ label: "car" }],
   }]);
   assert.equal(evaluationInput.groundTruthRows.length, 1);
+  assert.deepEqual(evaluation.recognitionClasses, ["car"]);
   assert.equal(evaluationInput.iouThreshold, 0.5);
   assert.deepEqual(evaluation.summary, {
     precision: 1,

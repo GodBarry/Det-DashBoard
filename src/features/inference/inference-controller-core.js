@@ -1,5 +1,7 @@
+export const DEFAULT_RECOGNITION_CLASSES = ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"];
+
 export function createDefaultInferenceForm(restoredInferenceForm) {
-  return {
+  const form = {
     name: "",
     datasetProjectId: "",
     datasetProjectIds: [],
@@ -12,6 +14,7 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     iou: 0.7,
     imgsz: 640,
     batch: 16,
+    recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
     device: "0",
     inputScope: "project",
     inputScenes: "",
@@ -27,6 +30,12 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     createLabelVersion: false,
     fakeReferenceMode: false,
     ...(restoredInferenceForm || {}),
+  };
+  return {
+    ...form,
+    recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
+      ? [...form.recognitionClasses]
+      : [...DEFAULT_RECOGNITION_CLASSES],
   };
 }
 
@@ -84,6 +93,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
       iou: Number(inferenceForm.iou),
       imgsz: Number(inferenceForm.imgsz),
       batch: Number(inferenceForm.batch),
+      recognitionClasses: [...(inferenceForm.recognitionClasses || DEFAULT_RECOGNITION_CLASSES)],
       device: inferenceForm.device,
       input: {
         projectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),

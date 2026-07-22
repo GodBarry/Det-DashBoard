@@ -28,6 +28,7 @@ import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
 import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
@@ -702,6 +703,10 @@ return (
             <span className="row-label">数据来源</span>
             <span className="dataset-source-kind"><Database size={14} />数据集</span>
             <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={(projectIds) => setInferenceForm({ ...inferenceForm, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" })} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
+          </div>
+          <div className="config-row recognition-class-row">
+            <span className="row-label">识别类别</span>
+            <RecognitionClassPicker values={inferenceForm.recognitionClasses} onChange={(recognitionClasses) => setField("recognitionClasses", recognitionClasses)} />
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
