@@ -4,6 +4,12 @@ function createTrashService({ query, transaction, store, httpError }) {
   if (!store || typeof store.removeObject !== "function") throw new TypeError("createTrashService requires store");
   if (typeof httpError !== "function") throw new TypeError("createTrashService requires httpError");
 
+  async function removeObjects(keys, concurrency = 24) {
+    for (let index = 0; index < keys.length; index += concurrency) {
+      await Promise.all(keys.slice(index, index + concurrency).map((key) => store.removeObject(key)));
+    }
+  }
+
   async function softDeleteProjectTree(projectId) {
     await query(
       `WITH RECURSIVE descendants AS (
@@ -76,7 +82,7 @@ function createTrashService({ query, transaction, store, httpError }) {
        WHERE NOT EXISTS (SELECT 1 FROM project_videos pv WHERE pv.video_asset_id=va.id)
        RETURNING id, object_key`,
     );
-    for (const row of [...images.rows, ...videos.rows]) await store.removeObject(row.object_key);
+    await removeObjects([...images.rows, ...videos.rows].map((row) => row.object_key));
     return { image_assets: images.rowCount, video_assets: videos.rowCount };
   }
 
@@ -86,10 +92,9 @@ function createTrashService({ query, transaction, store, httpError }) {
     if (!suffixes.length) return 0;
     const keys = await store.listObjectKeys("objects/raw-labels/");
     let removed = 0;
-    for (const key of keys.filter((item) => suffixes.some((suffix) => item.includes(suffix)))) {
-      await store.removeObject(key);
-      removed += 1;
-    }
+    const matchingKeys = keys.filter((item) => suffixes.some((suffix) => item.includes(suffix)));
+    await removeObjects(matchingKeys);
+    removed += matchingKeys.length;
     return removed;
   }
 

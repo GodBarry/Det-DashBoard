@@ -224,10 +224,10 @@ async function removeObject(objectKey) {
   if (!objectKey) return;
   if (await ensureBucketSafe()) {
     await client.removeObject(minio.bucket, objectKey).catch(() => {});
-    return;
   }
-  fs.rmSync(fallbackPath(objectKey), { force: true });
-  fs.rmSync(secondaryFallbackPath(objectKey), { force: true });
+  for (const filePath of [fallbackPath(objectKey), secondaryFallbackPath(objectKey), legacyFallbackPath(objectKey)]) {
+    fs.rmSync(filePath, { force: true });
+  }
 }
 
 async function objectSize(objectKey) {
