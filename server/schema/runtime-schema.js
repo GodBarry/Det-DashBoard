@@ -4,6 +4,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_image_assets_quick_hash_size ON image_assets(quick_hash, file_size)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",

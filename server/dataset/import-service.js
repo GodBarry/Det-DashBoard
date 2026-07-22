@@ -65,10 +65,28 @@ function createImportService(deps) {
   async function upsertImageAsset(client, filePath, meta = {}) {
     const stat = fs.statSync(filePath);
     const qh = quickHash(filePath);
-    const sha = await hashFile(filePath);
     const ext = path.extname(filePath).toLowerCase() || ".jpg";
     let width = Number(meta.imageWidth) || null;
     let height = Number(meta.imageHeight) || null;
+    const quickMatches = await client.query(
+      "SELECT * FROM image_assets WHERE quick_hash=$1 AND file_size=$2 ORDER BY id LIMIT 2",
+      [qh, stat.size],
+    );
+    if (quickMatches.rows.length === 1) {
+      let row = quickMatches.rows[0];
+      const storedSize = await store.objectSize(row.object_key).catch(() => -1);
+      if (storedSize === Number(row.file_size || stat.size)) {
+        if ((!row.width && width) || (!row.height && height)) {
+          row = (await client.query(
+            "UPDATE image_assets SET width=COALESCE(width,$1), height=COALESCE(height,$2) WHERE id=$3 RETURNING *",
+            [width, height, row.id],
+          )).rows[0];
+        }
+        return row;
+      }
+    }
+
+    const sha = await hashFile(filePath);
     if (!width || !height) {
       try {
         const imageMeta = await sharp(filePath).metadata();

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS image_assets (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_image_assets_quick_hash ON image_assets(quick_hash);
+CREATE INDEX IF NOT EXISTS idx_image_assets_quick_hash_size ON image_assets(quick_hash, file_size);
 
 CREATE TABLE IF NOT EXISTS video_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -37,7 +37,7 @@ function createFixture(overrides = {}) {
     VIDEO_EXTS: new Set([".mp4"]),
     walk: overrides.walk || (() => []),
     walkAsync: overrides.walkAsync || (async () => []),
-    hashFile: async () => "sha",
+    hashFile: overrides.hashFile || (async () => "sha"),
     quickHash: () => "quick",
     inferModality: () => "visible",
     inferSceneFromPath: () => "UnknownScene",
@@ -200,4 +200,35 @@ test("runImportBatch propagates scanner failures unchanged", async () => {
     service.runImportBatch("batch-1", { id: "project-1", owner_user_id: "owner-1" }, { sourcePath: "C:\\data" }),
     (error) => error === failure,
   );
+});
+
+test("upsertImageAsset reuses an unambiguous quick-hash match without full hashing", async () => {
+  const calls = [];
+  let fullHashCalls = 0;
+  const existing = {
+    id: "asset-1",
+    quick_hash: "quick",
+    file_size: 123,
+    object_key: "objects/images/existing.jpg",
+    width: 640,
+    height: 480,
+  };
+  const { service } = createFixture({
+    fs: { statSync: () => ({ size: 123 }) },
+    hashFile: async () => { fullHashCalls += 1; return "sha"; },
+    store: { objectSize: async () => 123, putFile: async () => assert.fail("must not upload a reused asset") },
+  });
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes("WHERE quick_hash=$1")) return { rows: [existing] };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const row = await service.upsertImageAsset(client, "C:\\data\\one.jpg");
+
+  assert.equal(row, existing);
+  assert.equal(fullHashCalls, 0);
+  assert.deepEqual(calls[0].params, ["quick", 123]);
 });
