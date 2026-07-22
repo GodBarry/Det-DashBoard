@@ -277,6 +277,13 @@ function createAlgorithmAssetService({
       if (error.code !== "42P01") throw error;
     });
     await query(
+      `UPDATE algorithm_assets
+       SET deleted_at=COALESCE(deleted_at, now()), status='retired', updated_at=now()
+       WHERE algorithm_key IN ('sam2_segmentation', 'samurai_tracking') AND version='21'`,
+    ).catch((error) => {
+      if (error.code !== "42P01") throw error;
+    });
+    await query(
       `DELETE FROM training_templates
        WHERE template_key IN ('rtdetr', 'fake_reference_detector', 'dummy_empty_detector')`,
     ).catch((error) => {
@@ -378,8 +385,6 @@ function createAlgorithmAssetService({
 
   async function listAlgorithmAssets(actor, scope = "mine") {
     try {
-      await ensureBuiltinAlgorithmAssets();
-      await syncMinioAlgorithmAssets();
       const adminId = await resourceAccess.getAdminId();
       await query("UPDATE algorithm_assets SET owner_user_id=$1 WHERE owner_user_id IS NULL", [adminId]);
       await query("UPDATE algorithm_assets SET visibility='public' WHERE source_type='builtin' OR version='builtin'");

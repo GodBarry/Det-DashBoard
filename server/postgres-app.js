@@ -738,6 +738,7 @@ async function main() {
   await store.ensureBucketSafe();
   console.log("Boot: ensureBucketSafe done");
   await algorithmAssetService.ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
+  algorithmAssetService.syncMinioAlgorithmAssets().catch((error) => console.warn("Algorithm asset MinIO sync skipped:", error.message));
   await resourceAccess.initializeSchema();
   return processLifecycle.startHttpServer();
 }
