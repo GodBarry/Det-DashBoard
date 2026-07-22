@@ -13,9 +13,10 @@ async function query(text, params) {
 
 async function transaction(fn) {
   const client = await pool.connect();
-  client.on("error", (error) => {
+  const handleClientError = (error) => {
     console.error("PostgreSQL transaction client error:", error.message);
-  });
+  };
+  client.on("error", handleClientError);
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -25,6 +26,7 @@ async function transaction(fn) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
+    client.off("error", handleClientError);
     client.release();
   }
 }
