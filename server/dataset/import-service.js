@@ -1,27 +1,30 @@
 const { importedAnnotationAttributes } = require("../annotation/special-labels");
 const os = require("node:os");
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
+const zlib = require("node:zlib");
+const { once } = require("node:events");
+const { finished } = require("node:stream/promises");
 
 async function createRawLabelArchive(fs, path, sourceRoot, labelFiles) {
   if (!labelFiles.length) return null;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-dashboard-labels-"));
-  const archivePath = path.join(tempRoot, "raw-labels.tar.gz");
-  const mediaExcludes = [
-    "jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp",
-    "mp4", "avi", "mov", "mkv", "wmv", "m4v", "webm",
-  ].flatMap((ext) => [`--exclude=*.${ext}`, `--exclude=*.${ext.toUpperCase()}`]);
+  const archivePath = path.join(tempRoot, "raw-labels.jsonl.gz");
+  const output = fs.createWriteStream(archivePath);
+  const gzip = zlib.createGzip({ level: 1 });
+  gzip.pipe(output);
   try {
-    await execFileAsync("tar", ["-czf", archivePath, "-C", sourceRoot, ...mediaExcludes, "."], {
-      windowsHide: true,
-      maxBuffer: 1024 * 1024,
-    });
+    for (const file of labelFiles) {
+      const relativePath = path.relative(sourceRoot, file).split(path.sep).join("/");
+      const line = `${JSON.stringify({ path: relativePath, content: fs.readFileSync(file, "utf8") })}\n`;
+      if (!gzip.write(line, "utf8")) await once(gzip, "drain");
+    }
+    gzip.end();
+    await finished(output);
     return { archivePath, tempRoot, fileCount: labelFiles.length };
   } catch (error) {
+    gzip.destroy();
+    output.destroy();
     fs.rmSync(tempRoot, { recursive: true, force: true });
-    throw new Error(`原始标注归档失败：${error.stderr || error.message}`);
+    throw new Error(`原始标注归档失败：${error.message}`);
   }
 }
 
@@ -317,7 +320,7 @@ function createImportService(deps) {
       const archive = await createRawLabelArchive(fs, path, group.sourceRoot, labelFiles);
       try {
         for (const [targetProjectId, version] of versionsByProject) {
-          const archiveName = sourceGroups.length === 1 ? "raw-labels.tar.gz" : `raw-labels-${sourceIndex + 1}.tar.gz`;
+          const archiveName = sourceGroups.length === 1 ? "raw-labels.jsonl.gz" : `raw-labels-${sourceIndex + 1}.jsonl.gz`;
           await store.putFile(rawLabelObjectKey(targetProjectId, version.id, archiveName), archive.archivePath);
         }
       } finally {

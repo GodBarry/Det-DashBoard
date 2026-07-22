@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
 const { createImportService, createRawLabelArchive } = require("../../server/dataset/import-service");
 
@@ -235,7 +236,7 @@ test("upsertImageAsset reuses an unambiguous quick-hash match without full hashi
   assert.deepEqual(calls[0].params, ["quick", 123]);
 });
 
-test("createRawLabelArchive stores nested unicode label files in one tarball", async () => {
+test("createRawLabelArchive stores nested unicode label files in one streaming archive", async () => {
   const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-import-source-"));
   const nested = path.join(sourceRoot, "标签");
   fs.mkdirSync(nested, { recursive: true });
@@ -248,6 +249,12 @@ test("createRawLabelArchive stores nested unicode label files in one tarball", a
     archive = await createRawLabelArchive(fs, path, sourceRoot, [first, second]);
     assert.equal(archive.fileCount, 2);
     assert.ok(fs.statSync(archive.archivePath).size > 0);
+    const records = zlib.gunzipSync(fs.readFileSync(archive.archivePath)).toString("utf8")
+      .trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(records, [
+      { path: "标签/one.json", content: '{"label":"tank"}' },
+      { path: "two.json", content: '{"label":"car"}' },
+    ]);
   } finally {
     if (archive?.tempRoot) fs.rmSync(archive.tempRoot, { recursive: true, force: true });
     fs.rmSync(sourceRoot, { recursive: true, force: true });
