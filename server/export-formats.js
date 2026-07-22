@@ -1,4 +1,5 @@
 const YAML = require("yaml");
+const { isSpecialAnnotationLabel } = require("./annotation/special-labels");
 
 const EXPORT_FORMATS = new Set(["labelme", "coco", "yolo"]);
 
@@ -24,7 +25,7 @@ function labelmeDocument(item, annotations, imageName) {
       score: annotation.score == null ? null : Number(annotation.score),
       points: boxPoints(annotation),
       group_id: null,
-      description: "",
+      description: annotation.attributes_json?.source_description || "",
       difficult: Boolean(annotation.difficult),
       shape_type: annotation.shape_type || "rectangle",
       flags: {},
@@ -43,7 +44,9 @@ function labelmeDocument(item, annotations, imageName) {
 }
 
 function sortedLabels(entries) {
-  return [...new Set(entries.flatMap((entry) => entry.annotations.map((annotation) => String(annotation.label || "unknown"))))]
+  return [...new Set(entries.flatMap((entry) => entry.annotations
+    .filter((annotation) => !isSpecialAnnotationLabel(annotation.label))
+    .map((annotation) => String(annotation.label || "unknown"))))]
     .sort((left, right) => left.localeCompare(right, "zh-Hans-CN"));
 }
 
@@ -64,7 +67,7 @@ function cocoDocument(entries) {
       view: entry.item.view || "",
       keyword: entry.item.keyword || "",
     });
-    entry.annotations.forEach((annotation) => {
+    entry.annotations.filter((annotation) => !isSpecialAnnotationLabel(annotation.label)).forEach((annotation) => {
       const x = Number(annotation.bbox_x) || 0;
       const y = Number(annotation.bbox_y) || 0;
       const width = Math.max(0, Number(annotation.bbox_w) || 0);
@@ -114,6 +117,7 @@ function yoloDocuments(entries) {
   const labelFiles = new Map();
   for (const entry of entries) {
     const lines = entry.annotations
+      .filter((annotation) => !isSpecialAnnotationLabel(annotation.label))
       .map((annotation) => yoloLine(annotation, entry.item.width, entry.item.height, labelIndex))
       .filter(Boolean);
     labelFiles.set(entry.labelName, `${lines.join("\n")}${lines.length ? "\n" : ""}`);

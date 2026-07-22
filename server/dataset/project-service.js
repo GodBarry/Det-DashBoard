@@ -149,7 +149,7 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
         COALESCE((SELECT jsonb_agg(DISTINCT pi.scene) FILTER (WHERE pi.scene IS NOT NULL AND pi.scene<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS scenes,
         COALESCE((SELECT jsonb_agg(DISTINCT pi.view) FILTER (WHERE pi.view IS NOT NULL AND pi.view<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS views,
         COALESCE((SELECT jsonb_agg(DISTINCT pi.modality) FILTER (WHERE pi.modality IS NOT NULL AND pi.modality<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS modalities,
-        COALESCE((SELECT jsonb_agg(DISTINCT a.label) FILTER (WHERE a.label IS NOT NULL AND a.label<>'') FROM subtree s JOIN image_annotations a ON a.label_version_id=s.effective_label_version_id WHERE s.root_id=p.id), '[]'::jsonb) AS labels,
+        COALESCE((SELECT jsonb_agg(DISTINCT a.label) FILTER (WHERE a.label IS NOT NULL AND a.label<>'' AND lower(trim(a.label))<>'mosaic') FROM subtree s JOIN image_annotations a ON a.label_version_id=s.effective_label_version_id WHERE s.root_id=p.id), '[]'::jsonb) AS labels,
         it.last_import_at
        FROM projects p
        LEFT JOIN image_counts ic ON ic.root_id = p.id
@@ -209,13 +209,13 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
            FROM image_annotations a
            JOIN project_images pi ON pi.id=a.project_image_id
            JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id
-           WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative')
+           WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', 'mosaic')
            GROUP BY a.label
          ) label_stats) AS label_counts,
         (SELECT json_agg(DISTINCT scene) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS scenes,
         (SELECT json_agg(DISTINCT view) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS views,
         (SELECT json_agg(DISTINCT modality) FROM project_images pi JOIN subtree s ON s.id=pi.project_id WHERE pi.deleted_at IS NULL) AS modalities,
-        (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative')) AS labels`,
+        (SELECT json_agg(DISTINCT label) FROM image_annotations a JOIN project_images pi ON pi.id=a.project_image_id JOIN subtree s ON s.id=pi.project_id AND s.effective_label_version_id=a.label_version_id WHERE pi.deleted_at IS NULL AND lower(trim(a.label)) NOT IN ('no', 'none', 'background', 'bg', 'negative', 'mosaic')) AS labels`,
       [projectId],
     );
     return rows.rows[0];

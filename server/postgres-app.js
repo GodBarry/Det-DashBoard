@@ -502,6 +502,7 @@ async function main() {
   });
   trainingWorkerController = createTrainingWorker({
     query,
+    sharp,
     fs,
     path,
     storageRoot,

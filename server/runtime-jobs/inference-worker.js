@@ -561,12 +561,14 @@ function createInferenceWorker({
     await runtimeAssetLinkService.recordSuccess(job, metrics);
   }
 
-  function normalizeTorchDevice(value, cudaAvailable = false) {
+  function normalizeTorchDevice(value, cudaAvailable = false, accelerator = "") {
+    const isNpu = String(accelerator || "").toLowerCase() === "npu";
+    const defaultDevice = isNpu ? "npu:0" : (cudaAvailable ? "cuda:0" : "cpu");
     const raw = String(value ?? "").trim().toLowerCase();
-    if (!raw) return cudaAvailable ? "cuda:0" : "cpu";
-    if (/^\d+$/.test(raw)) return `cuda:${raw}`;
-    if (raw === "-1") return cudaAvailable ? "cuda:0" : "cpu";
-    if (/^cuda:\d+$/.test(raw) || ["cpu", "mps"].includes(raw)) return raw;
+    if (!raw) return defaultDevice;
+    if (/^\d+$/.test(raw)) return `${isNpu ? "npu" : "cuda"}:${raw}`;
+    if (raw === "-1") return defaultDevice;
+    if (/^(cuda|npu):\d+$/.test(raw) || ["cpu", "mps"].includes(raw)) return raw;
     return raw;
   }
 
@@ -596,20 +598,21 @@ function createInferenceWorker({
     const { configPath, sourceRoot } = await algorithmRuntimeSource.resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot });
     const classNames = (await query(
       `SELECT DISTINCT a.label FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id
-       WHERE p.id=$1 ORDER BY a.label`,
+       WHERE p.id=$1 AND lower(trim(a.label)) <> 'mosaic' ORDER BY a.label`,
       [job.dataset_project_id],
     )).rows.map((row) => String(row.label));
     const runnerPath = path.join(outputRoot, "run_dino_inference.py");
     const config = {
       jobId: job.id, configPath, weightPath, manifestPath, predictionsPath, visualizationDir,
       scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
-      device: normalizeTorchDevice(params.device, env.cuda_available),
+      device: normalizeTorchDevice(params.device, env.cuda_available, env.accelerator),
       classNames,
     };
     const runner = [
       "import json, os, sys, traceback",
       "import cv2",
       "import dino_detector",
+      "from mmengine.config import Config",
       "from mmdet.apis import init_detector, inference_detector",
       `cfg = json.loads(${JSON.stringify(JSON.stringify(config))})`,
       "with open(cfg['manifestPath'], 'r', encoding='utf-8') as f: manifest = json.load(f)",
@@ -617,7 +620,18 @@ function createInferenceWorker({
       "root = manifest.get('cacheRoot') or os.path.dirname(cfg['manifestPath'])",
       "print('[DINO] manifest loaded: %d images' % len(items), flush=True)",
       "print('[DINO] initializing model on %s' % cfg['device'], flush=True)",
-      "model = init_detector(cfg['configPath'], cfg['weightPath'], device=cfg['device'])",
+      "model_cfg = Config.fromfile(cfg['configPath'])",
+      "def normalize_inference_dataset(node):",
+      "    if isinstance(node, dict):",
+      "        node_type = str(node.get('type') or '')",
+      "        if node_type == 'MosaicCocoDataset': node['type'] = 'CocoDataset'",
+      "        if str(node.get('type') or '').endswith('Dataset'): node['lazy_init'] = True",
+      "        if isinstance(node.get('pipeline'), list): node['pipeline'] = [step for step in node['pipeline'] if not (isinstance(step, dict) and step.get('type') == 'ApplyMosaicMask')]",
+      "        for value in node.values(): normalize_inference_dataset(value)",
+      "    elif isinstance(node, list):",
+      "        for value in node: normalize_inference_dataset(value)",
+      "normalize_inference_dataset(model_cfg._cfg_dict)",
+      "model = init_detector(model_cfg, cfg['weightPath'], device=cfg['device'])",
       "print('[DINO] model initialized', flush=True)",
       "classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('classNames') or [])",
       "rows = []",

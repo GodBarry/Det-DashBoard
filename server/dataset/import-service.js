@@ -1,3 +1,5 @@
+const { importedAnnotationAttributes } = require("../annotation/special-labels");
+
 function createImportService(deps) {
   const {
     query,
@@ -314,7 +316,7 @@ function createImportService(deps) {
           `INSERT INTO image_annotations
            (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [version.id, projectImage.id, shape.label || "unknown", box.x, box.y, box.width, box.height, shape.shape_type || "rectangle", Boolean(shape.difficult), shape.score, shape.attributes || {}],
+          [version.id, projectImage.id, shape.label || "unknown", box.x, box.y, box.width, box.height, shape.shape_type || "rectangle", Boolean(shape.difficult), shape.score, importedAnnotationAttributes(shape)],
         );
         annCount += 1;
       }

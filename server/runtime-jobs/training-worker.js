@@ -7,9 +7,11 @@ const {
   parseMetricLine,
 } = require("../training-format");
 const { exportBaseName, cleanName } = require("../utils");
+const { isMosaicAnnotation, mosaicPixelSize } = require("../annotation/special-labels");
 
 function createTrainingWorker({
   query,
+  sharp,
   fs,
   path,
   storageRoot,
@@ -69,7 +71,8 @@ function createTrainingWorker({
        WHERE pi.project_id=ANY($1::uuid[]) AND a.label_version_id=p.active_label_version_id ORDER BY a.label, a.id`,
       [selectedIds],
     )).rows;
-    const labels = [...new Set(annRows.map((ann) => String(ann.label || "unknown")))].sort((a, b) => a.localeCompare(b));
+    const targetAnnRows = annRows.filter((ann) => !isMosaicAnnotation(ann));
+    const labels = [...new Set(targetAnnRows.map((ann) => String(ann.label || "unknown")))].sort((a, b) => a.localeCompare(b));
     if (!labels.length) throw new Error("Selected dataset splits have no annotations");
     const labelToIndex = new Map(labels.map((label, index) => [label, index]));
     const annsByImage = new Map();
@@ -95,7 +98,9 @@ function createTrainingWorker({
     let duplicateImageCount = 0;
     for (let index = 0; index < deduplicatedRows.length; index += 1) {
       const item = deduplicatedRows[index];
-      const annotations = annsByImage.get(String(item.id)) || [];
+      const allAnnotations = annsByImage.get(String(item.id)) || [];
+      const annotations = allAnnotations.filter((ann) => !isMosaicAnnotation(ann));
+      const mosaicRegions = allAnnotations.filter(isMosaicAnnotation);
       const matchingParts = ["train", "val", "test"].filter((part) =>
         splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, annotations, datasetFilters[part]));
       if (matchingParts.length > 1) {
@@ -114,7 +119,30 @@ function createTrainingWorker({
       const ext = item.original_ext || ".jpg";
       const base = `${exportBaseName(item, index + 1)}_${String(item.id).slice(0, 8)}`;
       const imageName = `${base}${ext}`;
-      await writeObjectToFile(item.object_key, path.join(snapshotRoot, "images", part, imageName));
+      const snapshotImagePath = path.join(snapshotRoot, "images", part, imageName);
+      await writeObjectToFile(item.object_key, snapshotImagePath);
+      if (mosaicRegions.length && sharp) {
+        const overlays = [];
+        for (const region of mosaicRegions) {
+          const left = Math.max(0, Math.round(Number(region.bbox_x || 0)));
+          const top = Math.max(0, Math.round(Number(region.bbox_y || 0)));
+          const width = Math.max(0, Math.min(Number(item.width || 1) - left, Math.round(Number(region.bbox_w || 0))));
+          const height = Math.max(0, Math.min(Number(item.height || 1) - top, Math.round(Number(region.bbox_h || 0))));
+          if (!width || !height) continue;
+          const block = Math.max(1, mosaicPixelSize(region));
+          const input = await sharp(snapshotImagePath)
+            .extract({ left, top, width, height })
+            .resize(Math.max(1, Math.ceil(width / block)), Math.max(1, Math.ceil(height / block)), { kernel: "nearest" })
+            .resize(width, height, { kernel: "nearest" })
+            .toBuffer();
+          overlays.push({ input, left, top });
+        }
+        if (overlays.length) {
+          const temporaryPath = `${snapshotImagePath}.mosaic-tmp${ext}`;
+          await sharp(snapshotImagePath).composite(overlays).toFile(temporaryPath);
+          fs.renameSync(temporaryPath, snapshotImagePath);
+        }
+      }
       const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
       fs.writeFileSync(path.join(snapshotRoot, "labels", part, `${base}.txt`), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
       cocoBySplit[part].images.push({ id: String(item.id), file_name: imageName, width: Number(item.width || 0), height: Number(item.height || 0) });
@@ -132,7 +160,7 @@ function createTrainingWorker({
     fs.writeFileSync(path.join(snapshotRoot, "data.yaml"), dataYaml, "utf8");
     const imageCount = split.train + split.val + split.test;
     const includedImageIds = new Set(Object.values(cocoBySplit).flatMap((coco) => coco.images.map((image) => String(image.id))));
-    const annotationCount = annRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
+    const annotationCount = targetAnnRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
     if (!split.train) throw new Error("Training filters produced an empty train split");
     fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
     const snapshot = (await query(

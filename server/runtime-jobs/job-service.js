@@ -296,7 +296,7 @@ function createRuntimeJobService({
     let groundTruthRows = [];
     if (project?.active_label_version_id && imageIds.length) {
       groundTruthRows = (await query(
-        "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])",
+        "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) AND lower(trim(label)) <> 'mosaic'",
         [project.active_label_version_id, imageIds],
       )).rows;
     }
