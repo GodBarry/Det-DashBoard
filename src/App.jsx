@@ -23,13 +23,14 @@ export default function App() {
 
 const {
   activeTrainingJobId,
-  consumeRestoredActiveProjectId,
+  activeProjectId,
   consumeRestoredSelected,
   currentFolderId,
   persistUiState,
   restoredInferenceForm,
   restoredTrainingForm,
   setActiveTrainingJobId,
+  setActiveProjectId,
   setCurrentFolderId,
   setTheme,
   setView,
@@ -83,7 +84,6 @@ const {
   refreshHome,
   restoreAllProjects,
   restoreProject,
-  setActiveProject,
   setEditingProjectName,
   setHomeExpandedIds,
   startRenameProject,
@@ -101,7 +101,8 @@ const {
   setCurrentFolderId,
   setView,
   setError,
-  consumeRestoredActiveProjectId,
+  activeProjectId,
+  setActiveProjectId,
   resetWorkspace: () => datasetWorkspaceRef.current?.resetWorkspace(),
 });
 
@@ -258,8 +259,8 @@ const {
 });
 
 useEffect(() => {
-  persistUiState({ activeProject, selected, trainingForm, inferenceForm });
-}, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
+  persistUiState({ selected, trainingForm, inferenceForm });
+}, [view, theme, currentFolderId, activeProjectId, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
 const datasetImportController = useDatasetImportController({
   activeProject,

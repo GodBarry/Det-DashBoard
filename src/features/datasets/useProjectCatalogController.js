@@ -17,21 +17,22 @@ export function useProjectCatalogController({
   withScope,
   datasetScope,
   view,
+  activeProjectId,
+  setActiveProjectId,
   currentFolderId,
   setCurrentFolderId,
   setView,
   setError,
-  consumeRestoredActiveProjectId,
   resetWorkspace,
 }) {
   const [projects, setProjects] = useState([]);
   const [trashProjects, setTrashProjects] = useState([]);
-  const [activeProject, setActiveProject] = useState(null);
   const [editingProjectId, setEditingProjectId] = useState(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [homeExpandedIds, setHomeExpandedIds] = useState(() => new Set());
 
   const projectById = useMemo(() => buildProjectById(projects), [projects]);
+  const activeProject = activeProjectId ? projectById.get(activeProjectId) || null : null;
   const projectLastImportAt = useMemo(() => buildProjectLastImportAt(projects), [projects]);
   const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
   const visibleProjects = useMemo(
@@ -57,17 +58,19 @@ export function useProjectCatalogController({
   );
 
   function refreshHome() {
-    fetchRequest(withScope("/api/projects", datasetScope)).then((r) => r.json()).then((d) => {
-      const rows = d.projects || [];
+    fetchRequest(withScope("/api/projects", datasetScope)).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.projects)) throw new Error(data.error || "刷新项目目录失败");
+      return data.projects;
+    }).then((rows) => {
       setProjects(rows);
-      setActiveProject((current) => {
-        const projectId = consumeRestoredActiveProjectId(current?.id);
-        return projectId ? rows.find((project) => project.id === projectId) || null : null;
-      });
-      setCurrentFolderId((current) => current && rows.some((project) => project.id === current) ? current : null);
     }).catch(() => {});
 
-    fetchRequest("/api/projects/trash").then((r) => r.json()).then((d) => setTrashProjects(d.projects || [])).catch(() => {});
+    fetchRequest("/api/projects/trash").then(async (response) => {
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.projects)) throw new Error(data.error || "刷新项目回收站失败");
+      return data.projects;
+    }).then(setTrashProjects).catch(() => {});
   }
 
   function createProject() {
@@ -124,6 +127,7 @@ export function useProjectCatalogController({
     const removedRows = projects.filter((project) => descendants.has(project.id));
     setProjects((current) => current.filter((project) => !descendants.has(project.id)));
     if (currentFolderId && descendants.has(currentFolderId)) setCurrentFolderId(null);
+    if (activeProjectId && descendants.has(activeProjectId)) setActiveProjectId(null);
     fetchRequest(`/api/projects/${projectId}`, { method: "DELETE" }).then(() => { recordDatasetActivity("删除", `项目已移入回收站：${projectName}`); refreshHome(); }).catch((err) => { setProjects((current) => [...current, ...removedRows]); recordDatasetActivity("删除", `删除项目失败：${projectName}`, "error", err.message); setError(err.message); });
   }
 
@@ -159,7 +163,6 @@ export function useProjectCatalogController({
         recordDatasetActivity("重命名", `${project.name} → ${data.project?.name || name}`);
         cancelRenameProject();
         refreshHome();
-        if (activeProject?.id === project.id && data.project) setActiveProject(data.project);
       })
       .catch((err) => {
         recordDatasetActivity("重命名", `重命名失败：${project.name}`, "error", err.message);
@@ -207,8 +210,8 @@ export function useProjectCatalogController({
   }
 
   function openProject(project) {
-    setActiveProject(project);
-    setCurrentFolderId(project.id);
+    setActiveProjectId(project.id);
+    setCurrentFolderId(project.parent_id || null);
     setView("workspace");
     resetWorkspace();
     setError(null);
@@ -216,7 +219,7 @@ export function useProjectCatalogController({
 
   function goHome() {
     setView("home");
-    setActiveProject(null);
+    setActiveProjectId(null);
     setCurrentFolderId(null);
     setError(null);
     refreshHome();
@@ -244,7 +247,7 @@ export function useProjectCatalogController({
 
   function openDatasetView() {
     setError(null);
-    setActiveProject(null);
+    setActiveProjectId(null);
     setCurrentFolderId(null);
     setView("home");
     refreshHome();
@@ -277,7 +280,6 @@ export function useProjectCatalogController({
     refreshHome,
     restoreAllProjects,
     restoreProject,
-    setActiveProject,
     setEditingProjectName,
     setHomeExpandedIds,
     startRenameProject,

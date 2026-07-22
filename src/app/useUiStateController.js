@@ -12,19 +12,13 @@ export function useUiStateController() {
   ));
   const [theme, setTheme] = useState(() => restoredUiState.theme === "dark" ? "dark" : "light");
   const [currentFolderId, setCurrentFolderId] = useState(() => restoredUiState.currentFolderId || null);
+  const [activeProjectId, setActiveProjectId] = useState(() => (
+    restoredUiState.view === "workspace" ? restoredUiState.activeProjectId || null : null
+  ));
   const [activeTrainingJobId, setActiveTrainingJobId] = useState(
     () => restoredUiState.activeTrainingJobId || null,
   );
-  const restoredActiveProjectIdRef = useRef(
-    restoredUiState.view === "workspace" ? restoredUiState.activeProjectId || null : null,
-  );
   const restoredSelectedImageIdRef = useRef(restoredUiState.selectedImageId || null);
-
-  const consumeRestoredActiveProjectId = (currentProjectId) => {
-    const projectId = currentProjectId || restoredActiveProjectIdRef.current;
-    restoredActiveProjectIdRef.current = null;
-    return projectId;
-  };
 
   const consumeRestoredSelected = (items) => {
     const restoredSelected = restoredSelectedImageIdRef.current
@@ -34,16 +28,14 @@ export function useUiStateController() {
     return restoredSelected;
   };
 
-  const persistUiState = ({ activeProject, selected, trainingForm, inferenceForm }) => {
-    const persistedActiveProjectId = activeProject?.id
-      || (view === "workspace" ? restoredActiveProjectIdRef.current : null);
+  const persistUiState = ({ selected, trainingForm, inferenceForm }) => {
     const persistedSelectedImageId = selected?.id
       || (view === "workspace" ? restoredSelectedImageIdRef.current : null);
     updateUiState({
       view,
       theme,
       currentFolderId,
-      activeProjectId: persistedActiveProjectId,
+      activeProjectId: view === "workspace" ? activeProjectId : null,
       selectedImageId: persistedSelectedImageId,
       activeTrainingJobId,
       trainingForm: { ...trainingForm },
@@ -53,13 +45,14 @@ export function useUiStateController() {
 
   return {
     activeTrainingJobId,
-    consumeRestoredActiveProjectId,
+    activeProjectId,
     consumeRestoredSelected,
     currentFolderId,
     persistUiState,
     restoredInferenceForm: restoredUiState.inferenceForm,
     restoredTrainingForm: restoredUiState.trainingForm,
     setActiveTrainingJobId,
+    setActiveProjectId,
     setCurrentFolderId,
     setTheme,
     setView,

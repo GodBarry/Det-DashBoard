@@ -3530,18 +3530,6 @@ button:disabled:hover {
   background: rgba(17, 24, 39, .78);
 }
 
-.thumb-name {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  padding: 15px 8px 7px;
-  color: #fff;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .68));
-  font-size: 12px;
-}
-
 .selected-mark {
   position: absolute;
   top: 8px;

@@ -1221,9 +1221,6 @@ return (
 <span className="thumb-tags"><em>{viewLabel(item.view)}</em><em>{modalityLabel(item.modality)}</em></span>
 
 
-
-<b className="thumb-name">{item.display_name}</b>
-
 </div>
 
 </button>

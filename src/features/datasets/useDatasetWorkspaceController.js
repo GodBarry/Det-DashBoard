@@ -35,12 +35,23 @@ export function useDatasetWorkspaceController({
   const [lastCheckedId, setLastCheckedId] = useState(null);
   const importRefreshKeyRef = useRef("");
   const loggedJobStatesRef = useRef(null);
+  const activeProjectIdRef = useRef(activeProject?.id || null);
+  const workspaceRequestRef = useRef({ sequence: 0, controller: null });
+  const summaryRequestRef = useRef({ sequence: 0, controller: null });
+  const importsRequestRef = useRef({ sequence: 0, controller: null });
+  activeProjectIdRef.current = activeProject?.id || null;
+
+  useEffect(() => () => {
+    workspaceRequestRef.current.controller?.abort();
+    summaryRequestRef.current.controller?.abort();
+    importsRequestRef.current.controller?.abort();
+  }, []);
 
   useEffect(() => {
     if (!activeProject) return;
 
     loadWorkspace(activeProject.id);
-  }, [activeProject, page, filters]);
+  }, [activeProject?.id, page, filters]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -57,7 +68,7 @@ export function useDatasetWorkspaceController({
     }, DATASET_WORKSPACE_POLL_INTERVAL);
 
     return () => window.clearInterval(timer);
-  }, [activeProject, currentUser?.id]);
+  }, [activeProject?.id, currentUser?.id]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -87,9 +98,14 @@ export function useDatasetWorkspaceController({
   }, [jobs]);
 
   function loadWorkspace(projectId) {
+    workspaceRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = workspaceRequestRef.current.sequence + 1;
+    workspaceRequestRef.current = { sequence, controller };
     const params = buildWorkspaceSearchParams(page, filters);
 
-    request(`/api/projects/${projectId}/images?${params}`).then((response) => response.json()).then((data) => {
+    request(`/api/projects/${projectId}/images?${params}`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (controller.signal.aborted || activeProjectIdRef.current !== projectId || workspaceRequestRef.current.sequence !== sequence) return;
       setItems(data.items || []);
       setTotalItems(Number(data.total) || 0);
 
@@ -104,13 +120,19 @@ export function useDatasetWorkspaceController({
       if (selected && !data.items?.some((item) => item.id === selected.id)) setSelected(data.items?.[0] || null);
 
       setCheckedIds((ids) => ids.filter((id) => data.items?.some((item) => item.id === id)));
-    }).catch(() => {});
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
 
     loadSummary(projectId);
     loadImports(projectId);
   }
 
   function resetWorkspace() {
+    workspaceRequestRef.current.controller?.abort();
+    summaryRequestRef.current.controller?.abort();
+    importsRequestRef.current.controller?.abort();
+    workspaceRequestRef.current.sequence += 1;
+    summaryRequestRef.current.sequence += 1;
+    importsRequestRef.current.sequence += 1;
     setPage(1);
     setSelected(null);
     setItems([]);
@@ -120,18 +142,31 @@ export function useDatasetWorkspaceController({
   }
 
   function loadSummary(projectId) {
-    request(`/api/projects/${projectId}/summary`).then((response) => response.json()).then((data) => setSummary(data.summary || null)).catch(() => {});
+    summaryRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = summaryRequestRef.current.sequence + 1;
+    summaryRequestRef.current = { sequence, controller };
+    request(`/api/projects/${projectId}/summary`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (!controller.signal.aborted && activeProjectIdRef.current === projectId && summaryRequestRef.current.sequence === sequence) setSummary(data.summary || null);
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
   }
 
   function loadImports(projectId) {
-    request(`/api/projects/${projectId}/imports`).then((response) => response.json()).then((data) => {
+    importsRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = importsRequestRef.current.sequence + 1;
+    importsRequestRef.current = { sequence, controller };
+    request(`/api/projects/${projectId}/imports`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (controller.signal.aborted || activeProjectIdRef.current !== projectId || importsRequestRef.current.sequence !== sequence) return;
       const rows = data.imports || [];
 
       setImports(rows);
       setLatestImport(findRunningImport(rows));
-    }).catch(() => {});
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
 
-    request(`/api/projects/${projectId}/imports?trash=1`).then((response) => response.json()).then((data) => setTrashImports(data.imports || [])).catch(() => {});
+    request(`/api/projects/${projectId}/imports?trash=1`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (!controller.signal.aborted && activeProjectIdRef.current === projectId && importsRequestRef.current.sequence === sequence) setTrashImports(data.imports || []);
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
   }
 
   function cancelLatestImport() {
