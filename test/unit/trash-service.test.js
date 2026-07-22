@@ -55,7 +55,7 @@ test("raw label cleanup removes only objects owned by deleted label versions", a
     "objects/raw-labels/project-1/version-2/raw-labels.jsonl.gz",
   ]);
 
-  assert.equal(await service.cleanupRawLabelObjects(["version-1"]), 1);
+  assert.equal(await service.cleanupRawLabelObjects([{ id: "version-1", project_id: "project-1" }]), 1);
   assert.deepEqual(removedObjects, ["objects/raw-labels/project-1/version-1/one.json"]);
 });
 
