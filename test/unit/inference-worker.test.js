@@ -1,8 +1,19 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const { createInferenceWorker } = require("../../server/runtime-jobs/inference-worker");
+
+test("DINO runner uses true batches with safe GPU fallback", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../server/runtime-jobs/inference-worker.js"), "utf8");
+
+  assert.match(source, /batchSize: Math\.max\(1, Math\.floor\(Number\(params\.batch/);
+  assert.match(source, /model\.test_step\(pseudo_collate\(data\)\)/);
+  assert.match(source, /safe_cap = 2 if total_gb < 6 else \(4 if total_gb < 12 else 8\)/);
+  assert.match(source, /except torch\.cuda\.OutOfMemoryError/);
+  assert.match(source, /active_batch = max\(1, active_batch \/\/ 2\)/);
+});
 
 function deferred() {
   let resolve;
