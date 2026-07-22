@@ -45,6 +45,14 @@ function createMlRoutes(deps) {
       sendJson(res, { version: await modelService.createModelVersion(await readBody(req), actor) });
       return true;
     }
+    if (method === "POST" && pathname === "/api/ml/model-versions/preflight") {
+      const body = await readBody(req);
+      if (body.modelId || body.model_id) {
+        await resourceAccess.assertIndependentAccess("model_clusters", body.modelId || body.model_id, actor, "read");
+      }
+      sendJson(res, { analysis: await modelService.inspectModelWeight(body) });
+      return true;
+    }
     if (method === "POST" && pathname === "/api/ml/model-assets/clear") {
       accessControl.requireAdmin(actor);
       sendJson(res, await modelMaintenanceService.clearModelAssets(await readBody(req)));
@@ -92,6 +100,11 @@ function createMlRoutes(deps) {
     if (method === "PATCH" && modelVersionMatch) {
       await resourceAccess.assertIndependentAccess("model_revisions", modelVersionMatch[1], actor, "write");
       sendJson(res, { version: await modelService.renameModelVersion(modelVersionMatch[1], await readBody(req)) });
+      return true;
+    }
+    if (method === "DELETE" && modelVersionMatch) {
+      await resourceAccess.assertIndependentAccess("model_revisions", modelVersionMatch[1], actor, "write");
+      sendJson(res, await modelService.deleteModelVersion(modelVersionMatch[1]));
       return true;
     }
     const modelVersionDownloadMatch = pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);

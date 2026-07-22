@@ -63,6 +63,8 @@ export function PlatformPage({
   setEnvForm,
   createModel,
   createModelVersion,
+  deleteModelVersion,
+  inspectModelWeight,
   createPythonEnv,
   renameModelVersion,
   submitTrainingJob,
@@ -261,6 +263,8 @@ export function PlatformPage({
             setEnvForm={setEnvForm}
             createModel={createModel}
             createModelVersion={createModelVersion}
+            deleteModelVersion={deleteModelVersion}
+            inspectModelWeight={inspectModelWeight}
             createPythonEnv={createPythonEnv}
             renameModelVersion={renameModelVersion}
             drawerMode={assetDrawerMode}

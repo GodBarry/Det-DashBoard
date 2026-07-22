@@ -71,6 +71,46 @@ function createModelService({
     return `${base}_${String((rows.rows[0]?.count || 0) + 1).padStart(3, "0")}`;
   }
 
+  function inferWeightFramework(sourcePath, model = {}) {
+    const fileName = path.basename(sourcePath).toLowerCase();
+    const ext = path.extname(fileName);
+    if (ext === ".onnx") return "ONNX";
+    if (/dino|faster[-_]?r?cnn|mmdet/.test(fileName)) return "PyTorch / MMDetection";
+    if (/yolo|ultralytics/.test(fileName) || ext === ".pt") return "Ultralytics";
+    if (ext === ".pth") return "PyTorch";
+    return model.framework || "Unknown";
+  }
+
+  function validateWeightPath(sourcePath) {
+    if (!sourcePath) throw new Error("请选择权重文件路径");
+    if (/^[a-z]:[^\\/]/i.test(sourcePath)) throw new Error("Windows 盘符路径需写为 E:\\文件名，而不是 E:文件名");
+    if (!fs.existsSync(sourcePath)) throw new Error("权重文件不存在，请确认这是服务器上的绝对路径");
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isFile()) throw new Error("权重文件路径必须指向文件，不能是文件夹");
+    return stat;
+  }
+
+  async function inspectModelWeight(body = {}) {
+    const modelId = body.modelId || body.model_id;
+    const sourcePath = String(body.sourcePath || body.source_path || "").trim();
+    const model = modelId ? (await query("SELECT * FROM model_clusters WHERE id=$1 AND deleted_at IS NULL", [modelId])).rows[0] : null;
+    if (!model) throw new Error("请先选择模型簇");
+    const stat = validateWeightPath(sourcePath);
+    const sha256Pending = stat.size > 128 * 1024 * 1024;
+    const sha256 = sha256Pending ? null : await hashFile(sourcePath);
+    const epoch = path.basename(sourcePath).match(/epoch[_-]?(\d+)/i)?.[1] || null;
+    return {
+      fileName: path.basename(sourcePath),
+      size: stat.size,
+      sizeLabel: stat.size >= 1024 ** 2 ? `${(stat.size / 1024 ** 2).toFixed(2)} MB` : `${(stat.size / 1024).toFixed(2)} KB`,
+      sha256,
+      sha256Pending,
+      framework: inferWeightFramework(sourcePath, model),
+      taskType: model.task_type,
+      epoch: epoch ? Number(epoch) : null,
+    };
+  }
+
   async function createModelVersion(body = {}, actor) {
     const modelId = body.modelId || body.model_id;
     if (!modelId) throw new Error("Select a model cluster.");
@@ -80,25 +120,35 @@ function createModelService({
     const requestedStage = String(body.stage || "pretrained").trim().toLowerCase();
     const stage = ["pretrained", "training", "candidate", "production"].includes(requestedStage) ? requestedStage : "pretrained";
     const sourcePath = String(body.sourcePath || body.source_path || "").trim();
-    const params = body.params || {};
-    const defaultPrefix = `${stage === "pretrained" ? "pretrain" : stage}_${model.name}_${dateCode()}`;
+    const stat = validateWeightPath(sourcePath);
+    const datasetProjectId = ["", "unknown", "__unknown__"].includes(String(body.datasetProjectId || body.dataset_project_id || ""))
+      ? null
+      : (body.datasetProjectId || body.dataset_project_id);
+    let datasetName = "unknown";
+    if (datasetProjectId) {
+      const dataset = (await query("SELECT id, name FROM projects WHERE id=$1 AND deleted_at IS NULL", [datasetProjectId])).rows[0];
+      if (!dataset) throw new Error("训练数据不存在或已被删除");
+      datasetName = dataset.name;
+    }
+    const params = { ...(body.params || {}), description: String(body.description || "").trim() };
+    const epoch = path.basename(sourcePath).match(/epoch[_-]?(\d+)/i)?.[1];
+    const defaultPrefix = `${model.name}_${datasetName}${epoch ? `_epoch${epoch}` : ""}`;
     const versionName = String(body.versionName || body.version_name || await nextModelVersionName(defaultPrefix, model.id)).trim();
     const artifactRoot = path.join(storageRoot, "runtime", "models", model.id, versionName);
     fs.mkdirSync(artifactRoot, { recursive: true });
     const version = (await query(
-      `INSERT INTO model_revisions (model_id, version_name, stage, params_json, artifact_root)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [model.id, versionName, stage, JSON.stringify(params), artifactRoot],
+      `INSERT INTO model_revisions (model_id, version_name, stage, params_json, artifact_root, dataset_project_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [model.id, versionName, stage, JSON.stringify(params), artifactRoot, datasetProjectId],
     )).rows[0];
     await resourceAccess.assignOwner("model_revisions", version.id, actor);
     if (sourcePath) {
-      if (!fs.existsSync(sourcePath)) throw new Error("Weight file does not exist.");
       const ext = path.extname(sourcePath).toLowerCase() || ".pt";
       const objectKey = `ml/artifacts/models/${model.id}/${version.id}/weights${ext}`;
-      await store.putFile(objectKey, sourcePath);
-      const stat = fs.statSync(sourcePath);
-      const sha = await hashFile(sourcePath).catch(() => null);
       const manifestKey = modelWeightManifestKey(model.id, version.id);
+      try {
+      await store.putFile(objectKey, sourcePath);
+      const sha = await hashFile(sourcePath).catch(() => null);
       const manifest = {
         format: "det-dashboard.model-weight.v1",
         assetType: "model_weight",
@@ -106,7 +156,7 @@ function createModelService({
         modelName: model.name,
         modelVersionId: version.id,
         versionName,
-        framework: model.framework,
+        framework: inferWeightFramework(sourcePath, model),
         taskType: model.task_type,
         weightKey: objectKey,
         weightName: path.basename(objectKey),
@@ -122,8 +172,25 @@ function createModelService({
          VALUES ($1,'weights',$2,$3,$4,$5)`,
         [version.id, objectKey, stat.size, sha, JSON.stringify({ assetPolicy: "platform_minio_asset", weightKey: objectKey, manifestKey, importSourcePath: sourcePath, weightRole: stage === "pretrained" ? "pretrained" : "other" })],
       );
+      } catch (error) {
+        await store.removeObject?.(objectKey).catch(() => {});
+        await store.removeObject?.(manifestKey).catch(() => {});
+        await query("DELETE FROM model_revisions WHERE id=$1", [version.id]).catch(() => {});
+        throw error;
+      }
     }
     return version;
+  }
+
+  async function deleteModelVersion(versionId) {
+    const files = await query("SELECT path, metadata_json FROM model_files WHERE model_version_id=$1", [versionId]);
+    const removed = await query("DELETE FROM model_revisions WHERE id=$1 RETURNING id, model_id, version_name", [versionId]);
+    if (!removed.rows[0]) throw new Error("模型版本不存在");
+    for (const file of files.rows) {
+      await store.removeObject?.(file.path).catch(() => {});
+      if (file.metadata_json?.manifestKey) await store.removeObject?.(file.metadata_json.manifestKey).catch(() => {});
+    }
+    return { deleted: true, version: removed.rows[0] };
   }
 
   async function renameModelVersion(versionId, body = {}) {
@@ -282,7 +349,9 @@ function createModelService({
     listMlModels,
     createMlModel,
     nextModelVersionName,
+    inspectModelWeight,
     createModelVersion,
+    deleteModelVersion,
     renameModelVersion,
     listModelVersions,
     findWeightArtifact,

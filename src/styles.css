@@ -13314,3 +13314,76 @@ body.resizing-table-column {
   .training-filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .parameter-group fieldset { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
 }
+/* Asset tables share the same adaptive, user-resizable column behavior as runtime queues. */
+.resizable-asset-table {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.resizable-asset-table .asset-table-head,
+.resizable-asset-table .asset-table-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--asset-table-columns) !important;
+  width: max(100%, max-content);
+  min-width: 100%;
+}
+
+.resizable-asset-table .asset-table-head > span,
+.resizable-asset-table .asset-table-row > span,
+.resizable-asset-table .asset-table-row > b,
+.resizable-asset-table .asset-table-row > em,
+.resizable-asset-table .asset-table-row > .asset-actions {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resizable-asset-table .asset-table-head > span {
+  position: relative;
+}
+
+.resizable-asset-table .table-column-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 4;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.asset-actions .danger {
+  color: var(--danger, #ef4444);
+}
+
+.asset-export-dialog-overlay {
+  background: rgba(15, 23, 42, .42);
+}
+
+.app-shell.light .asset-export-dialog,
+.light .asset-export-dialog {
+  color: #172033;
+  background: #fff;
+  border-color: #d7e0ea;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, .18);
+}
+
+.app-shell.light .asset-export-dialog select,
+.light .asset-export-dialog select {
+  color: #172033;
+  background: #fff;
+  border-color: #cbd7e4;
+}
+
+.drawer-submit-message,
+.drawer-inline-error {
+  color: var(--danger, #dc2626);
+  font-size: 12px;
+}
+
+.drawer-actions .drawer-submit-message {
+  margin-right: auto;
+  max-width: 48%;
+}

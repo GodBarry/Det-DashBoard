@@ -38,6 +38,8 @@ function createHarness(overrides = {}) {
       createMlModel: async () => ({ id: "model-1" }),
       listModelVersions: async (...args) => ({ args }),
       createModelVersion: async () => ({ id: "version-1" }),
+      inspectModelWeight: async () => ({ framework: "PyTorch" }),
+      deleteModelVersion: async (id) => ({ deleted: true, id }),
       renameModelVersion: async () => ({ id: "version-1", name: "renamed" }),
       streamModelArtifact: async (...args) => calls.push(["modelStream", ...args.slice(1)]),
     },
@@ -81,6 +83,19 @@ test("model version listing preserves model id, actor, scope, and response", asy
   const actor = { id: "user-1" };
   await routes.handle(request("GET"), {}, parsed("/api/ml/model-versions", { model_id: "model-4" }), actor);
   assert.deepEqual(calls, [["sendJson", { versions: { args: ["model-4", actor, "mine"] } }]]);
+});
+
+test("model preflight and deletion preserve access checks and response contracts", async () => {
+  const actor = { id: "user-1" };
+  const { routes, calls } = createHarness({ readBody: async () => ({ modelId: "model-7", sourcePath: "E:\\weights.pth" }) });
+  await routes.handle(request("POST"), {}, parsed("/api/ml/model-versions/preflight"), actor);
+  await routes.handle(request("DELETE"), {}, parsed("/api/ml/model-versions/version-7"), actor);
+  assert.deepEqual(calls, [
+    ["independent", "model_clusters", "model-7", actor, "read"],
+    ["sendJson", { analysis: { framework: "PyTorch" } }],
+    ["independent", "model_revisions", "version-7", actor, "write"],
+    ["sendJson", { deleted: true, id: "version-7" }],
+  ]);
 });
 
 test("training priority checks ownership and targets the training queue", async () => {
@@ -143,6 +158,6 @@ test("model downloads preserve access, artifact selection, and stream order", as
   );
   assert.deepEqual(calls, [
     ["independent", "model_revisions", "version-2", actor, "read"],
-    ["modelStream", "version-2", "artifact-9"],
+    ["modelStream", "version-2", "artifact-9", "original"],
   ]);
 });

@@ -234,11 +234,13 @@ const {
 
 const {
   createModel,
-  createModelVersion,
+    createModelVersion,
+    deleteModelVersion,
   createPythonEnv,
   envForm,
   modelForm,
-  renameModelVersion,
+    renameModelVersion,
+    inspectModelWeight,
   setEnvForm,
   setModelForm,
   setVersionForm,
@@ -546,6 +548,10 @@ setEnvForm={setEnvForm}
 createModel={createModel}
 
 createModelVersion={createModelVersion}
+
+deleteModelVersion={deleteModelVersion}
+
+inspectModelWeight={inspectModelWeight}
 
 createPythonEnv={createPythonEnv}
 

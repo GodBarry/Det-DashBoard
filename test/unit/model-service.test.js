@@ -150,8 +150,8 @@ test("createModelVersion preserves MinIO key, manifest, metadata, and permission
     modelId: "model-3",
     modelName: "YOLO",
     modelVersionId: "version-3",
-    versionName: "pretrain_YOLO_20260716_001",
-    framework: "ultralytics",
+    versionName: "YOLO_unknown_001",
+    framework: "Ultralytics",
     taskType: "detect",
     weightKey: "ml/artifacts/models/model-3/version-3/weights.pt",
     weightName: "weights.pt",
@@ -169,6 +169,38 @@ test("createModelVersion preserves MinIO key, manifest, metadata, and permission
     importSourcePath: sourcePath,
     weightRole: "pretrained",
   });
+});
+
+test("weight preflight validates server paths and infers pth frameworks", async () => {
+  const sourcePath = "E:\\best_source_model_epoch50.pth";
+  const query = async (sql) => {
+    if (sql.startsWith("SELECT * FROM model_clusters")) return { rows: [{ id: "model-5", framework: "ultralytics", task_type: "detect" }] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  };
+  const { service } = createFixture(query, {
+    fs: {
+      existsSync: (target) => target === sourcePath,
+      statSync: () => ({ size: 5 * 1024 * 1024, isFile: () => true }),
+    },
+  });
+
+  const analysis = await service.inspectModelWeight({ modelId: "model-5", sourcePath });
+  assert.equal(analysis.framework, "PyTorch");
+  assert.equal(analysis.epoch, 50);
+  assert.equal(analysis.sizeLabel, "5.00 MB");
+  await assert.rejects(() => service.inspectModelWeight({ modelId: "model-5", sourcePath: "E:weights.pth" }), /Windows 盘符路径/);
+});
+
+test("deleteModelVersion removes the database record and archived objects", async () => {
+  const removedObjects = [];
+  const query = async (sql) => {
+    if (sql.startsWith("SELECT path")) return { rows: [{ path: "weights.pth", metadata_json: { manifestKey: "manifest.json" } }] };
+    if (sql.startsWith("DELETE FROM model_revisions")) return { rows: [{ id: "version-6", version_name: "v6" }] };
+    throw new Error(`Unexpected SQL: ${sql}`);
+  };
+  const { service } = createFixture(query, { store: { async removeObject(key) { removedObjects.push(key); } } });
+  assert.equal((await service.deleteModelVersion("version-6")).deleted, true);
+  assert.deepEqual(removedObjects, ["weights.pth", "manifest.json"]);
 });
 
 test("artifact lookup and streaming preserve cache paths, selection, and response headers", async () => {
@@ -200,6 +232,6 @@ test("artifact lookup and streaming preserve cache paths, selection, and respons
   assert.match(queries[1].sql, /ma\.id=\$2/);
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers["content-type"], "application/octet-stream");
-  assert.equal(res.headers["content-disposition"], 'attachment; filename="Model_One_Version_One_best.pt"');
+  assert.match(res.headers["content-disposition"], /^attachment; filename="Model_One_best_\d{12}\.pt"; filename\*=UTF-8''Model_One_best_\d{12}\.pt$/);
   assert.equal(remoteStream.pipeTarget, res);
 });

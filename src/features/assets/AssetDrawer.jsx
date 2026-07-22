@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 import { getAssetDrawerSubtitle, getAssetDrawerTitle } from "./assetDrawerPresentation.js";
@@ -19,14 +19,66 @@ export function AssetDrawer({
   setEnvForm,
   createModel,
   createModelVersion,
+  inspectModelWeight,
   createPythonEnv,
 }) {
   const drawerTitle = getAssetDrawerTitle(mode);
   const drawerSubtitle = getAssetDrawerSubtitle(mode);
 
-  const submit = () => {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [analysis, setAnalysis] = useState(null);
+  const previousAutoName = useRef("");
+  const selectedModel = mlModels.find((model) => model.id === versionForm.modelId);
+  const selectedProject = projects.find((project) => project.id === versionForm.datasetProjectId);
+  const automaticVersionName = useMemo(() => {
+    const clean = (value) => String(value || "").trim().replace(/[\\/:*?"<>|\s]+/g, "_").replace(/_+/g, "_");
+    const epoch = String(versionForm.sourcePath || "").match(/epoch[_-]?(\d+)/i)?.[1];
+    return [clean(selectedModel?.name || "model"), clean(selectedProject?.name || "unknown"), epoch ? `epoch${epoch}` : null].filter(Boolean).join("_");
+  }, [selectedModel?.name, selectedProject?.name, versionForm.sourcePath]);
+
+  useEffect(() => {
+    if (mode !== "version" && mode !== "pretrained") return;
+    if (!versionForm.versionName || versionForm.versionName === previousAutoName.current) {
+      previousAutoName.current = automaticVersionName;
+      setVersionForm((current) => ({ ...current, versionName: automaticVersionName }));
+    }
+  }, [automaticVersionName, mode, setVersionForm, versionForm.versionName]);
+
+  useEffect(() => {
+    if ((mode !== "version" && mode !== "pretrained") || !versionForm.modelId || !versionForm.sourcePath.trim()) {
+      setAnalysis(null);
+      return undefined;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        setAnalysis({ loading: true });
+        setAnalysis(await inspectModelWeight({ modelId: versionForm.modelId, sourcePath: versionForm.sourcePath }));
+      } catch (error) {
+        setAnalysis({ error: error.message });
+      }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [inspectModelWeight, mode, versionForm.modelId, versionForm.sourcePath]);
+
+  const submit = async () => {
+    setSubmitMessage("");
     if (mode === "cluster") createModel();
-    if (mode === "version" || mode === "pretrained") createModelVersion();
+    if (mode === "version" || mode === "pretrained") {
+      if (analysis?.error) {
+        setSubmitMessage(analysis.error);
+        return;
+      }
+      setSubmitting(true);
+      try {
+        await createModelVersion();
+        onClose();
+      } catch (error) {
+        setSubmitMessage(error.message);
+      } finally {
+        setSubmitting(false);
+      }
+    }
     if (mode === "env") createPythonEnv();
     if (mode === "algorithm") window.alert("算法适配器导入接口待接入，当前已完成界面布局");
   };
@@ -62,11 +114,10 @@ export function AssetDrawer({
             <DrawerField label="版本名称"><input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="yolov8n_ultralytics_8.4.80_cpu" /></DrawerField>
             <DrawerField label="权重来源"><div className="drawer-segment"><button className="active" type="button">本地路径</button><button type="button">MinIO路径</button><button type="button">训练产物</button></div></DrawerField>
             <DrawerField label="权重文件路径"><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} placeholder="C:\\Users\\Administrator\\Downloads\\v8_s.pt" /></DrawerField>
-            <DrawerField label="训练数据"><select value={versionForm.datasetProjectId || ""} onChange={(e) => setVersionForm({ ...versionForm, datasetProjectId: e.target.value })}><option value="">请选择训练数据</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></DrawerField>
+            <DrawerField label="训练数据"><select value={versionForm.datasetProjectId || "unknown"} onChange={(e) => setVersionForm({ ...versionForm, datasetProjectId: e.target.value })}><option value="unknown">未知</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></DrawerField>
             <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
             <DrawerField label="说明" tall><textarea value={versionForm.description || ""} onChange={(e) => setVersionForm({ ...versionForm, description: e.target.value })} placeholder="请输入说明（可选）" maxLength={500} /></DrawerField>
-            <DrawerField label="MinIO目标路径"><DrawerInputWithIcon readOnly copyIcon value={`assets/models/${versionForm.versionName || "model-version"}/best.pt`} /></DrawerField>
-            <div className="auto-parse-card"><h3>自动解析</h3><p><span>文件大小</span><b>--</b></p><p><span>SHA256</span><b>提交后计</b></p><p><span>框架</span><b>Ultralytics</b></p><p><span>任务</span><b>detect</b></p></div>
+            <div className={`auto-parse-card ${analysis?.error ? "has-error" : ""}`}><h3>自动解析</h3><p><span>文件大小</span><b>{analysis?.loading ? "解析中..." : analysis?.sizeLabel || "--"}</b></p><p><span>SHA256</span><b title={analysis?.sha256}>{analysis?.sha256 ? `${analysis.sha256.slice(0, 16)}...` : analysis?.sha256Pending ? "登记时计算" : "--"}</b></p><p><span>框架</span><b>{analysis?.framework || selectedModel?.framework || "待解析"}</b></p><p><span>任务</span><b>{analysis?.taskType || selectedModel?.task_type || "detect"}</b></p>{analysis?.error && <p className="drawer-inline-error">{analysis.error}</p>}</div>
           </>
         )}
         {mode === "algorithm" && (
@@ -95,8 +146,9 @@ export function AssetDrawer({
         )}
       </div>
       <div className="drawer-actions">
+        {submitMessage && <span className="drawer-submit-message">{submitMessage}</span>}
         <button onClick={onClose}>取消</button>
-        <button className="primary" onClick={submit}>{drawerTitle}</button>
+        <button className="primary" onClick={submit} disabled={submitting || analysis?.loading}>{submitting ? "登记中..." : drawerTitle}</button>
       </div>
     </aside>
   );

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 const initialModelForm = { name: "", taskType: "detect", framework: "ultralytics", description: "" };
-const initialVersionForm = { modelId: "", versionName: "", sourcePath: "", stage: "pretrained" };
+const initialVersionForm = { modelId: "", versionName: "", sourcePath: "", datasetProjectId: "unknown", stage: "pretrained" };
 const initialEnvForm = { name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" };
 
 export function useAssetMutationController({
@@ -30,20 +30,47 @@ export function useAssetMutationController({
       .catch((err) => setError(err.message));
   }
 
-  function createModelVersion() {
-    fetch("/api/ml/model-versions", {
+  async function createModelVersion() {
+    try {
+      const response = await fetch("/api/ml/model-versions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(versionForm),
-    })
-      .then((r) => Promise.all([r.status, r.json()]))
-      .then(([status, data]) => {
-        if (status >= 400) throw new Error(data.error || messages.createModelVersion);
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.error || messages.createModelVersion);
+      setVersionForm({ ...initialVersionForm, modelId: versionForm.modelId });
+      await loadMlPlatform();
+      return data.version;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }
 
-        setVersionForm({ ...initialVersionForm, modelId: versionForm.modelId });
-        loadMlPlatform();
-      })
-      .catch((err) => setError(err.message));
+  const inspectModelWeight = useCallback(async (payload) => {
+    const response = await fetch("/api/ml/model-versions/preflight", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) throw new Error(data.error || "权重文件解析失败");
+    return data.analysis;
+  }, []);
+
+  async function deleteModelVersion(version) {
+    if (!window.confirm(`确定删除模型版本“${version.version_name}”吗？`)) return;
+    const response = await fetch(`/api/ml/model-versions/${encodeURIComponent(version.id)}`, { method: "DELETE" });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      setError(data.error || "删除模型版本失败");
+      return;
+    }
+    await loadMlPlatform();
   }
 
   function createPythonEnv() {
@@ -88,9 +115,11 @@ export function useAssetMutationController({
   return {
     createModel,
     createModelVersion,
+    deleteModelVersion,
     createPythonEnv,
     envForm,
     modelForm,
+    inspectModelWeight,
     renameModelVersion,
     setEnvForm,
     setModelForm,
