@@ -1,4 +1,29 @@
 const { importedAnnotationAttributes } = require("../annotation/special-labels");
+const os = require("node:os");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+
+const execFileAsync = promisify(execFile);
+
+async function createRawLabelArchive(fs, path, sourceRoot, labelFiles) {
+  if (!labelFiles.length) return null;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-dashboard-labels-"));
+  const archivePath = path.join(tempRoot, "raw-labels.tar.gz");
+  const mediaExcludes = [
+    "jpg", "jpeg", "png", "bmp", "tif", "tiff", "webp",
+    "mp4", "avi", "mov", "mkv", "wmv", "m4v", "webm",
+  ].flatMap((ext) => [`--exclude=*.${ext}`, `--exclude=*.${ext.toUpperCase()}`]);
+  try {
+    await execFileAsync("tar", ["-czf", archivePath, "-C", sourceRoot, ...mediaExcludes, "."], {
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    return { archivePath, tempRoot, fileCount: labelFiles.length };
+  } catch (error) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw new Error(`原始标注归档失败：${error.stderr || error.message}`);
+  }
+}
 
 function createImportService(deps) {
   const {
@@ -245,7 +270,6 @@ function createImportService(deps) {
     const images = sourceGroups.flatMap((group) => group.images.map((file) => ({ file, sourceRoot: group.sourceRoot, matches: group.matches })));
     const videos = sourceGroups.flatMap((group) => group.videos.map((file) => ({ file, sourceRoot: group.sourceRoot })));
     const unresolved = sourceGroups.flatMap((group) => group.unresolved || []);
-    const usedLabelFiles = sourceGroups.flatMap((group) => (group.usedLabelFiles || []).map((file) => ({ file, sourceRoot: group.sourceRoot })));
     const formatCounts = sourceGroups.reduce((acc, group) => {
       acc.labelme += group.formatCounts?.labelme || 0;
       acc.coco += group.formatCounts?.coco || 0;
@@ -282,10 +306,22 @@ function createImportService(deps) {
       await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, targetProjectId]);
     }
 
-    for (const item of usedLabelFiles) {
-      const relative = path.relative(item.sourceRoot, item.file).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
-      for (const [targetProjectId, version] of versionsByProject) {
-        await store.putFile(rawLabelObjectKey(targetProjectId, version.id, relative || path.basename(item.file)), item.file);
+    for (let sourceIndex = 0; sourceIndex < sourceGroups.length; sourceIndex += 1) {
+      const group = sourceGroups[sourceIndex];
+      const labelFiles = Array.from(group.usedLabelFiles || []);
+      if (!labelFiles.length) continue;
+      await query(
+        "UPDATE import_batches SET message=$1 WHERE id=$2",
+        [`正在归档原始标注：${sourceIndex + 1} / ${sourceGroups.length}（${labelFiles.length} 文件）`, batchId],
+      );
+      const archive = await createRawLabelArchive(fs, path, group.sourceRoot, labelFiles);
+      try {
+        for (const [targetProjectId, version] of versionsByProject) {
+          const archiveName = sourceGroups.length === 1 ? "raw-labels.tar.gz" : `raw-labels-${sourceIndex + 1}.tar.gz`;
+          await store.putFile(rawLabelObjectKey(targetProjectId, version.id, archiveName), archive.archivePath);
+        }
+      } finally {
+        fs.rmSync(archive.tempRoot, { recursive: true, force: true });
       }
     }
 
@@ -475,4 +511,4 @@ function createImportService(deps) {
   };
 }
 
-module.exports = { createImportService };
+module.exports = { createImportService, createRawLabelArchive };

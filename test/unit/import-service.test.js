@@ -1,8 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
-const { createImportService } = require("../../server/dataset/import-service");
+const { createImportService, createRawLabelArchive } = require("../../server/dataset/import-service");
 
 function emptySplitPlan() {
   return Object.fromEntries(["train", "val", "test"].map((split) => [split, { files: new Set(), directories: new Set() }]));
@@ -231,4 +233,23 @@ test("upsertImageAsset reuses an unambiguous quick-hash match without full hashi
   assert.equal(row, existing);
   assert.equal(fullHashCalls, 0);
   assert.deepEqual(calls[0].params, ["quick", 123]);
+});
+
+test("createRawLabelArchive stores nested unicode label files in one tarball", async () => {
+  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-import-source-"));
+  const nested = path.join(sourceRoot, "标签");
+  fs.mkdirSync(nested, { recursive: true });
+  const first = path.join(nested, "one.json");
+  const second = path.join(sourceRoot, "two.json");
+  fs.writeFileSync(first, '{"label":"tank"}', "utf8");
+  fs.writeFileSync(second, '{"label":"car"}', "utf8");
+  let archive;
+  try {
+    archive = await createRawLabelArchive(fs, path, sourceRoot, [first, second]);
+    assert.equal(archive.fileCount, 2);
+    assert.ok(fs.statSync(archive.archivePath).size > 0);
+  } finally {
+    if (archive?.tempRoot) fs.rmSync(archive.tempRoot, { recursive: true, force: true });
+    fs.rmSync(sourceRoot, { recursive: true, force: true });
+  }
 });
