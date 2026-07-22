@@ -72,6 +72,8 @@ currentUser,
 
 userPermissions,
 
+refreshAssets,
+
 
 ScopeTabs,
 
@@ -161,6 +163,12 @@ return (
 
 <h2>资产目录</h2>
 
+<div className="asset-sidebar-scope">
+
+<ScopeTabs value={assetScope} onChange={setAssetScope} />
+
+</div>
+
 <AssetResourceGroup title="算法适配" icon={Boxes} count={algorithms.length} defaultOpen={false}>
 
 {algorithms.map((algorithm) => (
@@ -211,8 +219,6 @@ return (
 
 <div className="asset-toolbar">
 
-<ScopeTabs value={assetScope} onChange={setAssetScope} />
-
 <div className="workspace-path-row">
 
 <FolderOpen size={16} />
@@ -243,7 +249,7 @@ return (
 <button onClick={() => setDrawerMode("env")}><span>+</span>登记Python 环境</button>
 </>}
 
-<button><RefreshCw size={15} />刷新</button>
+<button onClick={() => refreshAssets?.()}><RefreshCw size={15} />刷新</button>
 
 </div>
 

@@ -513,6 +513,8 @@ pythonEnvs={pythonEnvs}
 
 assetLinks={assetLinks}
 
+loadMlPlatform={loadMlPlatform}
+
 activeTrainingJobId={activeTrainingJobId}
 
 setActiveTrainingJobId={setActiveTrainingJobId}

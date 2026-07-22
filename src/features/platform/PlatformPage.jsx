@@ -46,6 +46,7 @@ export function PlatformPage({
   algorithmAssets,
   pythonEnvs,
   assetLinks,
+  loadMlPlatform,
   activeTrainingJobId,
   setActiveTrainingJobId,
   trainingLogs,
@@ -251,6 +252,7 @@ export function PlatformPage({
             trainingTemplates={trainingTemplates}
             pythonEnvs={pythonEnvs}
             assetLinks={assetLinks}
+            refreshAssets={loadMlPlatform}
             modelForm={modelForm}
             setModelForm={setModelForm}
             versionForm={versionForm}

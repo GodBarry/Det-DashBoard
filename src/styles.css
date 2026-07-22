@@ -5400,6 +5400,27 @@ button:disabled:hover {
   right: 18px;
 }
 
+.asset-sidebar-scope {
+  padding: 0 10px 10px;
+  border-bottom: 1px solid rgba(75, 96, 116, .36);
+}
+
+.asset-sidebar-scope .multi-user-scope-tabs {
+  width: 100%;
+  min-width: 0;
+}
+
+.asset-sidebar-scope .multi-user-scope-tabs button {
+  min-width: 0;
+  padding-inline: 8px !important;
+}
+
+.asset-sidebar-scope .multi-user-scope-tabs button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .asset-main {
   min-width: 0;
   overflow: auto;
@@ -8755,6 +8776,21 @@ button:disabled:hover {
   .training-toolbar .inference-commandbar button {
     padding-left: 7px;
     padding-right: 7px;
+  }
+}
+
+@media (max-width: 1680px) {
+  .asset-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .asset-toolbar .workspace-path-row {
+    display: none;
+  }
+
+  .asset-commandbar {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 
