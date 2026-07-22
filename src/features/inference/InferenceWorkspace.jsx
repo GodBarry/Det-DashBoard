@@ -29,6 +29,7 @@ import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWork
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
+import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
 import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
@@ -137,6 +138,13 @@ const inferenceMetadataValues = (key) => Array.from(new Set(projects.flatMap((pr
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
 const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), views: inferenceMetadataValues("views"), modalities: inferenceMetadataValues("modalities"), labels: inferenceMetadataValues("labels") };
+const selectedInferenceProjectIds = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean);
+const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => selectedInferenceProjectIds.includes(project.id)).flatMap((project) => {
+  const value = project.labels;
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
+}).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
 
@@ -706,7 +714,11 @@ return (
           </div>
           <div className="config-row recognition-class-row">
             <span className="row-label">识别类别</span>
-            <RecognitionClassPicker values={inferenceForm.recognitionClasses} onChange={(recognitionClasses) => setField("recognitionClasses", recognitionClasses)} />
+            <RecognitionClassPicker values={inferenceForm.recognitionClasses} onChange={(recognitionClasses) => setInferenceForm((current) => ({ ...current, recognitionClasses }))} />
+          </div>
+          <div className="config-row class-mapping-config-row">
+            <span className="row-label">类别映射</span>
+            <ClassMappingPicker availableSources={selectedInferenceLabels} defaultTargets={inferenceForm.recognitionClasses} configured={inferenceForm.classMappingsConfigured} mappings={inferenceForm.classMappings} onChange={({ configured, mappings }) => setInferenceForm((current) => ({ ...current, classMappingsConfigured: configured, classMappings: mappings, ...(configured && mappings.length ? { recognitionClasses: mappings.map((row) => row.target) } : {}) }))} />
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>

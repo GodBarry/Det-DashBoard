@@ -15,6 +15,8 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     imgsz: 640,
     batch: 16,
     recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: null,
+    classMappingsConfigured: false,
     device: "0",
     inputScope: "project",
     inputScenes: "",
@@ -36,6 +38,8 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
       ? [...form.recognitionClasses]
       : [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: form.classMappingsConfigured ? (Array.isArray(form.classMappings) ? form.classMappings : []) : null,
+    classMappingsConfigured: Boolean(form.classMappingsConfigured),
   };
 }
 
@@ -94,6 +98,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
       imgsz: Number(inferenceForm.imgsz),
       batch: Number(inferenceForm.batch),
       recognitionClasses: [...(inferenceForm.recognitionClasses || DEFAULT_RECOGNITION_CLASSES)],
+      classMappings: inferenceForm.classMappingsConfigured ? (inferenceForm.classMappings || []) : null,
       device: inferenceForm.device,
       input: {
         projectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),

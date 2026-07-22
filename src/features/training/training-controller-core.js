@@ -31,6 +31,8 @@ export function createDefaultTrainingForm(restoredTrainingForm) {
     imgsz: 640,
     batch: 16,
     recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: null,
+    classMappingsConfigured: false,
     learningRate: 0.0032,
     optimizer: "SGD",
     savePeriod: 0,
@@ -47,6 +49,8 @@ export function createDefaultTrainingForm(restoredTrainingForm) {
     recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
       ? [...form.recognitionClasses]
       : [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: form.classMappingsConfigured ? (Array.isArray(form.classMappings) ? form.classMappings : []) : null,
+    classMappingsConfigured: Boolean(form.classMappingsConfigured),
   };
 }
 
@@ -97,6 +101,7 @@ export function buildTrainingPayload(trainingForm) {
       imgsz: Number(trainingForm.imgsz),
       batch: Number(trainingForm.batch),
       recognitionClasses: [...(trainingForm.recognitionClasses || DEFAULT_RECOGNITION_CLASSES)],
+      classMappings: trainingForm.classMappingsConfigured ? (trainingForm.classMappings || []) : null,
       learningRate: Number(trainingForm.learningRate),
       lr0: Number(trainingForm.learningRate),
       optimizer: trainingForm.optimizer,

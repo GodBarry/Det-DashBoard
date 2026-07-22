@@ -1,4 +1,4 @@
-const { normalizeClassName, normalizeRecognitionClasses, recognitionClassSet } = require("../recognition-classes");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeRecognitionClasses } = require("../recognition-classes");
 
 function createRuntimeJobService({
   query,
@@ -272,11 +272,16 @@ function createRuntimeJobService({
     );
     return rows.rows.map((row) => {
       const params = typeof row.job_params_json === "string" ? JSON.parse(row.job_params_json || "{}") : (row.job_params_json || {});
-      const allowed = recognitionClassSet(params.recognitionClasses);
+      const mappings = normalizeClassMappings(params.classMappings, params.recognitionClasses);
+      const lookup = classMappingLookup(mappings, params.recognitionClasses);
+      const targets = mappedRecognitionClasses(mappings, params.recognitionClasses);
       return {
         ...row,
         predictions_json: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
-          .filter((prediction) => allowed.has(normalizeClassName(prediction.label))),
+          .map((prediction) => {
+            const label = mapClassName(prediction.label, lookup);
+            return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
+          }).filter(Boolean),
         thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
         image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
       };
@@ -295,13 +300,17 @@ function createRuntimeJobService({
     const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
     if (!job) throw httpError(404, "inference job not found");
     const jobParams = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
-    const recognitionClasses = normalizeRecognitionClasses(jobParams.recognitionClasses);
-    const allowedClasses = recognitionClassSet(recognitionClasses);
+    const classMappings = normalizeClassMappings(jobParams.classMappings, jobParams.recognitionClasses);
+    const classLookup = classMappingLookup(classMappings, jobParams.recognitionClasses);
+    const recognitionClasses = mappedRecognitionClasses(classMappings, normalizeRecognitionClasses(jobParams.recognitionClasses));
     const resultRows = await listInferenceResults(jobId, { limit: null });
     const predictionRows = resultRows.map((row) => ({
       projectImageId: row.project_image_id,
       predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
-        .filter((prediction) => allowedClasses.has(normalizeClassName(prediction.label))),
+        .map((prediction) => {
+          const label = mapClassName(prediction.label, classLookup);
+          return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
+        }).filter(Boolean),
     }));
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     let groundTruthRows = [];
@@ -313,7 +322,10 @@ function createRuntimeJobService({
          JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL AND p.active_label_version_id=a.label_version_id
          WHERE a.project_image_id = ANY($1::uuid[]) AND lower(trim(a.label)) <> 'mosaic'`,
         [imageIds],
-      )).rows.filter((row) => allowedClasses.has(normalizeClassName(row.label)));
+      )).rows.map((row) => {
+        const label = mapClassName(row.label, classLookup);
+        return label ? { ...row, label, original_label: row.label } : null;
+      }).filter(Boolean);
     }
     const labeledImageIds = new Set(groundTruthRows.map((row) => String(row.project_image_id)));
     const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(String(row.projectImageId)));
@@ -334,6 +346,7 @@ function createRuntimeJobService({
       ...evaluation,
       jobId,
       recognitionClasses,
+      classMappings,
       labelVersionIds: Array.from(new Set(groundTruthRows.map((row) => row.label_version_id).filter(Boolean))),
       reason: groundTruthRows.length
         ? "仅对存在真值标注的图片进行评估；未标注图片的推理结果仍已保存"

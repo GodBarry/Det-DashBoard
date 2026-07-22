@@ -10,7 +10,7 @@ const {
   metricLabel,
   averagePrecision,
 } = require("./inference-metrics");
-const { normalizeClassName, normalizeRecognitionClasses, recognitionClassSet } = require("../recognition-classes");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeClassName, normalizeRecognitionClasses, recognitionInputClasses } = require("../recognition-classes");
 
 function createInferenceWorker({
   query,
@@ -34,14 +34,33 @@ function createInferenceWorker({
 
   function recognitionClassesForJob(job) {
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
-    return normalizeRecognitionClasses(params.recognitionClasses);
+    return mappedRecognitionClasses(params.classMappings, normalizeRecognitionClasses(params.recognitionClasses));
+  }
+
+  function classMappingsForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return normalizeClassMappings(params.classMappings, params.recognitionClasses);
+  }
+
+  function classLookupForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return classMappingLookup(params.classMappings, params.recognitionClasses);
+  }
+
+  function inputClassesForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return recognitionInputClasses(params.classMappings, params.recognitionClasses);
   }
 
   function filterPredictionRows(job, rows) {
-    const allowed = recognitionClassSet(recognitionClassesForJob(job));
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     return (rows || []).map((row) => ({
       ...row,
-      predictions: (row.predictions || []).filter((prediction) => allowed.has(normalizeClassName(prediction.label))),
+      predictions: (row.predictions || []).map((prediction) => {
+        const label = mapClassName(prediction.label, mappings, targets);
+        return label ? { ...prediction, label, ...(label === normalizeClassName(prediction.label) ? {} : { original_label: prediction.label }) } : null;
+      }).filter(Boolean),
     }));
   }
 
@@ -152,7 +171,8 @@ function createInferenceWorker({
   async function loadFakeReferenceGroundTruth(job, images) {
     const imageIds = images.map((image) => image.projectImageId).filter(Boolean);
     if (!imageIds.length) throw new Error("Fake GT inference requires project image ids in the input manifest.");
-    const allowed = recognitionClassSet(recognitionClassesForJob(job));
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const gtRows = (await query(
       `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
        FROM image_annotations a
@@ -160,7 +180,10 @@ function createInferenceWorker({
        JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
        WHERE a.project_image_id = ANY($1::uuid[])`,
       [imageIds],
-    )).rows.filter((row) => allowed.has(normalizeClassName(row.label)));
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean);
     if (!gtRows.length) throw new Error("Fake GT inference did not find ground-truth boxes for the selected images.");
     const gtByImage = new Map();
     for (const gt of gtRows) {
@@ -341,7 +364,8 @@ function createInferenceWorker({
 
   async function computeDetectionMetrics(job, predictionRows) {
     predictionRows = filterPredictionRows(job, predictionRows);
-    const allowed = recognitionClassSet(recognitionClassesForJob(job));
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     if (!imageIds.length) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "没有可评估的图片 ID" };
     const gtRows = (await query(
@@ -351,7 +375,10 @@ function createInferenceWorker({
        JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
        WHERE a.project_image_id = ANY($1::uuid[])`,
       [imageIds],
-    )).rows.filter((row) => allowed.has(normalizeClassName(row.label))).map((row) => ({
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean).map((row) => ({
       ...row,
       metricLabel: metricLabel(row),
     }));
@@ -487,7 +514,7 @@ function createInferenceWorker({
       imgsz: Number(params.imgsz ?? 640),
       batch: Math.max(1, Number(params.batch ?? 1)),
       device,
-      recognitionClasses: normalizeRecognitionClasses(params.recognitionClasses),
+      recognitionClasses: inputClassesForJob(job),
     };
     const runner = [
       "import json, os, sys",
@@ -623,7 +650,7 @@ function createInferenceWorker({
       scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
       device: normalizeTorchDevice(params.device, env.cuda_available, env.accelerator),
       batchSize: Math.max(1, Math.floor(Number(params.batch ?? 1))),
-      recognitionClasses: normalizeRecognitionClasses(params.recognitionClasses),
+      recognitionClasses: inputClassesForJob(job),
       classNames,
     };
     const runner = [
