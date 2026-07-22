@@ -256,7 +256,8 @@ function createRuntimeJobService({
     }
   }
 
-  async function listInferenceResults(jobId) {
+  async function listInferenceResults(jobId, options = {}) {
+    const requestedLimit = options.limit === null ? null : Math.max(1, Math.min(5000, Number(options.limit) || 500));
     const rows = await query(
       `SELECT ir.*, ij.params_json AS job_params_json, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
               ia.width AS image_width, ia.height AS image_height
@@ -266,8 +267,8 @@ function createRuntimeJobService({
        LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
        WHERE ir.inference_job_id=$1
        ORDER BY ir.created_at, ir.id
-       LIMIT 500`,
-      [jobId],
+       ${requestedLimit === null ? "" : "LIMIT $2"}`,
+      requestedLimit === null ? [jobId] : [jobId, requestedLimit],
     );
     return rows.rows.map((row) => {
       const params = typeof row.job_params_json === "string" ? JSON.parse(row.job_params_json || "{}") : (row.job_params_json || {});
@@ -296,26 +297,32 @@ function createRuntimeJobService({
     const jobParams = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
     const recognitionClasses = normalizeRecognitionClasses(jobParams.recognitionClasses);
     const allowedClasses = recognitionClassSet(recognitionClasses);
-    const resultRows = await listInferenceResults(jobId);
+    const resultRows = await listInferenceResults(jobId, { limit: null });
     const predictionRows = resultRows.map((row) => ({
       projectImageId: row.project_image_id,
       predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
         .filter((prediction) => allowedClasses.has(normalizeClassName(prediction.label))),
     }));
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
-    const project = job.dataset_project_id
-      ? (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0]
-      : null;
     let groundTruthRows = [];
-    if (project?.active_label_version_id && imageIds.length) {
+    if (imageIds.length) {
       groundTruthRows = (await query(
-        "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) AND lower(trim(label)) <> 'mosaic'",
-        [project.active_label_version_id, imageIds],
+        `SELECT a.project_image_id, a.label_version_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+         FROM image_annotations a
+         JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+         JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL AND p.active_label_version_id=a.label_version_id
+         WHERE a.project_image_id = ANY($1::uuid[]) AND lower(trim(a.label)) <> 'mosaic'`,
+        [imageIds],
       )).rows.filter((row) => allowedClasses.has(normalizeClassName(row.label)));
     }
     const labeledImageIds = new Set(groundTruthRows.map((row) => String(row.project_image_id)));
     const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(String(row.projectImageId)));
-    const evaluation = evaluateDetections({ predictionRows: evaluationRows, groundTruthRows, iouThreshold: 0.5 });
+    const evaluation = evaluateDetections({
+      predictionRows: evaluationRows,
+      groundTruthRows,
+      iouThreshold: 0.5,
+      expectedLabels: recognitionClasses,
+    });
     evaluation.summary = {
       ...(evaluation.summary || {}),
       inferenceImages: predictionRows.length,
@@ -327,7 +334,7 @@ function createRuntimeJobService({
       ...evaluation,
       jobId,
       recognitionClasses,
-      labelVersionId: project?.active_label_version_id || null,
+      labelVersionIds: Array.from(new Set(groundTruthRows.map((row) => row.label_version_id).filter(Boolean))),
       reason: groundTruthRows.length
         ? "仅对存在真值标注的图片进行评估；未标注图片的推理结果仍已保存"
         : "推理结果已保存，但当前数据集没有可用于评估的活动标签版本或标注",

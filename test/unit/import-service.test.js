@@ -91,7 +91,7 @@ test("importPath preserves creation transaction, ownership, lifecycle, and respo
     ["project-1"],
     ["project-1"],
     ["project-1"],
-    ["project-1", "display:C:\\data", "merge_project", "正在扫描文件"],
+    ["project-1", "display:C:\\data", "merge_project", "incremental", "正在扫描文件"],
   ]);
   assert.deepEqual(ownerCalls, [["import_batches", "batch-1", actor]]);
   assert.equal(tracked.length, 1);

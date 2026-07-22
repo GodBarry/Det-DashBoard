@@ -384,13 +384,11 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
         ],
       };
     }
-    if (sql === "SELECT id, active_label_version_id FROM projects WHERE id=$1") {
-      return { rows: [{ id: "project-1", active_label_version_id: "labels-1" }] };
-    }
     if (sql.includes("FROM image_annotations")) {
       return {
         rows: [{
           project_image_id: "image-labeled",
+          label_version_id: "labels-1",
           label: "car",
           bbox_x: 1,
           bbox_y: 2,
@@ -398,6 +396,7 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
           bbox_h: 4,
         }, {
           project_image_id: "image-labeled",
+          label_version_id: "labels-1",
           label: "person",
           bbox_x: 5,
           bbox_y: 6,
@@ -419,7 +418,7 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
 
   const evaluation = await service.getInferenceEvaluation("job-1");
 
-  assert.deepEqual(calls[3].params, ["labels-1", ["image-labeled", "image-unlabeled"]]);
+  assert.deepEqual(calls[2].params, [["image-labeled", "image-unlabeled"]]);
   assert.deepEqual(evaluationInput.predictionRows, [{
     projectImageId: "image-labeled",
     predictions: [{ label: "car" }],
@@ -427,13 +426,14 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
   assert.equal(evaluationInput.groundTruthRows.length, 1);
   assert.deepEqual(evaluation.recognitionClasses, ["car"]);
   assert.equal(evaluationInput.iouThreshold, 0.5);
+  assert.deepEqual(evaluationInput.expectedLabels, ["car"]);
   assert.deepEqual(evaluation.summary, {
     precision: 1,
     inferenceImages: 3,
     evaluatedImages: 1,
     skippedUnlabeledImages: 2,
   });
-  assert.equal(evaluation.labelVersionId, "labels-1");
+  assert.deepEqual(evaluation.labelVersionIds, ["labels-1"]);
   assert.equal(evaluation.errors[0].display_name, "Labeled");
   assert.equal(evaluation.errors[0].thumb_url, "/api/project-images/image-labeled/thumb");
 });

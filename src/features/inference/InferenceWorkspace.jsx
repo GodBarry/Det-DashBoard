@@ -858,7 +858,7 @@ return (
                       key={prediction.id || predictionIndex}
                       style={{ ...boxStyle, borderColor: color, "--box-color": color }}
                     >
-                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(0)}%</small>}
+                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(2)}%</small>}
                     </i>
                   );
                 })}

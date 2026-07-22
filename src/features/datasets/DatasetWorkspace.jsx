@@ -96,6 +96,8 @@ export function DatasetWorkspace({ mode, viewModel }) {
     parsedImportPaths,
     importMode,
     setImportMode,
+    importStrategy,
+    setImportStrategy,
     importPath,
     setImportPath,
     browseFolder,
@@ -688,7 +690,22 @@ rows={4}
 
 <span>扫描方式</span>
 
-<b>递归扫描</b>
+<select value={importStrategy} onChange={(event) => setImportStrategy(event.target.value)}>
+<option value="incremental">智能增量（推荐）</option>
+<option value="labels_only">仅更新已有图片标签</option>
+<option value="strict">严格内容校验</option>
+</select>
+
+</div>
+
+<div className="import-profile-block">
+
+<span>目录方式</span>
+
+<select value={importMode} onChange={(event) => setImportMode(event.target.value)}>
+<option value="merge_project">合并到当前文件夹</option>
+<option value="preserve_structure">保持原目录结构</option>
+</select>
 
 </div>
 

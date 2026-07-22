@@ -1989,6 +1989,23 @@ button {
   color: var(--text-strong);
   font-size: 14px;
 }
+
+.import-profile-block select {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  padding: 0 30px 0 10px !important;
+  border: 1px solid var(--border, rgba(148,163,184,.28)) !important;
+  border-radius: 6px !important;
+  background-color: var(--input-bg, #ffffff) !important;
+  color: var(--text, #17212b) !important;
+  font: inherit !important;
+}
+
+.app-shell.dark .import-profile-block select {
+  color-scheme: dark;
+  background-color: rgba(6, 16, 24, .96) !important;
+}
 .import-profile-list {
   display: grid;
   gap: 8px;

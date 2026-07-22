@@ -196,19 +196,24 @@ const kpis = [
 
 ];
 
-const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => Number(b.ap50 || 0) - Number(a.ap50 || 0));
+const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => {
+  if (a.evaluable !== b.evaluable) return a.evaluable ? -1 : 1;
+  return Number(b.ap50 || 0) - Number(a.ap50 || 0);
+});
 
   const classRows = allClassRows.slice(0, 8);
 
-const rankRows = allClassRows.length > 8 && allClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
+const evaluableClassRows = allClassRows.filter((row) => row.evaluable && row.ap50 != null);
 
-? [...allClassRows.slice(0, 4), ...allClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+const rankRows = evaluableClassRows.length > 8 && evaluableClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
 
-: classRows;
+? [...evaluableClassRows.slice(0, 4), ...evaluableClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+
+: evaluableClassRows.slice(0, 8);
 
 const curves = evaluation?.curves || [];
 
-  const weakestClass = allClassRows.filter((row) => Number.isFinite(Number(row.ap50))).slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
+  const weakestClass = evaluableClassRows.slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
 
 const insightRows = evaluation?.evaluated ? [
 
@@ -366,7 +371,7 @@ return (
 
 <h3>类别指标明细</h3><div className="evaluation-class-table"><b>类别</b><b>GT</b><b>预测</b><b>TP</b><b>FP</b><b>FN</b><b>Precision</b><b>Recall</b><b>AP50</b>
 
-{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{formatMetric(row.precision)}</span><span>{formatMetric(row.recall)}</span><span>{formatMetric(row.ap50)}</span></React.Fragment>)}
+{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{row.precision == null ? "--" : formatMetric(row.precision)}</span><span>{row.recall == null ? "无真值" : formatMetric(row.recall)}</span><span>{row.ap50 == null ? "无真值" : formatMetric(row.ap50)}</span></React.Fragment>)}
 
 </div></div>}
 

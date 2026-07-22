@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS import_batches (
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   source_path TEXT NOT NULL,
   import_mode TEXT NOT NULL,
+  import_strategy TEXT NOT NULL DEFAULT 'incremental',
   source_type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   total_files INT NOT NULL DEFAULT 0,
@@ -62,6 +63,8 @@ CREATE TABLE IF NOT EXISTS project_images (
   import_batch_id UUID REFERENCES import_batches(id) ON DELETE SET NULL,
   display_name TEXT NOT NULL,
   source_path TEXT NOT NULL DEFAULT '',
+  source_size BIGINT,
+  source_mtime_ms BIGINT,
   scene TEXT NOT NULL DEFAULT '',
   view TEXT NOT NULL DEFAULT '',
   modality TEXT NOT NULL DEFAULT '',
@@ -69,6 +72,7 @@ CREATE TABLE IF NOT EXISTS project_images (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_project_images_project ON project_images(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_images_project_source ON project_images(project_id, source_path);
 CREATE INDEX IF NOT EXISTS idx_project_images_scene ON project_images(scene);
 CREATE INDEX IF NOT EXISTS idx_project_images_modality ON project_images(modality);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_images_unique_asset ON project_images(project_id, image_asset_id, display_name);
