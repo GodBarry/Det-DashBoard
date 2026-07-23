@@ -12,9 +12,9 @@ import {
   FolderOpen,
   GripVertical,
   Play,
-  Power,
   Pause,
   RefreshCw,
+  Radio,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -60,6 +60,12 @@ setInferenceForm,
 selectedInferenceEnv,
 
 submitInferenceJob,
+
+networkInferenceService,
+
+startNetworkInference,
+
+stopNetworkInference,
 
 viewInferenceResults,
 
@@ -148,65 +154,6 @@ const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => 
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
-
-const [inferenceServer, setInferenceServer] = useState({ running: false, port: 4180, modelName: "" });
-const [inferenceServerBusy, setInferenceServerBusy] = useState(false);
-const [inferenceServerError, setInferenceServerError] = useState("");
-const [receiverId, setReceiverId] = useState("");
-
-useEffect(() => {
-  let active = true;
-  const loadStatus = () => fetch("/api/ml/inference-server/status")
-    .then((response) => response.json().then((data) => ({ response, data })))
-    .then(({ response, data }) => {
-      if (!response.ok) throw new Error(data.error || "无法读取推理服务状态");
-      if (active) setInferenceServer((current) => ({ ...current, ...data }));
-    })
-    .catch((error) => { if (active) setInferenceServerError(error.message); });
-  loadStatus();
-  const timer = window.setInterval(loadStatus, 10000);
-  return () => { active = false; window.clearInterval(timer); };
-}, []);
-
-const toggleInferenceServer = () => {
-  setInferenceServerBusy(true);
-  setInferenceServerError("");
-  const stopping = inferenceServer.running && receiverId;
-  const weights = selectedVersion?.artifact_root
-    ? `${String(selectedVersion.artifact_root).replace(/\/$/, "")}/weights/best.pt`
-    : "";
-  const endpoint = stopping
-    ? `/api/ml/inference-receiver/${receiverId}/stop`
-    : "/api/ml/inference-receiver/start";
-  fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: stopping ? JSON.stringify({}) : JSON.stringify({
-      name: inferenceForm.name || "远程接收推理",
-      datasetProjectId: inferenceForm.datasetProjectId,
-      modelVersionId: inferenceForm.modelVersionId,
-      algorithmAssetId: inferenceForm.templateId,
-      params: { categorySettings: inferenceForm.classMappings || inferenceForm.inputLabels || [] },
-      weights,
-      host: "0.0.0.0",
-      port: 4180,
-      device: inferenceForm.device || "cpu",
-      conf: Number(inferenceForm.conf || 0.25),
-      iou: Number(inferenceForm.iou || 0.7),
-      imgsz: Number(inferenceForm.imgsz || 640),
-    }),
-  })
-    .then((response) => response.json().then((data) => ({ response, data })))
-    .then(({ response, data }) => {
-      if (!response.ok) throw new Error(data.error || "推理服务操作失败");
-      const receiver = data.receiver || data.job || {};
-      if (receiver.id || receiver.receiverId) setReceiverId(receiver.id || receiver.receiverId);
-      if (stopping) setReceiverId("");
-      setInferenceServer((current) => ({ ...current, ...(data.server || data), running: stopping ? false : true }));
-    })
-    .catch((error) => setInferenceServerError(error.message))
-    .finally(() => setInferenceServerBusy(false));
-};
 
   const visibleInferenceAlgorithms = inferenceAlgorithms.length ? inferenceAlgorithms : algorithmAssets;
 
@@ -749,16 +696,22 @@ return (
           <button type="button">新建任务</button>
         </div>
         <div className="workspace-commandbar inference-commandbar">
-          <button className={inferenceServer.running ? "danger" : "primary"} type="button" onClick={toggleInferenceServer} disabled={inferenceServerBusy || (!inferenceServer.running && !selectedVersion)}>
-            <Power size={15} />{inferenceServerBusy ? "处理中..." : inferenceServer.running ? "关闭推理服务" : "开启推理服务"}
+          <button
+            className={networkInferenceService?.running ? "danger-outline" : ""}
+            type="button"
+            onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
+            title={networkInferenceService?.running
+              ? `关闭 ${networkInferenceService.port || 4180} 端口监听并完成当前会话`
+              : "固定当前算法、模型、GPU、类别和参数并监听 4180"}
+          >
+            <Radio size={15} />
+            {networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
           </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
           <button className="danger-outline" type="button" disabled={!sortedInferenceJobs.length} onClick={deleteInferenceQueue} title={selectedInferenceCount ? "删除选中的推理任务" : "删除全部推理任务队列"}><Trash2 size={16} />{selectedInferenceQueueLabel}</button>
           <button type="button"><RefreshCw size={16} />刷新</button>
         </div>
-        {inferenceServer.running && <p className="muted">推理服务运行中：端口 {inferenceServer.port || 4180}{inferenceServer.modelName ? ` · ${inferenceServer.modelName}` : ""}</p>}
-        {inferenceServerError && <p className="form-error">推理服务：{inferenceServerError}</p>}
       </div>
 
       <section className="reference-builder">
@@ -871,7 +824,8 @@ return (
           </div>
           {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
-            const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
+            const normalizedStatus = String(job.status || "").toLowerCase();
+            const done = completedEvaluationStatuses.has(normalizedStatus) || normalizedStatus === "stopped";
             const progress = Math.max(0, Math.min(100, Number(job.progress ?? (done ? 100 : 0)) || 0));
             return (
               <div data-job-id={job.id} className={`inference-table-row${draggedJobId === job.id ? " is-dragging" : ""}${dragOverJobId === job.id ? " is-drag-over" : ""}`} key={job.id}>

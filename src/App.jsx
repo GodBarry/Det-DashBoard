@@ -217,11 +217,14 @@ const {
   deleteInferenceJob,
   deleteInferenceJobs,
   inferenceForm,
+  networkInferenceService,
   requeueInferenceJob,
   updateInferenceJobState,
   setActiveInferenceResult,
   setInferenceForm,
   submitInferenceJob,
+  startNetworkInference,
+  stopNetworkInference,
   viewInferenceResults,
 } = useInferenceController({
   algorithmAssets,
@@ -567,6 +570,12 @@ updateTrainingJobState={updateTrainingJobState}
 deleteTrainingJob={deleteTrainingJob}
 
 submitInferenceJob={submitInferenceJob}
+
+networkInferenceService={networkInferenceService}
+
+startNetworkInference={startNetworkInference}
+
+stopNetworkInference={stopNetworkInference}
 
 deleteInferenceJob={deleteInferenceJob}
 

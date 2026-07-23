@@ -19,6 +19,7 @@ function createMlRoutes(deps) {
     inferenceServerService,
     inferenceReceiverService,
     createInferenceJob,
+    networkInferenceService,
   } = deps;
 
   async function handle(req, res, parsed, actor) {
@@ -228,6 +229,18 @@ function createMlRoutes(deps) {
     }
     if (method === "POST" && pathname === "/api/ml/inference-jobs") {
       sendJson(res, { job: await createInferenceJob(await readBody(req), actor) });
+      return true;
+    }
+    if (method === "GET" && pathname === "/api/ml/network-inference/status") {
+      sendJson(res, { service: networkInferenceService.status() });
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/ml/network-inference/start") {
+      sendJson(res, { service: await networkInferenceService.start(await readBody(req), actor) });
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/ml/network-inference/stop") {
+      sendJson(res, { service: await networkInferenceService.stop(actor) });
       return true;
     }
     const inferencePriorityMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);

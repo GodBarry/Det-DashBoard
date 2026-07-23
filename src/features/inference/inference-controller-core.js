@@ -74,6 +74,15 @@ export function validateInferenceSubmission(inferenceForm, algorithmResolution) 
   return null;
 }
 
+export function validateNetworkInferenceSubmission(inferenceForm, algorithmResolution) {
+  if (!algorithmResolution.selectedAlgorithm) return "请选择算法名称";
+  if (!algorithmResolution.isBuiltInNoEnvAlgorithm) {
+    if (!inferenceForm.pythonEnvId) return "真实算法推理需要先选择运行环境资产";
+    if (!inferenceForm.modelVersionId) return "真实算法推理需要先选择模型权重版本";
+  }
+  return null;
+}
+
 function splitCommaSeparated(value) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }

@@ -59,6 +59,7 @@ const { createInferenceReceiverService } = require("./runtime-jobs/inference-rec
 const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
+const { createNetworkInferenceService } = require("./runtime-jobs/network-inference-service");
 const { createModelService } = require("./ml-assets/model-service");
 const { createModelMaintenanceService } = require("./ml-assets/model-maintenance-service");
 const { createPythonEnvService } = require("./ml-assets/python-env-service");
@@ -128,6 +129,7 @@ let annotationStandardService;
 let computeWorkerController;
 let videoFrameExecutor;
 let inferenceSubmissionService;
+let networkInferenceService;
 let runtimeJobService;
 let trainingCatalogService;
 let runtimeQueueService;
@@ -587,6 +589,19 @@ async function main() {
     quickHash,
     imageObjectKey,
   });
+  networkInferenceService = createNetworkInferenceService({
+    query,
+    transaction,
+    resourceAccess,
+    createInferenceJob: inferenceSubmissionService.createInferenceJob,
+    importService,
+    inferenceWorkerController,
+    fs,
+    path,
+    sharp,
+    storageRoot,
+    logger: console,
+  });
   mlRoutes = createMlRoutes({
     query,
     readBody,
@@ -605,6 +620,7 @@ async function main() {
     inferenceServerService,
     inferenceReceiverService,
     createInferenceJob: inferenceSubmissionService.createInferenceJob,
+    networkInferenceService,
   });
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });
   datasetContentService = createDatasetContentService({
