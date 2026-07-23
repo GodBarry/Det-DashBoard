@@ -54,6 +54,8 @@ const { createTrainingCatalogService } = require("./runtime-jobs/training-catalo
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
 const { createRuntimeWorkerSupport } = require("./runtime-jobs/worker-support");
 const { createInferenceWorker } = require("./runtime-jobs/inference-worker");
+const { createInferenceServerService } = require("./runtime-jobs/inference-server-service");
+const { createInferenceReceiverService } = require("./runtime-jobs/inference-receiver-service");
 const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
@@ -137,6 +139,10 @@ let algorithmAssetService;
 let runtimeAssetLinkService;
 let inferenceWorkerController;
 let trainingWorkerController;
+let inferenceReceiverService;
+const inferenceServerService = createInferenceServerService({
+  baseUrl: process.env.INFERENCE_SIDECAR_URL,
+});
 const authService = createAuthService({ query, httpError });
 const settingsService = createSettingsService({
   query,
@@ -304,6 +310,9 @@ async function route(req, res) {
     await query("SELECT 1");
     const shuttingDown = lifecycle.isShuttingDown();
     return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
+  }
+  if (method === "POST" && parsed.pathname === "/api/ml/inference-receiver/events") {
+    return sendJson(res, await inferenceReceiverService.recordEvent(await readBody(req)));
   }
   if (multiUserRouter && await multiUserRouter.handle(req, res)) return;
   const actor = parsed.pathname.startsWith("/api/")
@@ -564,6 +573,20 @@ async function main() {
     storageRoot,
     logger: console,
   });
+  inferenceReceiverService = createInferenceReceiverService({
+    query,
+    resourceAccess,
+    inferenceServerService,
+    callbackUrl: process.env.INFERENCE_CALLBACK_URL,
+    callbackToken: process.env.INFERENCE_CALLBACK_TOKEN,
+    fs,
+    path,
+    sharp,
+    store,
+    hashFile,
+    quickHash,
+    imageObjectKey,
+  });
   mlRoutes = createMlRoutes({
     query,
     readBody,
@@ -579,6 +602,8 @@ async function main() {
     pythonEnvService,
     runtimeQueueService,
     runtimeJobService,
+    inferenceServerService,
+    inferenceReceiverService,
     createInferenceJob: inferenceSubmissionService.createInferenceJob,
   });
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });

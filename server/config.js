@@ -1,6 +1,8 @@
 const path = require("path");
 const fs = require("fs");
-const projectRoot = path.resolve(__dirname, "..");
+// Packaged deployments can relocate the compiled entrypoint without changing
+// where runtime assets and the optional .env file are resolved from.
+const projectRoot = path.resolve(process.env.APP_ROOT || path.resolve(__dirname, ".."));
 const hostPathMode = String(process.env.HOST_PATH_MODE || "posix").toLowerCase();
 
 function loadEnvFile(filePath) {

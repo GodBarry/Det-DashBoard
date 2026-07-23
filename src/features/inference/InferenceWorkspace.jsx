@@ -12,6 +12,7 @@ import {
   FolderOpen,
   GripVertical,
   Play,
+  Power,
   Pause,
   RefreshCw,
   RotateCcw,
@@ -83,14 +84,14 @@ const inferenceTableRef = useRef(null);
 const [inferenceColumnWidths, setInferenceColumnWidths] = useState(() => {
   try {
     const stored = JSON.parse(window.localStorage.getItem("det-dashboard.inference-table-columns") || "null");
-    return Array.isArray(stored) && stored.length === 11 ? stored : null;
+    return Array.isArray(stored) && stored.length === 12 ? stored : null;
   } catch {
     return null;
   }
 });
 const inferenceColumnTemplate = inferenceColumnWidths
   ? inferenceColumnWidths.map((width) => `${Math.round(width)}px`).join(" ")
-  : "minmax(145px,1.35fr) minmax(90px,.78fr) minmax(105px,.9fr) minmax(68px,.5fr) minmax(112px,.82fr) minmax(62px,.48fr) minmax(62px,.48fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(184px,1.15fr)";
+  : "minmax(145px,1.35fr) minmax(90px,.78fr) minmax(105px,.9fr) minmax(68px,.5fr) minmax(94px,.7fr) minmax(112px,.82fr) minmax(62px,.48fr) minmax(62px,.48fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(184px,1.15fr)";
 const inferenceTableStyle = { "--inference-table-columns": inferenceColumnTemplate };
 const resetInferenceColumns = () => {
   setInferenceColumnWidths(null);
@@ -105,7 +106,7 @@ const beginInferenceColumnResize = (event, index) => {
   const startX = event.clientX;
   const leftStart = widths[index];
   const rightStart = widths[index + 1];
-  const minimums = [120, 76, 86, 62, 92, 54, 54, 58, 58, 58, 170];
+  const minimums = [120, 76, 86, 62, 78, 92, 54, 54, 58, 58, 58, 170];
   const onMove = (moveEvent) => {
     const requested = moveEvent.clientX - startX;
     const delta = Math.max(minimums[index] - leftStart, Math.min(requested, rightStart - minimums[index + 1]));
@@ -147,6 +148,65 @@ const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => 
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
+
+const [inferenceServer, setInferenceServer] = useState({ running: false, port: 4180, modelName: "" });
+const [inferenceServerBusy, setInferenceServerBusy] = useState(false);
+const [inferenceServerError, setInferenceServerError] = useState("");
+const [receiverId, setReceiverId] = useState("");
+
+useEffect(() => {
+  let active = true;
+  const loadStatus = () => fetch("/api/ml/inference-server/status")
+    .then((response) => response.json().then((data) => ({ response, data })))
+    .then(({ response, data }) => {
+      if (!response.ok) throw new Error(data.error || "无法读取推理服务状态");
+      if (active) setInferenceServer((current) => ({ ...current, ...data }));
+    })
+    .catch((error) => { if (active) setInferenceServerError(error.message); });
+  loadStatus();
+  const timer = window.setInterval(loadStatus, 10000);
+  return () => { active = false; window.clearInterval(timer); };
+}, []);
+
+const toggleInferenceServer = () => {
+  setInferenceServerBusy(true);
+  setInferenceServerError("");
+  const stopping = inferenceServer.running && receiverId;
+  const weights = selectedVersion?.artifact_root
+    ? `${String(selectedVersion.artifact_root).replace(/\/$/, "")}/weights/best.pt`
+    : "";
+  const endpoint = stopping
+    ? `/api/ml/inference-receiver/${receiverId}/stop`
+    : "/api/ml/inference-receiver/start";
+  fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: stopping ? JSON.stringify({}) : JSON.stringify({
+      name: inferenceForm.name || "远程接收推理",
+      datasetProjectId: inferenceForm.datasetProjectId,
+      modelVersionId: inferenceForm.modelVersionId,
+      algorithmAssetId: inferenceForm.templateId,
+      params: { categorySettings: inferenceForm.classMappings || inferenceForm.inputLabels || [] },
+      weights,
+      host: "0.0.0.0",
+      port: 4180,
+      device: inferenceForm.device || "cpu",
+      conf: Number(inferenceForm.conf || 0.25),
+      iou: Number(inferenceForm.iou || 0.7),
+      imgsz: Number(inferenceForm.imgsz || 640),
+    }),
+  })
+    .then((response) => response.json().then((data) => ({ response, data })))
+    .then(({ response, data }) => {
+      if (!response.ok) throw new Error(data.error || "推理服务操作失败");
+      const receiver = data.receiver || data.job || {};
+      if (receiver.id || receiver.receiverId) setReceiverId(receiver.id || receiver.receiverId);
+      if (stopping) setReceiverId("");
+      setInferenceServer((current) => ({ ...current, ...(data.server || data), running: stopping ? false : true }));
+    })
+    .catch((error) => setInferenceServerError(error.message))
+    .finally(() => setInferenceServerBusy(false));
+};
 
   const visibleInferenceAlgorithms = inferenceAlgorithms.length ? inferenceAlgorithms : algorithmAssets;
 
@@ -689,11 +749,16 @@ return (
           <button type="button">新建任务</button>
         </div>
         <div className="workspace-commandbar inference-commandbar">
+          <button className={inferenceServer.running ? "danger" : "primary"} type="button" onClick={toggleInferenceServer} disabled={inferenceServerBusy || (!inferenceServer.running && !selectedVersion)}>
+            <Power size={15} />{inferenceServerBusy ? "处理中..." : inferenceServer.running ? "关闭推理服务" : "开启推理服务"}
+          </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
           <button className="danger-outline" type="button" disabled={!sortedInferenceJobs.length} onClick={deleteInferenceQueue} title={selectedInferenceCount ? "删除选中的推理任务" : "删除全部推理任务队列"}><Trash2 size={16} />{selectedInferenceQueueLabel}</button>
           <button type="button"><RefreshCw size={16} />刷新</button>
         </div>
+        {inferenceServer.running && <p className="muted">推理服务运行中：端口 {inferenceServer.port || 4180}{inferenceServer.modelName ? ` · ${inferenceServer.modelName}` : ""}</p>}
+        {inferenceServerError && <p className="form-error">推理服务：{inferenceServerError}</p>}
       </div>
 
       <section className="reference-builder">
@@ -796,11 +861,11 @@ return (
           <div className="inference-table-head">
             {[
               <><input type="checkbox" checked={allVisibleInferenceJobsSelected} onChange={toggleVisibleInferenceJobsSelection} disabled={!displayJobs.length} />任务名称</>,
-              "数据集", "模型", "状态", "进度", "图像数", "预测数", "Precision", "Recall", "mAP50", "操作",
+              "数据集", "模型", "状态", "来源", "进度", "图像数", "预测数", "Precision", "Recall", "mAP50", "操作",
             ].map((label, index) => (
               <span className={index === 0 ? "inference-task-name" : ""} key={index}>
                 {label}
-                {index < 10 && <i className="table-column-resizer" role="separator" aria-orientation="vertical" title="拖动调整列宽，双击恢复自动宽度" onPointerDown={(event) => beginInferenceColumnResize(event, index)} onDoubleClick={resetInferenceColumns} />}
+                {index < 11 && <i className="table-column-resizer" role="separator" aria-orientation="vertical" title="拖动调整列宽，双击恢复自动宽度" onPointerDown={(event) => beginInferenceColumnResize(event, index)} onDoubleClick={resetInferenceColumns} />}
               </span>
             ))}
           </div>
@@ -814,6 +879,7 @@ return (
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
                 <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
+                <span>{parseMaybeJson(job.params_json).taskSource === "external_api" ? "外部接口推理" : parseMaybeJson(job.params_json).taskType === "test" ? "本地文件推理" : "本地验证评测"}</span>
                 <span className="inference-progress" title={`进度 ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
                 <span>{metrics.images ?? job.image_count ?? 0}</span>
                 <span>{metrics.predictions ?? job.prediction_count ?? 0}</span>

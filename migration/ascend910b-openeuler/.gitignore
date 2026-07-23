@@ -1,0 +1,10 @@
+.env
+build-context.tar.gz
+images/
+*.tar
+*.tar.gz
+*.tgz
+*.whl
+offline-build/
+npu-wheels/
+npu-wheels-py39/

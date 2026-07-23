@@ -16,12 +16,40 @@ function createMlRoutes(deps) {
     pythonEnvService,
     runtimeQueueService,
     runtimeJobService,
+    inferenceServerService,
+    inferenceReceiverService,
     createInferenceJob,
   } = deps;
 
   async function handle(req, res, parsed, actor) {
     const method = req.method;
     const pathname = parsed.pathname;
+
+    if (pathname === "/api/ml/inference-server/status" && method === "GET") {
+      sendJson(res, await inferenceServerService.status());
+      return true;
+    }
+    if (pathname === "/api/ml/inference-server/start" && method === "POST") {
+      accessControl.requireAdmin(actor);
+      sendJson(res, { ok: true, ...await inferenceServerService.start(await readBody(req)) });
+      return true;
+    }
+    if (pathname === "/api/ml/inference-server/stop" && method === "POST") {
+      accessControl.requireAdmin(actor);
+      sendJson(res, { ok: true, ...await inferenceServerService.stop() });
+      return true;
+    }
+    if (pathname === "/api/ml/inference-receiver/start" && method === "POST") {
+      accessControl.requireAdmin(actor);
+      sendJson(res, { ok: true, receiver: await inferenceReceiverService.start(await readBody(req), actor) });
+      return true;
+    }
+    const receiverStopMatch = pathname.match(/^\/api\/ml\/inference-receiver\/([^/]+)\/stop$/);
+    if (method === "POST" && receiverStopMatch) {
+      accessControl.requireAdmin(actor);
+      sendJson(res, { ok: true, ...await inferenceReceiverService.stop(receiverStopMatch[1], actor) });
+      return true;
+    }
 
     if (method === "GET" && pathname === "/api/ml/models") {
       sendJson(res, { models: await modelService.listMlModels(actor, requestedScope(parsed, actor)) });
