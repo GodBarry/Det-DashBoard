@@ -39,6 +39,7 @@ const { createProjectService } = require("./dataset/project-service");
 const { createDatasetContentService } = require("./dataset/content-service");
 const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
+const { createBrowserUploadService } = require("./dataset/browser-upload-service");
 const { createVideoService } = require("./dataset/video-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
@@ -120,6 +121,7 @@ let projectService;
 let datasetContentService;
 let baselineService;
 let importService;
+let browserUploadService;
 let videoService;
 let datasetRoutes;
 let mlRoutes;
@@ -615,6 +617,15 @@ async function main() {
     storageRoot,
     logger: console,
   });
+  browserUploadService = createBrowserUploadService({
+    fs,
+    path,
+    crypto,
+    dataRoot,
+    storageRoot,
+    importService,
+    httpError,
+  });
   const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
   if (reconciledNetworkJobs) {
     console.log(`Boot: reconciled ${reconciledNetworkJobs} interrupted network inference session(s)`);
@@ -674,6 +685,7 @@ async function main() {
     datasetContentService,
     videoService,
     baselineService,
+    browserUploadService,
   });
   annotationRoutes = createAnnotationRoutes({
     readBody,

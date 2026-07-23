@@ -50,7 +50,8 @@ services:
       PORT: 5173
       APP_ROOT: /app
       DIST_ROOT: /app/dist
-      HOST_PATH_MODE: posix
+      HOST_PATH_MODE: windows
+      BROWSE_ALL_DRIVES: "true"
       DATA_ROOT: /data/data-root
       DATA_ROOT_DISPLAY: /data/data-root
       BROWSE_ROOT: /data/data-root

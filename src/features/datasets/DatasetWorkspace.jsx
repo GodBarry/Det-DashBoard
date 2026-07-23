@@ -94,12 +94,18 @@ export function DatasetWorkspace({ mode, viewModel }) {
     showImportDialog,
     setShowImportDialog,
     parsedImportPaths,
+    localFolder,
+    uploadProgress,
+    localFolderInputRef,
+    browseLocalFolder,
+    selectLocalFolder,
     importMode,
     setImportMode,
     importStrategy,
     setImportStrategy,
     importPath,
     setImportPath,
+    updateImportPath,
     browseFolder,
     browseBusy,
     confirmImport,
@@ -623,18 +629,27 @@ deleteCheckedImages={deleteCheckedImages}
 <div className="import-dialog-grid">
 
 <section className="import-path-panel">
+<input
+ref={localFolderInputRef}
+type="file"
+webkitdirectory=""
+directory=""
+multiple
+hidden
+onChange={selectLocalFolder}
+/>
 
 <div className="import-field-head">
 
 <div>
 
-<label htmlFor="dataset-import-path">路径队列</label>
+<label htmlFor="dataset-import-path">导入来源</label>
 
-<p>可多次浏览添加，或用分号分隔多个本地路径</p>
+<p>选择本机文件夹直接上传；服务器已有目录可按路径导入</p>
 
 </div>
 
-<span>{parsedImportPaths.length} 个路</span>
+<span>{localFolder ? `${localFolder.files.length} 个文件` : `${parsedImportPaths.length} 个路径`}</span>
 
 </div>
 
@@ -646,9 +661,9 @@ id="dataset-import-path"
 
 value={importPath}
 
-onChange={(e) => setImportPath(e.target.value)}
+onChange={(e) => updateImportPath(e.target.value)}
 
-placeholder="F:\\ZBH\\统计用\\山地; F:\\ZBH\\统计用\\草地"
+placeholder="服务器目录，例如 F:\\ZBH\\统计用\\山地 或 /data/datasets/山地"
 
 rows={4}
 
@@ -656,9 +671,11 @@ rows={4}
 
 <div className="import-path-tools">
 
-<button className="primary" onClick={browseFolder} disabled={browseBusy}><FolderOpen size={14} />{browseBusy ? "打开" : "浏览"}</button>
+<button className="primary" onClick={browseLocalFolder} disabled={browseBusy || Boolean(uploadProgress)}><FolderOpen size={14} />本机文件夹</button>
 
-<button onClick={() => setImportPath("")} disabled={!importPath.trim()}>清空</button>
+<button onClick={browseFolder} disabled={browseBusy || Boolean(uploadProgress)}><FolderOpen size={14} />{browseBusy ? "打开中" : "服务器目录"}</button>
+
+<button onClick={() => setImportPath("")} disabled={!importPath.trim() || Boolean(uploadProgress)}>清空</button>
 
 </div>
 
@@ -666,13 +683,24 @@ rows={4}
 
 <div className="import-path-list">
 
-{parsedImportPaths.length ? parsedImportPaths.map((pathValue) => (
+{localFolder ? (
+<span title={localFolder.rootName}>
+{localFolder.rootName} · {localFolder.files.length} 个文件 · {(localFolder.totalBytes / 1024 / 1024).toFixed(1)} MB
+</span>
+) : parsedImportPaths.length ? parsedImportPaths.map((pathValue) => (
 
 <span key={pathValue} title={pathValue}>{pathValue}</span>
 
 )) : <em>等待选择本地文件</em>}
 
 </div>
+
+{uploadProgress && (
+<div className="import-upload-progress">
+<div><span>正在上传到服务器</span><b>{uploadProgress.completedFiles} / {uploadProgress.totalFiles}</b></div>
+<progress value={uploadProgress.completedBytes} max={Math.max(1, uploadProgress.totalBytes)} />
+</div>
+)}
 
 </section>
 
@@ -729,9 +757,9 @@ rows={4}
 
 <div className="dialog-actions">
 
-<button onClick={() => { setShowImportDialog(false); setError(null); }}>取消</button>
+<button onClick={() => { setShowImportDialog(false); setError(null); }} disabled={Boolean(uploadProgress)}>取消</button>
 
-<button className="primary" onClick={confirmImport}>开始导入</button>
+<button className="primary" onClick={confirmImport} disabled={Boolean(uploadProgress)}>{uploadProgress ? "正在上传" : "开始导入"}</button>
 
 </div>
 

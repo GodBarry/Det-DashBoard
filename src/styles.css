@@ -11700,8 +11700,8 @@ button:disabled:hover {
 }
 
 .import-path-tools {
-  width: 96px !important;
-  gap: 10px !important;
+  width: 112px !important;
+  gap: 8px !important;
 }
 
 .import-path-tools button,
@@ -11735,6 +11735,35 @@ button:disabled:hover {
 
 .import-path-list em {
   color: var(--muted, #64748b) !important;
+}
+
+.import-upload-progress {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(20, 184, 166, .24);
+  border-radius: 7px;
+  background: rgba(20, 184, 166, .07);
+}
+
+.import-upload-progress div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}
+
+.import-upload-progress b {
+  color: var(--text, #17212b);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-upload-progress progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--dashboard-accent, #14b8a6);
 }
 
 .import-profile-panel {
