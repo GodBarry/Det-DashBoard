@@ -216,9 +216,15 @@ function createNetworkInferenceService({
       ).catch(() => {});
     });
     const timer = setTimeout(() => readyReject(new Error("模型加载超时（180 秒）")), 180000);
+    const loadingStartedAt = Date.now();
+    const heartbeat = setInterval(() => query(
+      "UPDATE runtime_inference_jobs SET message=$1 WHERE id=$2 AND status='preparing'",
+      [`正在将模型加载到 ${device}（已等待 ${Math.max(1, Math.round((Date.now() - loadingStartedAt) / 1000))} 秒）`, job.id],
+    ).catch(() => {}), 5000);
     try {
       const readyInfo = await ready;
       clearTimeout(timer);
+      clearInterval(heartbeat);
       return {
         type: "ultralytics_yolo",
         pid: child.pid,
@@ -253,6 +259,7 @@ function createNetworkInferenceService({
       };
     } catch (error) {
       clearTimeout(timer);
+      clearInterval(heartbeat);
       if (child.exitCode == null) child.kill();
       throw error;
     }
@@ -406,9 +413,15 @@ function createNetworkInferenceService({
       ).catch(() => {});
     });
     const timer = setTimeout(() => readyReject(new Error("DINO 模型加载超时（300 秒）")), 300000);
+    const loadingStartedAt = Date.now();
+    const heartbeat = setInterval(() => query(
+      "UPDATE runtime_inference_jobs SET message=$1 WHERE id=$2 AND status='preparing'",
+      [`正在将 DINO 模型加载到 ${device}（已等待 ${Math.max(1, Math.round((Date.now() - loadingStartedAt) / 1000))} 秒）`, job.id],
+    ).catch(() => {}), 5000);
     try {
       const readyInfo = await ready;
       clearTimeout(timer);
+      clearInterval(heartbeat);
       return {
         type: "dinov3_faster_rcnn",
         pid: child.pid,
@@ -443,6 +456,7 @@ function createNetworkInferenceService({
       };
     } catch (error) {
       clearTimeout(timer);
+      clearInterval(heartbeat);
       if (child.exitCode == null) child.kill();
       throw error;
     }

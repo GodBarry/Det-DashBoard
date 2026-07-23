@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
 const initialModelForm = { name: "", taskType: "detect", framework: "ultralytics", description: "" };
-const initialVersionForm = { modelId: "", versionName: "", sourcePath: "", sourceType: "local", datasetProjectId: "unknown", stage: "pretrained" };
+const initialVersionForm = { modelId: "", versionName: "", sourcePath: "", sourceType: "local", datasetProjectId: "unknown", stage: "pretrained", params: {} };
 const initialEnvForm = { name: "", sourceType: "conda_pack", pythonPath: "", condaPackPath: "", unpackPath: "" };
 
 export function useAssetMutationController({

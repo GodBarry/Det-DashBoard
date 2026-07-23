@@ -233,6 +233,17 @@ export function TrainingWorkspace({
   const logRows = trainingLogs.length ? trainingLogs.map((log) => log.message || log.text || String(log)).slice(-7) : [];
 
   const setField = (key, value) => setTrainingForm({ ...trainingForm, [key]: value });
+  const selectInitialModelVersion = (versionId) => {
+    const version = modelVersions.find((item) => item.id === versionId);
+    const detectedClasses = parseMaybeJson(version?.params_json)?.detectedClasses;
+    setTrainingForm({
+      ...trainingForm,
+      initialModelVersionId: versionId,
+      ...(Array.isArray(detectedClasses) && detectedClasses.length
+        ? { recognitionClasses: detectedClasses, classMappings: null, classMappingsConfigured: false }
+        : {}),
+    });
+  };
   const metadataValues = (key) => Array.from(new Set(projects.flatMap((project) => {
     const value = project[key];
     if (Array.isArray(value)) return value;
@@ -434,7 +445,7 @@ export function TrainingWorkspace({
 
           <section className="reference-section model-init-section">
             <h2>模型与算法</h2>
-            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => setField('initialModelVersionId', e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
+            <div className="config-row model-init-row"><span className="row-label">算法适配器</span><select value={trainingForm.templateId} onChange={(e) => selectTrainingAlgorithm(e.target.value)}><option value="">选择算法适配器</option>{algorithms.map((algorithm) => <option key={algorithm.id || algorithm.template_key} value={algorithm.id || algorithm.template_key}>{algorithm.name}</option>)}</select><span className="row-label">初始化方式</span><select value={trainingForm.initializationMode} onChange={(e) => setTrainingForm({ ...trainingForm, initializationMode: e.target.value, initialModelVersionId: '', resume: false })}><option value="random">随机初始化（不加载权重）</option><option value="zero">零初始化（不加载权重）</option><option value="pretrained">预训练权重</option><option value="training">训练任务产物</option></select>{['pretrained', 'training'].includes(trainingForm.initializationMode) ? <><span className="row-label">初始化权重</span><select value={trainingForm.initialModelVersionId} onChange={(e) => selectInitialModelVersion(e.target.value)}><option value="">选择权重</option>{modelVersions.filter((version) => trainingForm.initializationMode === 'training' ? Boolean(version.training_job_id) : version.stage === 'pretrained').map((version) => <option key={version.id} value={version.id}>{version.model_name} / {version.version_name}</option>)}</select>{trainingForm.initializationMode === 'training' && trainingForm.initialModelVersionId && <button className={`icon-toggle ${trainingForm.resume ? 'active' : ''}`} type="button" title={trainingForm.resume ? '从检查点继续训练' : '仅加载权重并从头训练'} onClick={() => setField('resume', !trainingForm.resume)}><RotateCcw size={15} /></button>}</> : <span className="initialization-note">{trainingForm.initializationMode === 'zero' ? '全部可训练参数从 0 开始，不使用任何模型权重。' : '按算法默认分布随机生成参数，不使用任何模型权重。'}</span>}</div>
             <div className="config-row"><span className="row-label">Python 环境</span><select value={trainingForm.pythonEnvId} onChange={(e) => { const env = pythonEnvs.find((item) => item.id === e.target.value); setTrainingForm({ ...trainingForm, pythonEnvId: e.target.value, python: env?.python_path || trainingForm.python }); }}><option value="">选择 Python 环境</option>{pythonEnvs.map((env) => <option key={env.id} value={env.id}>{env.name} · {env.status}</option>)}</select><span>{selectedEnv.python_version || '--'} · {selectedEnv.torch_version || '--'} · {(selectedEnv.accelerator || 'CPU').toUpperCase()}</span></div>
           </section>
 

@@ -63,6 +63,8 @@ submitInferenceJob,
 
 networkInferenceService,
 
+networkInferenceBusy,
+
 startNetworkInference,
 
 stopNetworkInference,
@@ -226,6 +228,17 @@ const [expandedGroups, setExpandedGroups] = usePersistentSet("det-dashboard.infe
 const [expandedDataNodes, setExpandedDataNodes] = usePersistentSet("det-dashboard.inference-data-nodes", []);
 
 const setField = (key, value) => setInferenceForm({ ...inferenceForm, [key]: value });
+const selectInferenceModelVersion = (versionId) => {
+  const version = modelVersions.find((item) => item.id === versionId);
+  const detectedClasses = parseMaybeJson(version?.params_json)?.detectedClasses;
+  setInferenceForm({
+    ...inferenceForm,
+    modelVersionId: versionId,
+    ...(Array.isArray(detectedClasses) && detectedClasses.length
+      ? { recognitionClasses: detectedClasses, classMappings: null, classMappingsConfigured: false }
+      : {}),
+  });
+};
 
 const inferenceProjectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
@@ -534,6 +547,11 @@ onClick: () => setField("pythonEnvId", env.id),
 
 const jobById = new Map(sortedInferenceJobs.map((job) => [job.id, job]));
 const displayJobs = queueOrder.map((id) => jobById.get(id)).filter(Boolean);
+const activeNetworkJob = displayJobs.find((job) => {
+  const status = String(job.status || "").toLowerCase();
+  return ["preparing", "listening", "running", "stopping"].includes(status)
+    && Boolean(parseMaybeJson(job.params_json)?.networkInference?.enabled);
+});
 const beginJobDrag = (event, jobId) => {
   event.preventDefault();
   setDraggedJobId(jobId);
@@ -700,10 +718,11 @@ return (
             className={networkInferenceService?.running ? "danger-outline" : ""}
             type="button"
             onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
+            disabled={networkInferenceBusy}
             title={networkInferenceService?.running ? "停止 4180 监听并完成当前会话" : "固定当前模型、算法、GPU、类别和参数并监听 4180"}
           >
             <Radio size={15} />
-            {networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
+            {networkInferenceBusy ? "模型加载中…" : networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
           </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
@@ -763,7 +782,7 @@ return (
               {familyRows.map((family) => <option key={family.family} value={family.family}>{family.family}</option>)}
             </select>
             <span className="row-label">模型版本</span>
-            <select value={inferenceForm.modelVersionId} onChange={(e) => setField("modelVersionId", e.target.value)} title={versionTooltip(selectedVersion)}>
+            <select value={inferenceForm.modelVersionId} onChange={(e) => selectInferenceModelVersion(e.target.value)} title={versionTooltip(selectedVersion)}>
               <option value="">请选择模型版本</option>
               {inferenceVersions.map((version) => <option key={version.id} value={version.id} title={versionTooltip(version)}>{version.model_name} / {version.version_name}</option>)}
             </select>
@@ -808,6 +827,13 @@ return (
           <h2>推理任务队列</h2>
           <span className="muted">共 {inferenceJobs.length} 条</span>
         </div>
+        {activeNetworkJob && (
+          <div className={`network-inference-live-state status-${activeNetworkJob.status}`}>
+            <Radio size={13} />
+            <b>{runStatusLabel(activeNetworkJob.status)}</b>
+            <span>{activeNetworkJob.message || "正在更新网络推理状态"}</span>
+          </div>
+        )}
         <div className="inference-table" ref={inferenceTableRef} style={inferenceTableStyle}>
           <div className="inference-table-head">
             {[
@@ -830,8 +856,8 @@ return (
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
-                <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
-                <span className="inference-progress" title={`进度 ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
+                <em className={`status-badge status-${job.status}`} title={job.message || ""}>{runStatusLabel(job.status)}</em>
+                <span className="inference-progress" title={`${job.message || "任务进度"} · ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
                 <span>{metrics.images ?? job.image_count ?? 0}</span>
                 <span>{metrics.predictions ?? job.prediction_count ?? 0}</span>
                 <span>{formatMetric(metrics.precision)}</span>

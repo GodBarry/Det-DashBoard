@@ -11916,6 +11916,11 @@ button:disabled:hover {
 .recognition-class-add button { width: 20px; min-width: 20px; height: 19px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .recognition-class-add button:disabled { opacity: .45; }
 .recognition-class-hint { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.network-inference-live-state { min-height: 30px; margin: 0 8px 7px; padding: 5px 9px; display: flex; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); color: var(--text); }
+.network-inference-live-state > svg { flex: 0 0 auto; color: var(--accent); }
+.network-inference-live-state > b { flex: 0 0 auto; color: var(--accent); font-size: 11px; }
+.network-inference-live-state > span { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.network-inference-live-state.status-failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .class-mapping-config-row { align-items: start; }
 .class-mapping-config-row > .row-label { padding-top: 7px; }
 .class-mapping-config-row > .class-mapping-picker { grid-column: 2 / -1; }

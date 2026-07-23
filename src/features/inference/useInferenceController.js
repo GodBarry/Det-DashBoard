@@ -27,6 +27,7 @@ export function useInferenceController({
   );
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
   const [networkInferenceService, setNetworkInferenceService] = useState({ running: false, status: "stopped", port: 4180 });
+  const [networkInferenceBusy, setNetworkInferenceBusy] = useState(false);
 
   const refreshNetworkInferenceStatus = useCallback(() => request("/api/ml/network-inference/status")
     .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
@@ -75,6 +76,13 @@ export function useInferenceController({
     const algorithmResolution = resolveInferenceAlgorithm(inferenceForm, algorithmAssets);
     const validationError = validateNetworkInferenceSubmission(inferenceForm, algorithmResolution);
     if (validationError) return setError(validationError);
+    setNetworkInferenceBusy(true);
+    setNetworkInferenceService((current) => ({ ...current, running: false, status: "preparing" }));
+    const refreshTimer = window.setInterval(() => {
+      (refreshInferenceJobs || loadMlPlatform)();
+      refreshNetworkInferenceStatus();
+    }, 1500);
+    (refreshInferenceJobs || loadMlPlatform)();
     request("/api/ml/network-inference/start", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -86,7 +94,15 @@ export function useInferenceController({
         setNetworkInferenceService(data.service);
         (refreshInferenceJobs || loadMlPlatform)();
       })
-      .catch((error) => setError(error.message));
+      .catch((error) => {
+        setNetworkInferenceService((current) => ({ ...current, running: false, status: "failed" }));
+        setError(error.message);
+      })
+      .finally(() => {
+        window.clearInterval(refreshTimer);
+        setNetworkInferenceBusy(false);
+        (refreshInferenceJobs || loadMlPlatform)();
+      });
   }
 
   function stopNetworkInference() {
@@ -193,6 +209,7 @@ export function useInferenceController({
     deleteInferenceJob,
     deleteInferenceJobs,
     inferenceForm,
+    networkInferenceBusy,
     networkInferenceService,
     requeueInferenceJob,
     updateInferenceJobState,

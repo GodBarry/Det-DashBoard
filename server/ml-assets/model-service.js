@@ -13,6 +13,7 @@ function createModelService({
   modelWeightManifestKey,
   writeObjectToFile,
   sendError,
+  weightInspector,
 }) {
   if (typeof query !== "function") throw new TypeError("createModelService requires query");
   if (!resourceAccess || typeof resourceAccess.scopeSql !== "function") throw new TypeError("createModelService requires resourceAccess");
@@ -139,6 +140,9 @@ function createModelService({
     };
     const stat = validateWeightPath(sourcePath);
     const epoch = path.basename(sourcePath).match(/epoch[_-]?(\d+)/i)?.[1] || null;
+    const labelAnalysis = weightInspector
+      ? await weightInspector.inspect(sourcePath).catch((error) => ({ classes: [], warning: error.message }))
+      : { classes: [], source: null, warning: null };
     return {
       fileName: path.basename(sourcePath),
       size: stat.size,
@@ -150,6 +154,9 @@ function createModelService({
       framework: inferWeightFramework(sourcePath, model),
       taskType: model.task_type,
       epoch: epoch ? Number(epoch) : null,
+      classes: labelAnalysis.classes || [],
+      classSource: labelAnalysis.source || null,
+      classWarning: labelAnalysis.warning || null,
     };
   }
 
