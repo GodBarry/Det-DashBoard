@@ -63,6 +63,10 @@ submitInferenceJob,
 
 networkInferenceService,
 
+networkInferenceBusy,
+
+networkInferenceStatusReady,
+
 startNetworkInference,
 
 stopNetworkInference,
@@ -90,14 +94,14 @@ const inferenceTableRef = useRef(null);
 const [inferenceColumnWidths, setInferenceColumnWidths] = useState(() => {
   try {
     const stored = JSON.parse(window.localStorage.getItem("det-dashboard.inference-table-columns") || "null");
-    return Array.isArray(stored) && stored.length === 12 ? stored : null;
+    return Array.isArray(stored) && stored.length === 11 ? stored : null;
   } catch {
     return null;
   }
 });
 const inferenceColumnTemplate = inferenceColumnWidths
   ? inferenceColumnWidths.map((width) => `${Math.round(width)}px`).join(" ")
-  : "minmax(145px,1.35fr) minmax(90px,.78fr) minmax(105px,.9fr) minmax(68px,.5fr) minmax(94px,.7fr) minmax(112px,.82fr) minmax(62px,.48fr) minmax(62px,.48fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(184px,1.15fr)";
+  : "minmax(145px,1.35fr) minmax(90px,.78fr) minmax(105px,.9fr) minmax(68px,.5fr) minmax(112px,.82fr) minmax(62px,.48fr) minmax(62px,.48fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(66px,.5fr) minmax(184px,1.15fr)";
 const inferenceTableStyle = { "--inference-table-columns": inferenceColumnTemplate };
 const resetInferenceColumns = () => {
   setInferenceColumnWidths(null);
@@ -112,7 +116,7 @@ const beginInferenceColumnResize = (event, index) => {
   const startX = event.clientX;
   const leftStart = widths[index];
   const rightStart = widths[index + 1];
-  const minimums = [120, 76, 86, 62, 78, 92, 54, 54, 58, 58, 58, 170];
+  const minimums = [120, 76, 86, 62, 92, 54, 54, 58, 58, 58, 170];
   const onMove = (moveEvent) => {
     const requested = moveEvent.clientX - startX;
     const delta = Math.max(minimums[index] - leftStart, Math.min(requested, rightStart - minimums[index + 1]));
@@ -226,6 +230,17 @@ const [expandedGroups, setExpandedGroups] = usePersistentSet("det-dashboard.infe
 const [expandedDataNodes, setExpandedDataNodes] = usePersistentSet("det-dashboard.inference-data-nodes", []);
 
 const setField = (key, value) => setInferenceForm({ ...inferenceForm, [key]: value });
+const selectInferenceModelVersion = (versionId) => {
+  const version = modelVersions.find((item) => item.id === versionId);
+  const detectedClasses = parseMaybeJson(version?.params_json)?.detectedClasses;
+  setInferenceForm({
+    ...inferenceForm,
+    modelVersionId: versionId,
+    ...(Array.isArray(detectedClasses) && detectedClasses.length
+      ? { recognitionClasses: detectedClasses, classMappings: null, classMappingsConfigured: false }
+      : {}),
+  });
+};
 
 const inferenceProjectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
@@ -534,6 +549,11 @@ onClick: () => setField("pythonEnvId", env.id),
 
 const jobById = new Map(sortedInferenceJobs.map((job) => [job.id, job]));
 const displayJobs = queueOrder.map((id) => jobById.get(id)).filter(Boolean);
+const activeNetworkJob = displayJobs.find((job) => {
+  const status = String(job.status || "").toLowerCase();
+  return ["preparing", "listening", "running", "stopping"].includes(status)
+    && Boolean(parseMaybeJson(job.params_json)?.networkInference?.enabled);
+});
 const beginJobDrag = (event, jobId) => {
   event.preventDefault();
   setDraggedJobId(jobId);
@@ -700,12 +720,17 @@ return (
             className={networkInferenceService?.running ? "danger-outline" : ""}
             type="button"
             onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
-            title={networkInferenceService?.running
-              ? `关闭 ${networkInferenceService.port || 4180} 端口监听并完成当前会话`
-              : "固定当前算法、模型、GPU、类别和参数并监听 4180"}
+            disabled={networkInferenceBusy || !networkInferenceStatusReady}
+            title={networkInferenceService?.running ? "停止 4180 监听并完成当前会话" : "固定当前模型、算法、GPU、类别和参数并监听 4180"}
           >
             <Radio size={15} />
-            {networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
+            {!networkInferenceStatusReady
+              ? "正在确认服务状态…"
+              : networkInferenceBusy
+                ? "模型加载中…"
+                : networkInferenceService?.running
+                  ? "关闭网络推理"
+                  : "开启网络推理"}
           </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
@@ -765,7 +790,7 @@ return (
               {familyRows.map((family) => <option key={family.family} value={family.family}>{family.family}</option>)}
             </select>
             <span className="row-label">模型版本</span>
-            <select value={inferenceForm.modelVersionId} onChange={(e) => setField("modelVersionId", e.target.value)} title={versionTooltip(selectedVersion)}>
+            <select value={inferenceForm.modelVersionId} onChange={(e) => selectInferenceModelVersion(e.target.value)} title={versionTooltip(selectedVersion)}>
               <option value="">请选择模型版本</option>
               {inferenceVersions.map((version) => <option key={version.id} value={version.id} title={versionTooltip(version)}>{version.model_name} / {version.version_name}</option>)}
             </select>
@@ -810,15 +835,22 @@ return (
           <h2>推理任务队列</h2>
           <span className="muted">共 {inferenceJobs.length} 条</span>
         </div>
+        {activeNetworkJob && (
+          <div className={`network-inference-live-state status-${activeNetworkJob.status}`}>
+            <Radio size={13} />
+            <b>{runStatusLabel(activeNetworkJob.status)}</b>
+            <span>{activeNetworkJob.message || "正在更新网络推理状态"}</span>
+          </div>
+        )}
         <div className="inference-table" ref={inferenceTableRef} style={inferenceTableStyle}>
           <div className="inference-table-head">
             {[
               <><input type="checkbox" checked={allVisibleInferenceJobsSelected} onChange={toggleVisibleInferenceJobsSelection} disabled={!displayJobs.length} />任务名称</>,
-              "数据集", "模型", "状态", "来源", "进度", "图像数", "预测数", "Precision", "Recall", "mAP50", "操作",
+              "数据集", "模型", "状态", "进度", "图像数", "预测数", "Precision", "Recall", "mAP50", "操作",
             ].map((label, index) => (
               <span className={index === 0 ? "inference-task-name" : ""} key={index}>
                 {label}
-                {index < 11 && <i className="table-column-resizer" role="separator" aria-orientation="vertical" title="拖动调整列宽，双击恢复自动宽度" onPointerDown={(event) => beginInferenceColumnResize(event, index)} onDoubleClick={resetInferenceColumns} />}
+                {index < 10 && <i className="table-column-resizer" role="separator" aria-orientation="vertical" title="拖动调整列宽，双击恢复自动宽度" onPointerDown={(event) => beginInferenceColumnResize(event, index)} onDoubleClick={resetInferenceColumns} />}
               </span>
             ))}
           </div>
@@ -832,9 +864,8 @@ return (
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
-                <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
-                <span>{parseMaybeJson(job.params_json).taskSource === "external_api" ? "外部接口推理" : parseMaybeJson(job.params_json).taskType === "test" ? "本地文件推理" : "本地验证评测"}</span>
-                <span className="inference-progress" title={`进度 ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
+                <em className={`status-badge status-${job.status}`} title={job.message || ""}>{runStatusLabel(job.status)}</em>
+                <span className="inference-progress" title={`${job.message || "任务进度"} · ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
                 <span>{metrics.images ?? job.image_count ?? 0}</span>
                 <span>{metrics.predictions ?? job.prediction_count ?? 0}</span>
                 <span>{formatMetric(metrics.precision)}</span>

@@ -26,25 +26,22 @@ export function useInferenceController({
     () => createDefaultInferenceForm(restoredInferenceForm),
   );
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
-  const [networkInferenceService, setNetworkInferenceService] = useState({
-    running: false,
-    status: "stopped",
-    port: 4180,
-  });
+  const [networkInferenceService, setNetworkInferenceService] = useState({ running: false, status: "stopped", port: 4180 });
+  const [networkInferenceBusy, setNetworkInferenceBusy] = useState(false);
+  const [networkInferenceStatusReady, setNetworkInferenceStatusReady] = useState(false);
 
-  const refreshNetworkInferenceStatus = useCallback(() => (
-    request("/api/ml/network-inference/status")
-      .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
-      .then(([status, data]) => {
-        if (status >= 400) throw new Error(data.error || "读取网络推理服务状态失败");
-        setNetworkInferenceService(data.service || { running: false, status: "stopped", port: 4180 });
-        return data.service;
-      })
-      .catch((error) => {
-        setError(error.message);
-        return null;
-      })
-  ), [request, setError]);
+  const refreshNetworkInferenceStatus = useCallback(() => request("/api/ml/network-inference/status")
+    .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
+    .then(([status, data]) => {
+      if (status >= 400) throw new Error(data.error || "读取网络推理服务状态失败");
+      setNetworkInferenceService(data.service || { running: false, status: "stopped", port: 4180 });
+      setNetworkInferenceStatusReady(true);
+      return data.service;
+    })
+    .catch(() => {
+      setNetworkInferenceStatusReady(false);
+      return null;
+    }), [request]);
 
   useEffect(() => {
     refreshNetworkInferenceStatus();
@@ -83,10 +80,14 @@ export function useInferenceController({
   function startNetworkInference() {
     const algorithmResolution = resolveInferenceAlgorithm(inferenceForm, algorithmAssets);
     const validationError = validateNetworkInferenceSubmission(inferenceForm, algorithmResolution);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
+    if (validationError) return setError(validationError);
+    setNetworkInferenceBusy(true);
+    setNetworkInferenceService((current) => ({ ...current, running: false, status: "preparing" }));
+    const refreshTimer = window.setInterval(() => {
+      (refreshInferenceJobs || loadMlPlatform)();
+      refreshNetworkInferenceStatus();
+    }, 1500);
+    (refreshInferenceJobs || loadMlPlatform)();
     request("/api/ml/network-inference/start", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -98,14 +99,19 @@ export function useInferenceController({
         setNetworkInferenceService(data.service);
         (refreshInferenceJobs || loadMlPlatform)();
       })
-      .catch((error) => setError(error.message));
+      .catch((error) => {
+        setNetworkInferenceService((current) => ({ ...current, running: false, status: "failed" }));
+        setError(error.message);
+      })
+      .finally(() => {
+        window.clearInterval(refreshTimer);
+        setNetworkInferenceBusy(false);
+        (refreshInferenceJobs || loadMlPlatform)();
+      });
   }
 
   function stopNetworkInference() {
-    request("/api/ml/network-inference/stop", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-    })
+    request("/api/ml/network-inference/stop", { method: "POST", headers: { "content-type": "application/json" } })
       .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
       .then(([status, data]) => {
         if (status >= 400) throw new Error(data.error || "关闭网络推理服务失败");
@@ -208,7 +214,9 @@ export function useInferenceController({
     deleteInferenceJob,
     deleteInferenceJobs,
     inferenceForm,
+    networkInferenceBusy,
     networkInferenceService,
+    networkInferenceStatusReady,
     requeueInferenceJob,
     updateInferenceJobState,
     setActiveInferenceResult,

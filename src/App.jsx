@@ -217,7 +217,9 @@ const {
   deleteInferenceJob,
   deleteInferenceJobs,
   inferenceForm,
+  networkInferenceBusy,
   networkInferenceService,
+  networkInferenceStatusReady,
   requeueInferenceJob,
   updateInferenceJobState,
   setActiveInferenceResult,
@@ -572,6 +574,10 @@ deleteTrainingJob={deleteTrainingJob}
 submitInferenceJob={submitInferenceJob}
 
 networkInferenceService={networkInferenceService}
+
+networkInferenceBusy={networkInferenceBusy}
+
+networkInferenceStatusReady={networkInferenceStatusReady}
 
 startNetworkInference={startNetworkInference}
 

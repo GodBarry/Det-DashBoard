@@ -51,6 +51,7 @@ export function runStatusLabel(status) {
   if (normalized === "running") return "运行中";
   if (normalized === "listening") return "监听中";
   if (normalized === "stopped") return "已停止";
+  if (normalized === "stopping") return "停止中";
   if (normalized === "failed") return "运行失败";
   if (normalized === "cancelled") return "已取消";
   return status || "未知状态态";

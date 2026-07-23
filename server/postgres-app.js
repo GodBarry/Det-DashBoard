@@ -61,6 +61,7 @@ const { createInferenceInputCacheService } = require("./runtime-jobs/inference-i
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
 const { createNetworkInferenceService } = require("./runtime-jobs/network-inference-service");
 const { createModelService } = require("./ml-assets/model-service");
+const { createModelWeightInspector } = require("./ml-assets/model-weight-inspector");
 const { createModelMaintenanceService } = require("./ml-assets/model-maintenance-service");
 const { createPythonEnvService } = require("./ml-assets/python-env-service");
 const { createAlgorithmAssetService } = require("./ml-assets/algorithm-asset-service");
@@ -135,6 +136,7 @@ let trainingCatalogService;
 let runtimeQueueService;
 let prepareInferenceInputCache;
 let modelService;
+let modelWeightInspector;
 let modelMaintenanceService;
 let pythonEnvService;
 let algorithmAssetService;
@@ -479,6 +481,13 @@ async function main() {
     algorithmAssetService,
     resourceAccess,
   });
+  modelWeightInspector = createModelWeightInspector({
+    query,
+    fs,
+    childProcess: { spawn },
+    pythonEnvService,
+    processRef: process,
+  });
   modelService = createModelService({
     query,
     resourceAccess,
@@ -492,6 +501,7 @@ async function main() {
     modelWeightManifestKey,
     writeObjectToFile,
     sendError,
+    weightInspector: modelWeightInspector,
   });
   inferenceWorkerController = createInferenceWorker({
     query,
@@ -596,12 +606,19 @@ async function main() {
     createInferenceJob: inferenceSubmissionService.createInferenceJob,
     importService,
     inferenceWorkerController,
+    pythonEnvService,
+    modelService,
+    algorithmRuntimeSource,
     fs,
     path,
     sharp,
     storageRoot,
     logger: console,
   });
+  const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
+  if (reconciledNetworkJobs) {
+    console.log(`Boot: reconciled ${reconciledNetworkJobs} interrupted network inference session(s)`);
+  }
   mlRoutes = createMlRoutes({
     query,
     readBody,

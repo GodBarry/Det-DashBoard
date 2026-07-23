@@ -59,12 +59,24 @@ export function AssetDrawer({
     const timer = window.setTimeout(async () => {
       try {
         setAnalysis({ loading: true });
-        const timeout = window.setTimeout(() => controller.abort(), 8000);
+        const timeout = window.setTimeout(() => controller.abort(), 65000);
         const result = await inspectModelWeight({ modelId: versionForm.modelId, sourcePath: versionForm.sourcePath }, controller.signal);
         window.clearTimeout(timeout);
-        if (sequence === analysisSequence.current) setAnalysis(result);
+        if (sequence === analysisSequence.current) {
+          setAnalysis(result);
+          if (Array.isArray(result.classes) && result.classes.length) {
+            setVersionForm((current) => ({
+              ...current,
+              params: {
+                ...(current.params || {}),
+                detectedClasses: result.classes,
+                detectedClassSource: result.classSource || null,
+              },
+            }));
+          }
+        }
       } catch (error) {
-        if (sequence === analysisSequence.current) setAnalysis({ error: error.name === "AbortError" ? "自动解析超时，可直接登记或检查服务器路径" : error.message });
+        if (sequence === analysisSequence.current) setAnalysis({ error: error.name === "AbortError" ? "自动解析超过 65 秒，可直接登记或检查 Python/Torch 环境" : error.message });
       }
     }, 450);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -137,7 +149,7 @@ export function AssetDrawer({
             <DrawerField label="训练数据"><div className="asset-dataset-picker"><CascadingProjectPicker projects={projects} value={versionForm.datasetProjectId === "unknown" ? "" : versionForm.datasetProjectId} onChange={(value) => setVersionForm({ ...versionForm, datasetProjectId: value || "unknown" })} storageKey="asset-version-dataset" ariaLabel="选择训练数据集" /><button type="button" className={`asset-unknown-dataset ${versionForm.datasetProjectId === "unknown" ? "active" : ""}`} onClick={() => setVersionForm({ ...versionForm, datasetProjectId: "unknown" })}>未知</button></div></DrawerField>
             <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
             <DrawerField label="说明" tall><textarea value={versionForm.description || ""} onChange={(e) => setVersionForm({ ...versionForm, description: e.target.value })} placeholder="请输入说明（可选）" maxLength={500} /></DrawerField>
-            <div className={`auto-parse-card ${analysis?.error ? "has-error" : ""}`}><h3>自动解析</h3><p><span>文件大小</span><b>{analysis?.loading ? "解析中..." : analysis?.sizeLabel || "--"}</b></p><p><span>SHA256</span><b title={analysis?.sha256}>{analysis?.sha256 ? `${analysis.sha256.slice(0, 16)}...` : analysis?.sha256Pending ? "登记时计算" : "--"}</b></p><p><span>框架</span><b>{analysis?.framework || selectedModel?.framework || "待解析"}</b></p><p><span>任务</span><b>{analysis?.taskType || selectedModel?.task_type || "detect"}</b></p>{analysis?.error && <p className="drawer-inline-error">{analysis.error}</p>}</div>
+            <div className={`auto-parse-card ${analysis?.error ? "has-error" : ""}`}><h3>自动解析</h3><p><span>文件大小</span><b>{analysis?.loading ? "解析中..." : analysis?.sizeLabel || "--"}</b></p><p><span>SHA256</span><b title={analysis?.sha256}>{analysis?.sha256 ? `${analysis.sha256.slice(0, 16)}...` : analysis?.sha256Pending ? "登记时计算" : "--"}</b></p><p><span>框架</span><b>{analysis?.framework || selectedModel?.framework || "待解析"}</b></p><p><span>任务</span><b>{analysis?.taskType || selectedModel?.task_type || "detect"}</b></p><p><span>内置标签</span><b title={(analysis?.classes || []).join(", ")}>{analysis?.loading ? "解析中..." : analysis?.classes?.length ? `${analysis.classes.length} 类：${analysis.classes.slice(0, 4).join("、")}${analysis.classes.length > 4 ? "…" : ""}` : "未发现"}</b></p>{analysis?.classWarning && !analysis?.classes?.length && <p className="drawer-source-hint">{analysis.classWarning}</p>}{analysis?.error && <p className="drawer-inline-error">{analysis.error}</p>}</div>
           </>
         )}
         {mode === "algorithm" && (
