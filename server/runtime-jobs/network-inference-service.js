@@ -92,6 +92,19 @@ function createNetworkInferenceService({
   let starting = false;
   let queue = Promise.resolve();
 
+  async function reconcileStaleJobs(message = "服务进程已重启，网络监听会话已中断") {
+    if (listener || session) return 0;
+    const result = await query(
+      `UPDATE runtime_inference_jobs
+       SET status='stopped',progress=100,process_pid=NULL,finished_at=COALESCE(finished_at,now()),
+           metrics_json=COALESCE(metrics_json,'{}'::jsonb)||$1::jsonb,message=$2
+       WHERE status IN ('preparing','listening','running','stopping')
+         AND COALESCE(params_json->'networkInference'->>'enabled','false')='true'`,
+      [JSON.stringify({ listening: false, interrupted: true }), message],
+    );
+    return result.rowCount || 0;
+  }
+
   function normalizedDevice(value, cudaAvailable, accelerator = "") {
     const isNpu = String(accelerator || "").toLowerCase() === "npu";
     const requested = String(value ?? "").trim().toLowerCase();
@@ -667,6 +680,7 @@ function createNetworkInferenceService({
     if (starting || listener || session) throw new Error("网络推理服务正在启动或已经开启");
     starting = true;
     try {
+      await reconcileStaleJobs("新的网络推理会话已启动，上一监听会话已结束");
       const project = await ensureProject(actor);
       const job = await createInferenceJob({
       ...body,
@@ -782,7 +796,7 @@ function createNetworkInferenceService({
     };
   }
 
-  return { start, stop, status };
+  return { reconcileStaleJobs, start, stop, status };
 }
 
 module.exports = { createNetworkInferenceService, networkRunnerKind, parseImage };

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  createNetworkInferenceService,
   networkRunnerKind,
   parseImage,
 } = require("../../server/runtime-jobs/network-inference-service");
@@ -29,4 +30,21 @@ test("network inference parses JSON base64 and preserves remote identifiers", ()
   assert.equal(parsed.filename, "frame.jpg");
   assert.equal(parsed.sessionId, "remote-session");
   assert.equal(parsed.remoteProjectImageId, "remote-image");
+});
+
+test("network inference reconciles stale listener jobs after service restart", async () => {
+  const calls = [];
+  const service = createNetworkInferenceService({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rowCount: 2, rows: [] };
+    },
+  });
+
+  const count = await service.reconcileStaleJobs();
+
+  assert.equal(count, 2);
+  assert.match(calls[0].sql, /status IN \('preparing','listening','running','stopping'\)/);
+  assert.match(calls[0].sql, /networkInference/);
+  assert.match(calls[0].params[1], /已中断/);
 });

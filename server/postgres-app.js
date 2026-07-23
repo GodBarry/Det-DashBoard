@@ -592,6 +592,10 @@ async function main() {
     storageRoot,
     logger: console,
   });
+  const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
+  if (reconciledNetworkJobs) {
+    console.log(`Boot: reconciled ${reconciledNetworkJobs} interrupted network inference session(s)`);
+  }
   mlRoutes = createMlRoutes({
     query,
     readBody,

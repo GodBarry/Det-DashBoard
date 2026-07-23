@@ -219,6 +219,7 @@ const {
   inferenceForm,
   networkInferenceBusy,
   networkInferenceService,
+  networkInferenceStatusReady,
   requeueInferenceJob,
   updateInferenceJobState,
   setActiveInferenceResult,
@@ -575,6 +576,8 @@ submitInferenceJob={submitInferenceJob}
 networkInferenceService={networkInferenceService}
 
 networkInferenceBusy={networkInferenceBusy}
+
+networkInferenceStatusReady={networkInferenceStatusReady}
 
 startNetworkInference={startNetworkInference}
 

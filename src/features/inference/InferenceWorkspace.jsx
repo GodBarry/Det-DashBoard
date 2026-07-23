@@ -65,6 +65,8 @@ networkInferenceService,
 
 networkInferenceBusy,
 
+networkInferenceStatusReady,
+
 startNetworkInference,
 
 stopNetworkInference,
@@ -718,11 +720,17 @@ return (
             className={networkInferenceService?.running ? "danger-outline" : ""}
             type="button"
             onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
-            disabled={networkInferenceBusy}
+            disabled={networkInferenceBusy || !networkInferenceStatusReady}
             title={networkInferenceService?.running ? "停止 4180 监听并完成当前会话" : "固定当前模型、算法、GPU、类别和参数并监听 4180"}
           >
             <Radio size={15} />
-            {networkInferenceBusy ? "模型加载中…" : networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
+            {!networkInferenceStatusReady
+              ? "正在确认服务状态…"
+              : networkInferenceBusy
+                ? "模型加载中…"
+                : networkInferenceService?.running
+                  ? "关闭网络推理"
+                  : "开启网络推理"}
           </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>

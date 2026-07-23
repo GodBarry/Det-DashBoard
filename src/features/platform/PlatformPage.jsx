@@ -73,6 +73,7 @@ export function PlatformPage({
   submitInferenceJob,
   networkInferenceService,
   networkInferenceBusy,
+  networkInferenceStatusReady,
   startNetworkInference,
   stopNetworkInference,
   deleteInferenceJob,
@@ -205,6 +206,7 @@ export function PlatformPage({
             submitInferenceJob={submitInferenceJob}
             networkInferenceService={networkInferenceService}
             networkInferenceBusy={networkInferenceBusy}
+            networkInferenceStatusReady={networkInferenceStatusReady}
             startNetworkInference={startNetworkInference}
             stopNetworkInference={stopNetworkInference}
             viewInferenceResults={viewInferenceResults}

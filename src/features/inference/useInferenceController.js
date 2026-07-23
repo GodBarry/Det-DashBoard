@@ -28,15 +28,20 @@ export function useInferenceController({
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
   const [networkInferenceService, setNetworkInferenceService] = useState({ running: false, status: "stopped", port: 4180 });
   const [networkInferenceBusy, setNetworkInferenceBusy] = useState(false);
+  const [networkInferenceStatusReady, setNetworkInferenceStatusReady] = useState(false);
 
   const refreshNetworkInferenceStatus = useCallback(() => request("/api/ml/network-inference/status")
     .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
     .then(([status, data]) => {
       if (status >= 400) throw new Error(data.error || "读取网络推理服务状态失败");
       setNetworkInferenceService(data.service || { running: false, status: "stopped", port: 4180 });
+      setNetworkInferenceStatusReady(true);
       return data.service;
     })
-    .catch(() => null), [request]);
+    .catch(() => {
+      setNetworkInferenceStatusReady(false);
+      return null;
+    }), [request]);
 
   useEffect(() => {
     refreshNetworkInferenceStatus();
@@ -211,6 +216,7 @@ export function useInferenceController({
     inferenceForm,
     networkInferenceBusy,
     networkInferenceService,
+    networkInferenceStatusReady,
     requeueInferenceJob,
     updateInferenceJobState,
     setActiveInferenceResult,
