@@ -49,6 +49,8 @@ function createAlgorithmRuntimeSource({
   }
 
   function ensureAlgorithmSourceArchiveExtracted(cacheRoot) {
+    const directSourceRoot = resolveDirectAlgorithmSourceRoot(cacheRoot);
+    if (directSourceRoot) return directSourceRoot;
     const archive = findFileUnder(cacheRoot, (file) => /[\\/]ZBH2FWQ[\\/]archives[\\/]dinov3-faster-rcnn-code\.tar\.zst$/i.test(file));
     if (!archive) return cacheRoot;
     const extractRoot = path.join(path.dirname(archive), "dinov3-faster-rcnn-code");
@@ -70,6 +72,18 @@ function createAlgorithmRuntimeSource({
     }
     const packagedRoot = path.join(extractRoot, "dinov3-faster-rcnn");
     return fs.existsSync(packagedRoot) ? packagedRoot : extractRoot;
+  }
+
+  function resolveDirectAlgorithmSourceRoot(cacheRoot) {
+    const requiredDirs = ["configs", "dino_detector", "tools"];
+    const candidates = [
+      cacheRoot,
+      path.join(cacheRoot, "dinov3-faster-rcnn"),
+    ];
+    for (const candidate of candidates) {
+      if (requiredDirs.every((name) => fs.existsSync(path.join(candidate, name)))) return candidate;
+    }
+    return "";
   }
 
   async function resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot }) {
@@ -121,6 +135,7 @@ function createAlgorithmRuntimeSource({
     assetPathSegmentForCache,
     findFileUnder,
     ensureAlgorithmSourceArchiveExtracted,
+    resolveDirectAlgorithmSourceRoot,
     resolveDinoConfigPath,
   };
 }
