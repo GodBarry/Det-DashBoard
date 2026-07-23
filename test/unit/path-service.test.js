@@ -51,3 +51,22 @@ test("system roots expose the Ubuntu filesystem root", () => {
   assert.deepEqual(result.dirs, [{ name: "文件系统 /", path: "/" }]);
   assert.deepEqual(result.files, []);
 });
+
+test("virtual host browse prefix preserves Windows drive paths", () => {
+  const service = createPathService({
+    config: config({
+      browseRoot: "C:\\",
+      browseRootDisplay: "C:\\",
+    }),
+    fs: {},
+    path,
+  });
+  assert.equal(
+    service.toInternalDataPath("/host/browse/F:\\ZBH\\阿拉善数据合并-7月训练\\评估_8类映射_2000_20260723025559"),
+    "F:\\ZBH\\阿拉善数据合并-7月训练\\评估_8类映射_2000_20260723025559",
+  );
+  assert.equal(
+    service.toInternalDataPath("/host/browse/F:/ZBH/阿拉善数据合并-7月训练/评估_8类映射_2000_20260723025559"),
+    "F:\\ZBH\\阿拉善数据合并-7月训练\\评估_8类映射_2000_20260723025559",
+  );
+});
