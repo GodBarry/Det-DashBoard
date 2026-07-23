@@ -16,6 +16,19 @@ async function readImportResponse(response) {
   return data;
 }
 
+function buildFailedImport(paths, message) {
+  return {
+    id: `client-failed-${Date.now()}`,
+    status: "failed",
+    message: message || "导入任务提交失败",
+    error_message: message || "导入任务提交失败",
+    source_path: paths.join("; "),
+    progress: 100,
+    processed_files: 0,
+    total_files: 1,
+  };
+}
+
 export function useDatasetImportController({
   activeProject,
   currentFolder,
@@ -151,7 +164,7 @@ export function useDatasetImportController({
       .catch((err) => {
         recordDatasetActivity("导入", `导入失败：${activeProject.name}`, "error", `${paths.join("; ")}\n${err.message}`);
         setError(err.message);
-        setLatestImport(null);
+        setLatestImport(buildFailedImport(paths, err.message));
       });
   }
 
