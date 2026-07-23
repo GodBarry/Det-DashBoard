@@ -36,7 +36,7 @@ function averagePrecision(points, totalGt) {
     const best = curve.reduce((max, point) => point.recall >= threshold ? Math.max(max, point.precision) : max, 0);
     ap += best / 101;
   }
-  return ap;
+  return Math.min(1, Math.max(0, ap));
 }
 
 function matchAtThreshold(predictions, groundTruth, minScore, iouThreshold, sameLabelOnly = true) {
@@ -68,7 +68,7 @@ function matchAtThreshold(predictions, groundTruth, minScore, iouThreshold, same
   return { tp, fp, fn: Math.max(0, groundTruth.length - used.size), iouSum };
 }
 
-function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThreshold = 0.5 } = {}) {
+function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThreshold = 0.5, expectedLabels = [] } = {}) {
   const predictions = [];
   for (const row of predictionRows) {
     const imageId = row.projectImageId || row.project_image_id;
@@ -82,7 +82,7 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
     imageId: row.projectImageId || row.project_image_id,
     label: labelOf(row),
   }));
-  const labels = Array.from(new Set([...groundTruth.map((row) => row.label), ...predictions.map((row) => row.label)].filter(Boolean))).sort();
+  const labels = Array.from(new Set([...expectedLabels, ...groundTruth.map((row) => row.label), ...predictions.map((row) => row.label)].filter(Boolean))).sort();
   const allLabels = [...labels, "背景"];
   const matrix = allLabels.map(() => allLabels.map(() => 0));
   const labelIndex = new Map(allLabels.map((label, index) => [label, index]));
@@ -182,9 +182,13 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
     }
     const row = perClass.get(label);
     row.ap50 = averagePrecision(points, labelGt.length);
-    row.precision = row.tp / Math.max(1, row.tp + row.fp);
-    row.recall = row.tp / Math.max(1, row.tp + row.fn);
-    row.f1 = 2 * row.precision * row.recall / Math.max(1e-9, row.precision + row.recall);
+    row.precision = row.predictions > 0 ? row.tp / (row.tp + row.fp) : null;
+    row.recall = row.groundTruth > 0 ? row.tp / (row.tp + row.fn) : null;
+    row.f1 = row.precision !== null && row.recall !== null
+      ? 2 * row.precision * row.recall / Math.max(1e-9, row.precision + row.recall)
+      : null;
+    row.evaluable = row.groundTruth > 0;
+    row.status = row.groundTruth > 0 ? "evaluable" : (row.predictions > 0 ? "predictions_without_ground_truth" : "no_samples");
   }
 
   const thresholds = Array.from({ length: 21 }, (_, index) => Number((index * 0.05).toFixed(2)));
@@ -212,6 +216,10 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
   const precision = totalTp / Math.max(1, totalTp + totalFp);
   const recall = totalTp / Math.max(1, totalTp + totalFn);
   const f1 = 2 * precision * recall / Math.max(1e-9, precision + recall);
+  const classRows = Array.from(perClass.values());
+  const precisionClasses = classRows.filter((row) => row.predictions > 0 && row.precision !== null);
+  const recallClasses = classRows.filter((row) => row.groundTruth > 0 && row.recall !== null);
+  const apClasses = classRows.filter((row) => row.groundTruth > 0 && row.ap50 !== null);
 
   return {
     evaluated: groundTruth.length > 0,
@@ -228,9 +236,14 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
       f1,
       avgIou: totalTp ? matchedIouSum / totalTp : 0,
       recommendedConfidence: recommended.confidence,
+      macroPrecision: precisionClasses.length ? precisionClasses.reduce((sum, row) => sum + row.precision, 0) / precisionClasses.length : null,
+      macroRecall: recallClasses.length ? recallClasses.reduce((sum, row) => sum + row.recall, 0) / recallClasses.length : null,
+      map50: apClasses.length ? apClasses.reduce((sum, row) => sum + row.ap50, 0) / apClasses.length : null,
+      configuredClasses: labels.length,
+      evaluableClasses: recallClasses.length,
     },
     labels,
-    perClass: Array.from(perClass.values()),
+    perClass: classRows,
     confusionMatrix: { labels: allLabels, values: matrix },
     curves,
     errors,

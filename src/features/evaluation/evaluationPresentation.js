@@ -38,7 +38,7 @@ export function evaluationErrorBoxes(row = {}, filter = "false_negative", predic
   return selected.flatMap((error) => {
     const label = errorLabels[error.type] || "错误";
     const itemLabel = (item) => item?.label || item?.class_name || item?.category || "目标";
-    const scoreLabel = (item) => item?.score == null ? "" : ` ${(Number(item.score) * 100).toFixed(0)}%`;
+    const scoreLabel = (item) => item?.score == null ? "" : ` ${(Number(item.score) * 100).toFixed(2)}%`;
     if (error.type === "false_negative" && error.groundTruth) {
       return [{ type: "false_negative ground", item: error.groundTruth, color: categoryColor(itemLabel(error.groundTruth)), label: `漏检｜真值｜${itemLabel(error.groundTruth)}` }];
     }

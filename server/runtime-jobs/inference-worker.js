@@ -10,6 +10,7 @@ const {
   metricLabel,
   averagePrecision,
 } = require("./inference-metrics");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeClassName, normalizeRecognitionClasses, recognitionInputClasses } = require("../recognition-classes");
 
 function createInferenceWorker({
   query,
@@ -30,6 +31,38 @@ function createInferenceWorker({
   clock,
 }) {
   const nowIso = () => new Date(clock.now()).toISOString();
+
+  function recognitionClassesForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return mappedRecognitionClasses(params.classMappings, normalizeRecognitionClasses(params.recognitionClasses));
+  }
+
+  function classMappingsForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return normalizeClassMappings(params.classMappings, params.recognitionClasses);
+  }
+
+  function classLookupForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return classMappingLookup(params.classMappings, params.recognitionClasses);
+  }
+
+  function inputClassesForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return recognitionInputClasses(params.classMappings, params.recognitionClasses);
+  }
+
+  function filterPredictionRows(job, rows) {
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
+    return (rows || []).map((row) => ({
+      ...row,
+      predictions: (row.predictions || []).map((prediction) => {
+        const label = mapClassName(prediction.label, mappings, targets);
+        return label ? { ...prediction, label, ...(label === normalizeClassName(prediction.label) ? {} : { original_label: prediction.label }) } : null;
+      }).filter(Boolean),
+    }));
+  }
 
   function isDummyInferenceJob(job) {
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
@@ -138,6 +171,8 @@ function createInferenceWorker({
   async function loadFakeReferenceGroundTruth(job, images) {
     const imageIds = images.map((image) => image.projectImageId).filter(Boolean);
     if (!imageIds.length) throw new Error("Fake GT inference requires project image ids in the input manifest.");
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const gtRows = (await query(
       `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
        FROM image_annotations a
@@ -145,7 +180,10 @@ function createInferenceWorker({
        JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
        WHERE a.project_image_id = ANY($1::uuid[])`,
       [imageIds],
-    )).rows;
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean);
     if (!gtRows.length) throw new Error("Fake GT inference did not find ground-truth boxes for the selected images.");
     const gtByImage = new Map();
     for (const gt of gtRows) {
@@ -325,6 +363,9 @@ function createInferenceWorker({
   }
 
   async function computeDetectionMetrics(job, predictionRows) {
+    predictionRows = filterPredictionRows(job, predictionRows);
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     if (!imageIds.length) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "没有可评估的图片 ID" };
     const gtRows = (await query(
@@ -334,7 +375,10 @@ function createInferenceWorker({
        JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
        WHERE a.project_image_id = ANY($1::uuid[])`,
       [imageIds],
-    )).rows.map((row) => ({
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean).map((row) => ({
       ...row,
       metricLabel: metricLabel(row),
     }));
@@ -470,6 +514,7 @@ function createInferenceWorker({
       imgsz: Number(params.imgsz ?? 640),
       batch: Math.max(1, Number(params.batch ?? 1)),
       device,
+      recognitionClasses: inputClassesForJob(job),
     };
     const runner = [
       "import json, os, sys",
@@ -490,6 +535,7 @@ function createInferenceWorker({
       "model = YOLO(cfg['weights'])",
       "rows = []",
       "names = getattr(model, 'names', {}) or {}",
+      "allowed_classes = {str(name).strip().lower() for name in cfg.get('recognitionClasses', [])}",
       "for abs_path in image_paths:",
       "    results = model.predict(source=abs_path, conf=cfg['conf'], iou=cfg['iou'], imgsz=cfg['imgsz'], batch=1, device=cfg['device'], verbose=False, stream=True)",
       "    result = next(iter(results))",
@@ -505,6 +551,7 @@ function createInferenceWorker({
       "            x1, y1, x2, y2 = [float(v) for v in coords]",
       "            cls_id = int(clss[index]) if clss[index] is not None else -1",
       "            label = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)",
+      "            if str(label).strip().lower() not in allowed_classes: continue",
       "            preds.append({'label': label, 'score': None if confs[index] is None else float(confs[index]), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2 - x1), 'bbox_h': max(0.0, y2 - y1), 'class_id': cls_id})",
       "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(source_path), 'width': item.get('width'), 'height': item.get('height'), 'predictions': preds})",
       "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'ultralytics_yolo', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
@@ -525,7 +572,7 @@ function createInferenceWorker({
     try { summary = JSON.parse(summaryLine); } catch { summary = {}; }
     if (!fs.existsSync(predictionsPath)) throw new Error("YOLO 推理未生成 predictions.json");
     const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
-    const rows = Array.isArray(predictions.images) ? predictions.images : [];
+    const rows = filterPredictionRows(job, Array.isArray(predictions.images) ? predictions.images : []);
     const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
     const metrics = await computeDetectionMetrics(job, rows);
 
@@ -596,17 +643,14 @@ function createInferenceWorker({
     const visualizationDir = path.join(outputDir, "visualizations");
     fs.mkdirSync(visualizationDir, { recursive: true });
     const { configPath, sourceRoot } = await algorithmRuntimeSource.resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot });
-    const classNames = (await query(
-      `SELECT DISTINCT a.label FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id
-       WHERE p.id=$1 AND lower(trim(a.label)) <> 'mosaic' ORDER BY a.label`,
-      [job.dataset_project_id],
-    )).rows.map((row) => String(row.label));
+    const classNames = normalizeRecognitionClasses(params.recognitionClasses);
     const runnerPath = path.join(outputRoot, "run_dino_inference.py");
     const config = {
       jobId: job.id, configPath, weightPath, manifestPath, predictionsPath, visualizationDir,
       scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
       device: normalizeTorchDevice(params.device, env.cuda_available, env.accelerator),
       batchSize: Math.max(1, Math.floor(Number(params.batch ?? 1))),
+      recognitionClasses: inputClassesForJob(job),
       classNames,
     };
     const runner = [
@@ -639,6 +683,7 @@ function createInferenceWorker({
       "model = init_detector(model_cfg, cfg['weightPath'], device=cfg['device'])",
       "print('[DINO] model initialized', flush=True)",
       "classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('classNames') or [])",
+      "allowed_classes = {str(name).strip().lower() for name in cfg.get('recognitionClasses', [])}",
       "test_pipeline = Compose(get_test_pipeline_cfg(model.cfg))",
       "requested_batch = max(1, int(cfg.get('batchSize') or 1))",
       "if str(cfg['device']).startswith('cuda'):",
@@ -681,6 +726,7 @@ function createInferenceWorker({
       "            if float(score) < cfg['scoreThreshold']: continue",
       "            x1, y1, x2, y2 = [float(v) for v in box]",
       "            label = str(classes[int(class_id)]) if 0 <= int(class_id) < len(classes) else str(int(class_id))",
+      "            if str(label).strip().lower() not in allowed_classes: continue",
       "            preds.append({'label': label, 'score': float(score), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2-x1), 'bbox_h': max(0.0, y2-y1), 'class_id': int(class_id)})",
       "            if canvas is not None:",
       "                cv2.rectangle(canvas, (int(x1), int(y1)), (int(x2), int(y2)), (0, 220, 0), 2)",
@@ -748,7 +794,7 @@ function createInferenceWorker({
     }
     if (!fs.existsSync(predictionsPath)) throw new Error(`DINO inference command completed without predictions.json: ${env.python_path} ${commandArgs.join(" ")}`);
     const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
-    const rows = Array.isArray(predictions.images) ? predictions.images : [];
+    const rows = filterPredictionRows(job, Array.isArray(predictions.images) ? predictions.images : []);
     const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
     const metrics = await computeDetectionMetrics(job, rows);
     await transaction(async (client) => {

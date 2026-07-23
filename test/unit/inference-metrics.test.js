@@ -100,7 +100,7 @@ test("metricLabel follows label, normalized label, class id, and unknown precede
 
 test("averagePrecision preserves the 101-point interpolated AP contract", () => {
   assert.equal(averagePrecision([], 0), null);
-  assert.equal(averagePrecision([{ tp: true }], 1), 1.0000000000000007);
+  assert.equal(averagePrecision([{ tp: true }], 1), 1);
   assert.equal(averagePrecision([{ tp: false }, { tp: true }], 1), 0.5000000000000003);
   assert.ok(Math.abs(averagePrecision([{ tp: true }, { tp: false }, { tp: true }], 2) - (253 / 303)) < 1e-12);
 });

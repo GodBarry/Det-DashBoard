@@ -23,6 +23,8 @@ import {
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
+import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function TrainingWorkspace({
 
@@ -237,6 +239,13 @@ export function TrainingWorkspace({
     if (!value) return [];
     try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(','); }
   }).map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const projectMetadataValues = (ids, key) => Array.from(new Set(projects.filter((project) => ids.includes(project.id)).flatMap((project) => {
+    const value = project[key];
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(','); }
+  }).map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const selectedDatasetLabels = projectMetadataValues(Array.from(new Set([...trainProjectIds, ...valProjectIds])), 'labels');
   const trainingFilterOptions = { scenes: metadataValues('scenes'), views: metadataValues('views'), modalities: metadataValues('modalities'), labels: metadataValues('labels') };
   const activeFilterSplit = splitName[activeDatasetSplit];
   const activeDatasetFilter = trainingForm.datasetFilters?.[activeFilterSplit] || { scenes: [], views: [], modalities: [], labels: [], keywords: [] };
@@ -392,6 +401,14 @@ export function TrainingWorkspace({
             <div className="config-row training-task-name-row"><span className="row-label">任务名称</span><input value={trainingForm.name || ""} onChange={(event) => setField("name", event.target.value)} placeholder="可留空，将按 数据集_算法_时间 自动生成" /></div>
             <div className="training-cascading-splits">
               {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} storageKey={`training-${splitKey}`} ariaLabel={`${label}树形选择`} /></div>)}
+            </div>
+            <div className="config-row recognition-class-row">
+              <span className="row-label">识别类别</span>
+              <RecognitionClassPicker values={trainingForm.recognitionClasses} onChange={(recognitionClasses) => setTrainingForm((current) => ({ ...current, recognitionClasses }))} />
+            </div>
+            <div className="config-row class-mapping-config-row">
+              <span className="row-label">类别映射</span>
+              <ClassMappingPicker availableSources={selectedDatasetLabels} defaultTargets={trainingForm.recognitionClasses} configured={trainingForm.classMappingsConfigured} mappings={trainingForm.classMappings} onChange={({ configured, mappings }) => setTrainingForm((current) => ({ ...current, classMappingsConfigured: configured, classMappings: mappings, ...(configured && mappings.length ? { recognitionClasses: mappings.map((row) => row.target) } : {}) }))} />
             </div>
             <div className="training-filter-bar">
               <b>{activeFilterSplit === "train" ? "训练集" : activeFilterSplit === "val" ? "验证集" : "测试集"}筛选</b>

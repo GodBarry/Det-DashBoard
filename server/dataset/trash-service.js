@@ -4,6 +4,16 @@ function createTrashService({ query, transaction, store, httpError }) {
   if (!store || typeof store.removeObject !== "function") throw new TypeError("createTrashService requires store");
   if (typeof httpError !== "function") throw new TypeError("createTrashService requires httpError");
 
+  async function removeObjects(keys, concurrency = 24, options = {}) {
+    if (typeof store.removeObjects === "function") {
+      await store.removeObjects(keys, options);
+      return;
+    }
+    for (let index = 0; index < keys.length; index += concurrency) {
+      await Promise.all(keys.slice(index, index + concurrency).map((key) => store.removeObject(key)));
+    }
+  }
+
   async function softDeleteProjectTree(projectId) {
     await query(
       `WITH RECURSIVE descendants AS (
@@ -76,8 +86,26 @@ function createTrashService({ query, transaction, store, httpError }) {
        WHERE NOT EXISTS (SELECT 1 FROM project_videos pv WHERE pv.video_asset_id=va.id)
        RETURNING id, object_key`,
     );
-    for (const row of [...images.rows, ...videos.rows]) await store.removeObject(row.object_key);
+    await removeObjects([...images.rows, ...videos.rows].map((row) => row.object_key));
     return { image_assets: images.rowCount, video_assets: videos.rowCount };
+  }
+
+  async function cleanupRawLabelObjects(labelVersions = []) {
+    if (typeof store.listObjectKeys !== "function") return 0;
+    const versions = labelVersions.map((item) => typeof item === "object" ? item : { id: item, project_id: null });
+    const suffixes = versions.map((item) => `/${item.id}/`);
+    if (!suffixes.length) return 0;
+    const projectIds = Array.from(new Set(versions.map((item) => item.project_id).filter(Boolean)));
+    const prefixes = projectIds.length ? projectIds.map((projectId) => `objects/raw-labels/${projectId}/`) : ["objects/raw-labels/"];
+    const keys = (await Promise.all(prefixes.map((prefix) => store.listObjectKeys(prefix)))).flat();
+    let removed = 0;
+    const matchingKeys = keys.filter((item) => suffixes.some((suffix) => item.includes(suffix)));
+    const collapsedPrefixes = versions
+      .filter((item) => item.project_id)
+      .map((item) => `objects/raw-labels/${item.project_id}/${item.id}/`);
+    await removeObjects(matchingKeys, 24, { collapsePrefixes: collapsedPrefixes });
+    removed += matchingKeys.length;
+    return removed;
   }
 
   async function emptyImportTrash(projectId) {
@@ -107,9 +135,10 @@ function createTrashService({ query, transaction, store, httpError }) {
         [projectId, ids],
       );
       const labelVersions = await client.query(
-        "DELETE FROM label_versions WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
+        "DELETE FROM label_versions WHERE import_batch_id = ANY($1::uuid[]) RETURNING id, project_id",
         [ids],
       );
+      await cleanupRawLabelObjects(labelVersions.rows);
       const images = await client.query(
         "DELETE FROM project_images WHERE import_batch_id = ANY($1::uuid[]) RETURNING id",
         [ids],
@@ -146,7 +175,8 @@ function createTrashService({ query, transaction, store, httpError }) {
       const ids = rows.rows.map((row) => row.id);
       if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
       await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
-      const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+      const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id, project_id", [ids]);
+      await cleanupRawLabelObjects(labelVersions.rows);
       const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
@@ -163,7 +193,8 @@ function createTrashService({ query, transaction, store, httpError }) {
       if (!ids.length) return { projects: 0, imports: 0, project_images: 0, project_videos: 0, label_versions: 0, image_assets: 0, video_assets: 0 };
 
       await client.query("UPDATE projects SET active_label_version_id=NULL WHERE id = ANY($1::uuid[])", [ids]);
-      const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
+      const labelVersions = await client.query("DELETE FROM label_versions WHERE project_id = ANY($1::uuid[]) RETURNING id, project_id", [ids]);
+      await cleanupRawLabelObjects(labelVersions.rows);
       const images = await client.query("DELETE FROM project_images WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const videos = await client.query("DELETE FROM project_videos WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
       const imports = await client.query("DELETE FROM import_batches WHERE project_id = ANY($1::uuid[]) RETURNING id", [ids]);
@@ -179,6 +210,7 @@ function createTrashService({ query, transaction, store, httpError }) {
     softDeleteImport,
     restoreImport,
     cleanupUnreferencedAssets,
+    cleanupRawLabelObjects,
     emptyImportTrash,
     deleteProjectPermanently,
     emptyProjectTrash,

@@ -224,10 +224,38 @@ async function removeObject(objectKey) {
   if (!objectKey) return;
   if (await ensureBucketSafe()) {
     await client.removeObject(minio.bucket, objectKey).catch(() => {});
-    return;
   }
-  fs.rmSync(fallbackPath(objectKey), { force: true });
-  fs.rmSync(secondaryFallbackPath(objectKey), { force: true });
+  for (const filePath of [fallbackPath(objectKey), secondaryFallbackPath(objectKey), legacyFallbackPath(objectKey)]) {
+    fs.rmSync(filePath, { force: true });
+  }
+}
+
+async function removeObjects(objectKeys = [], options = {}) {
+  const keys = Array.from(new Set(objectKeys.map(String).filter(Boolean)));
+  if (!keys.length) return;
+  const collapsedPrefixes = Array.from(new Set((options.collapsePrefixes || []).map(String).filter(Boolean)));
+  if (await ensureBucketSafe()) {
+    for (let index = 0; index < keys.length; index += 1000) {
+      const batch = keys.slice(index, index + 1000);
+      await client.removeObjects(minio.bucket, batch).catch(async () => {
+        await Promise.all(batch.map((key) => client.removeObject(minio.bucket, key).catch(() => {})));
+      });
+    }
+  }
+  for (const prefix of collapsedPrefixes) {
+    for (const root of [
+      path.join(storageRoot, "object-store-fallback"),
+      path.join(fallbackStorageRoot, "object-store-fallback"),
+      path.join(__dirname, "..", "object-store-fallback"),
+    ]) {
+      fs.rmSync(path.join(root, ...prefix.split("/").filter(Boolean)), { recursive: true, force: true });
+    }
+  }
+  for (const key of keys.filter((item) => !collapsedPrefixes.some((prefix) => item.startsWith(prefix)))) {
+    for (const filePath of [fallbackPath(key), secondaryFallbackPath(key), legacyFallbackPath(key)]) {
+      fs.rmSync(filePath, { force: true });
+    }
+  }
 }
 
 async function objectSize(objectKey) {
@@ -293,5 +321,5 @@ function extOf(filePath) {
   return path.extname(filePath).toLowerCase() || ".bin";
 }
 
-module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, removeObjects, extOf, localFallbackPath, bucket: minio.bucket };
 

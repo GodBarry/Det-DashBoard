@@ -45,6 +45,10 @@ const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
 
 const [evaluation, setEvaluation] = useState(null);
 
+const [evaluationCache, setEvaluationCache] = useState(() => new Map());
+
+const [evaluationRefreshToken, setEvaluationRefreshToken] = useState(0);
+
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
 
 const [errorFilter, setErrorFilter] = useState("false_negative");
@@ -102,14 +106,25 @@ return;
 let ignore = false;
 
 Promise.all(selectedJobs.map((job) => Promise.all([
-  fetch("/api/ml/inference-jobs/" + job.id + "/results").then((response) => response.json()),
-  fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).results)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/results?limit=60").then((response) => response.json()),
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).evaluation)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
 ]))).then((payloads) => {
 
 if (ignore) return;
 
 const results = payloads.flatMap(([resultsData], jobIndex) => (resultsData.results || []).map((row) => ({ ...row, source_job_id: selectedJobs[jobIndex].id })));
 const evaluations = payloads.map(([, evaluationData]) => evaluationData.evaluation).filter(Boolean);
+setEvaluationCache((current) => {
+  const next = new Map(current);
+  payloads.forEach(([resultsData, evaluationData], index) => {
+    next.set(selectedJobs[index].id, { results: resultsData, evaluation: evaluationData });
+  });
+  return next;
+});
 const first = evaluations[0] || null;
 setPreviewRows(results);
 if (evaluations.length <= 1) {
@@ -154,7 +169,7 @@ setEvaluation(null);
 
 return () => { ignore = true; };
 
-}, [selectedJobKey]);
+}, [selectedJobKey, evaluationRefreshToken]);
 
 useEffect(() => {
   setSelectedTaskIds((current) => new Set(Array.from(current).filter((id) => tasks.some((task) => task.id === id))));
@@ -166,6 +181,18 @@ const toggleTaskSelection = (taskId) => {
     if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
     return next;
   });
+};
+
+const refreshSelectedEvaluations = () => {
+  const ids = selectedJobs.map((job) => job.id);
+  setEvaluationCache((current) => {
+    const next = new Map(current);
+    ids.forEach((id) => next.delete(id));
+    return next;
+  });
+  setEvaluation(null);
+  setPreviewRows([]);
+  setEvaluationRefreshToken((value) => value + 1);
 };
 
 const metrics = { ...storedMetrics, ...(evaluation?.summary || {}), avg_iou: evaluation?.summary?.avgIou ?? storedMetrics.avg_iou };
@@ -196,19 +223,24 @@ const kpis = [
 
 ];
 
-const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => Number(b.ap50 || 0) - Number(a.ap50 || 0));
+const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => {
+  if (a.evaluable !== b.evaluable) return a.evaluable ? -1 : 1;
+  return Number(b.ap50 || 0) - Number(a.ap50 || 0);
+});
 
   const classRows = allClassRows.slice(0, 8);
 
-const rankRows = allClassRows.length > 8 && allClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
+const evaluableClassRows = allClassRows.filter((row) => row.evaluable && row.ap50 != null);
 
-? [...allClassRows.slice(0, 4), ...allClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+const rankRows = evaluableClassRows.length > 8 && evaluableClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
 
-: classRows;
+? [...evaluableClassRows.slice(0, 4), ...evaluableClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+
+: evaluableClassRows.slice(0, 8);
 
 const curves = evaluation?.curves || [];
 
-  const weakestClass = allClassRows.filter((row) => Number.isFinite(Number(row.ap50))).slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
+  const weakestClass = evaluableClassRows.slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
 
 const insightRows = evaluation?.evaluated ? [
 
@@ -316,7 +348,7 @@ return (
 
 <div className="workspace-path-row"><FolderOpen size={15} /><span>推理记录</span><ChevronRight size={13} /><b>{selectedTask?.name || "评估结果"}</b><ChevronRight size={13} /><b>评估结果</b></div>
 
-<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={() => setSelectedTaskId(selectedJob.id)}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
+<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={refreshSelectedEvaluations}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
 
 </div>
 
@@ -366,7 +398,7 @@ return (
 
 <h3>类别指标明细</h3><div className="evaluation-class-table"><b>类别</b><b>GT</b><b>预测</b><b>TP</b><b>FP</b><b>FN</b><b>Precision</b><b>Recall</b><b>AP50</b>
 
-{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{formatMetric(row.precision)}</span><span>{formatMetric(row.recall)}</span><span>{formatMetric(row.ap50)}</span></React.Fragment>)}
+{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{row.precision == null ? "--" : formatMetric(row.precision)}</span><span>{row.recall == null ? "无真值" : formatMetric(row.recall)}</span><span>{row.ap50 == null ? "无真值" : formatMetric(row.ap50)}</span></React.Fragment>)}
 
 </div></div>}
 

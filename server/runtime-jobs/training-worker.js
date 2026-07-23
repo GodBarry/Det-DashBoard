@@ -8,6 +8,7 @@ const {
 } = require("../training-format");
 const { exportBaseName, cleanName } = require("../utils");
 const { isMosaicAnnotation, mosaicPixelSize } = require("../annotation/special-labels");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeClassName, normalizeRecognitionClasses } = require("../recognition-classes");
 
 function createTrainingWorker({
   query,
@@ -45,6 +46,14 @@ function createTrainingWorker({
       test: requested.testProjectIds,
     };
     const datasetFilters = normalizeTrainingDatasetFilters({}, params);
+    const recognitionClasses = normalizeRecognitionClasses(params.recognitionClasses);
+    const classMappings = normalizeClassMappings(params.classMappings, recognitionClasses);
+    const classLookup = classMappingLookup(classMappings, recognitionClasses);
+    const labels = mappedRecognitionClasses(classMappings, recognitionClasses);
+    const mapAnnotation = (ann) => {
+      const label = mapClassName(ann.label, classLookup);
+      return label ? { ...ann, label, original_label: ann.label } : null;
+    };
     if (!splitProjectIds.train.length) throw new Error("Training split project is required");
     const selectedIds = [...new Set(Object.values(splitProjectIds).flat())];
     const projects = (await query("SELECT * FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedIds])).rows;
@@ -71,10 +80,9 @@ function createTrainingWorker({
        WHERE pi.project_id=ANY($1::uuid[]) AND a.label_version_id=p.active_label_version_id ORDER BY a.label, a.id`,
       [selectedIds],
     )).rows;
-    const targetAnnRows = annRows.filter((ann) => !isMosaicAnnotation(ann));
-    const labels = [...new Set(targetAnnRows.map((ann) => String(ann.label || "unknown")))].sort((a, b) => a.localeCompare(b));
-    if (!labels.length) throw new Error("Selected dataset splits have no annotations");
-    const labelToIndex = new Map(labels.map((label, index) => [label, index]));
+    const targetAnnRows = annRows.filter((ann) => !isMosaicAnnotation(ann)).map(mapAnnotation).filter(Boolean);
+    if (!targetAnnRows.length) throw new Error("Selected dataset splits have no annotations for the configured recognition classes");
+    const labelToIndex = new Map(labels.map((label, index) => [normalizeClassName(label), index]));
     const annsByImage = new Map();
     for (const ann of annRows) {
       const key = String(ann.project_image_id);
@@ -99,10 +107,11 @@ function createTrainingWorker({
     for (let index = 0; index < deduplicatedRows.length; index += 1) {
       const item = deduplicatedRows[index];
       const allAnnotations = annsByImage.get(String(item.id)) || [];
-      const annotations = allAnnotations.filter((ann) => !isMosaicAnnotation(ann));
+      const sourceAnnotations = allAnnotations.filter((ann) => !isMosaicAnnotation(ann));
+      const annotations = sourceAnnotations.map(mapAnnotation).filter(Boolean);
       const mosaicRegions = allAnnotations.filter(isMosaicAnnotation);
       const matchingParts = ["train", "val", "test"].filter((part) =>
-        splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, annotations, datasetFilters[part]));
+        splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, sourceAnnotations, datasetFilters[part]));
       if (matchingParts.length > 1) {
         throw new Error(`Dataset split filters overlap: image ${item.display_name || item.id} matches ${matchingParts.join(", ")}`);
       }
@@ -143,11 +152,11 @@ function createTrainingWorker({
           fs.renameSync(temporaryPath, snapshotImagePath);
         }
       }
-      const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
+      const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(normalizeClassName(ann.label)) ?? 0));
       fs.writeFileSync(path.join(snapshotRoot, "labels", part, `${base}.txt`), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
       cocoBySplit[part].images.push({ id: String(item.id), file_name: imageName, width: Number(item.width || 0), height: Number(item.height || 0) });
       for (const ann of annotations) cocoBySplit[part].annotations.push({
-        id: annotationId++, image_id: String(item.id), category_id: (labelToIndex.get(String(ann.label || "unknown")) ?? 0) + 1,
+        id: annotationId++, image_id: String(item.id), category_id: (labelToIndex.get(normalizeClassName(ann.label)) ?? 0) + 1,
         bbox: [Number(ann.bbox_x || 0), Number(ann.bbox_y || 0), Number(ann.bbox_w || 0), Number(ann.bbox_h || 0)],
         area: Number(ann.bbox_w || 0) * Number(ann.bbox_h || 0), iscrowd: 0,
       });
@@ -162,12 +171,12 @@ function createTrainingWorker({
     const includedImageIds = new Set(Object.values(cocoBySplit).flatMap((coco) => coco.images.map((image) => String(image.id))));
     const annotationCount = targetAnnRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
     if (!split.train) throw new Error("Training filters produced an empty train split");
-    fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
+    fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, recognitionClasses, classMappings, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
     const snapshot = (await query(
       `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
        VALUES ($1,$2,$3,'yolo+coco',$4,$5,$6,$7,$8) RETURNING *`,
       [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, imageCount, annotationCount,
-        JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
+        JSON.stringify({ labels, recognitionClasses, classMappings, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
     )).rows[0];
     await resourceAccess.assignOwner("dataset_snapshots", snapshot.id, { id: job.created_by_user_id });
     await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);

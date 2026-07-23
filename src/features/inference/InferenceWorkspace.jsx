@@ -28,6 +28,8 @@ import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
+import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
 import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
@@ -136,6 +138,13 @@ const inferenceMetadataValues = (key) => Array.from(new Set(projects.flatMap((pr
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
 const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), views: inferenceMetadataValues("views"), modalities: inferenceMetadataValues("modalities"), labels: inferenceMetadataValues("labels") };
+const selectedInferenceProjectIds = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean);
+const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => selectedInferenceProjectIds.includes(project.id)).flatMap((project) => {
+  const value = project.labels;
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
+}).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
 
@@ -703,6 +712,14 @@ return (
             <span className="dataset-source-kind"><Database size={14} />数据集</span>
             <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={(projectIds) => setInferenceForm({ ...inferenceForm, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" })} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
           </div>
+          <div className="config-row recognition-class-row">
+            <span className="row-label">识别类别</span>
+            <RecognitionClassPicker values={inferenceForm.recognitionClasses} onChange={(recognitionClasses) => setInferenceForm((current) => ({ ...current, recognitionClasses }))} />
+          </div>
+          <div className="config-row class-mapping-config-row">
+            <span className="row-label">类别映射</span>
+            <ClassMappingPicker availableSources={selectedInferenceLabels} defaultTargets={inferenceForm.recognitionClasses} configured={inferenceForm.classMappingsConfigured} mappings={inferenceForm.classMappings} onChange={({ configured, mappings }) => setInferenceForm((current) => ({ ...current, classMappingsConfigured: configured, classMappings: mappings, ...(configured && mappings.length ? { recognitionClasses: mappings.map((row) => row.target) } : {}) }))} />
+          </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
             <select value={inferenceForm.inputViews} onChange={(e) => setField("inputViews", e.target.value)}><option value="">视角：全部</option>{inferenceFilterOptions.views.map((value) => <option key={value} value={value}>{metadataLabel(value, "view")}</option>)}</select>
@@ -853,7 +870,7 @@ return (
                       key={prediction.id || predictionIndex}
                       style={{ ...boxStyle, borderColor: color, "--box-color": color }}
                     >
-                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(0)}%</small>}
+                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(2)}%</small>}
                     </i>
                   );
                 })}

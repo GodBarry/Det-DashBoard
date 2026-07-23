@@ -31,6 +31,7 @@ export function useDatasetImportController({
   const [dirPicker, setDirPicker] = useState(null);
   const [dirPickerBusy, setDirPickerBusy] = useState(false);
   const [importMode, setImportMode] = useState("merge_project");
+  const [importStrategy, setImportStrategy] = useState("incremental");
 
   function splitImportPaths(value) {
     return Array.from(new Set(String(value || "").split(";").map((item) => item.trim()).filter(Boolean)));
@@ -139,7 +140,7 @@ export function useDatasetImportController({
     fetch("/api/imports", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: activeProject.id, sourcePath: paths[0], sourcePaths: paths, rename: true, importMode }),
+      body: JSON.stringify({ projectId: activeProject.id, sourcePath: paths[0], sourcePaths: paths, rename: true, importMode, importStrategy }),
     })
       .then((r) => readImportResponse(r))
       .then((d) => {
@@ -160,6 +161,8 @@ export function useDatasetImportController({
     parsedImportPaths,
     importMode,
     setImportMode,
+    importStrategy,
+    setImportStrategy,
     importPath,
     setImportPath,
     browseFolder,

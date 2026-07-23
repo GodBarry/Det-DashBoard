@@ -1,3 +1,5 @@
+const { classMappingLookup, mapClassName, mapPredictionClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeRecognitionClasses } = require("../recognition-classes");
+
 function createRuntimeJobService({
   query,
   scopedSql,
@@ -223,11 +225,22 @@ function createRuntimeJobService({
     try {
       const scoped = scopedSql("runtime_inference_jobs", "ij", actor, scope);
       const rows = await query(
-        `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
+        `WITH RECURSIVE project_paths AS (
+           SELECT p.id, p.parent_id, p.name::text AS path, 1 AS depth
+           FROM projects p
+           WHERE p.parent_id IS NULL
+           UNION ALL
+           SELECT child.id, child.parent_id, (project_paths.path || '/' || child.name)::text AS path, project_paths.depth + 1
+           FROM projects child
+           JOIN project_paths ON project_paths.id = child.parent_id
+           WHERE project_paths.depth < 8
+         )
+         SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name, pp.path AS dataset_project_path
          FROM runtime_inference_jobs ij
          LEFT JOIN model_revisions mv ON mv.id=ij.model_version_id
          LEFT JOIN model_clusters m ON m.id=mv.model_id
          LEFT JOIN projects p ON p.id=ij.dataset_project_id
+         LEFT JOIN project_paths pp ON pp.id=ij.dataset_project_id
          WHERE ${scoped.sql}
          ORDER BY ij.priority DESC, ij.created_at DESC, ij.id DESC
          LIMIT 200`,
@@ -240,6 +253,7 @@ function createRuntimeJobService({
         const metrics = Object.keys(storedMetrics || {}).length ? storedMetrics : outputMetrics;
         return {
           ...row,
+          dataset_project_name: row.dataset_project_path || row.dataset_project_name,
           metrics_json: metrics,
           image_count: Number(metrics.images ?? params?.output?.resultCount ?? params?.input?.imageCount ?? 0),
           prediction_count: Number(metrics.predictions ?? params?.output?.predictionCount ?? 0),
@@ -254,23 +268,46 @@ function createRuntimeJobService({
     }
   }
 
-  async function listInferenceResults(jobId) {
+  async function listInferenceResults(jobId, options = {}) {
+    const requestedLimit = options.limit === null ? null : Math.max(1, Math.min(5000, Number(options.limit) || 500));
     const rows = await query(
-      `SELECT ir.*, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
+      `SELECT ir.*, ij.params_json AS job_params_json, pi.id AS project_image_id, pi.display_name, pi.scene, pi.view, pi.modality,
               ia.width AS image_width, ia.height AS image_height
        FROM runtime_inference_results ir
+       JOIN runtime_inference_jobs ij ON ij.id=ir.inference_job_id
        LEFT JOIN project_images pi ON pi.id=ir.project_image_id
        LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
        WHERE ir.inference_job_id=$1
        ORDER BY ir.created_at, ir.id
-       LIMIT 500`,
+       ${requestedLimit === null ? "" : "LIMIT $2"}`,
+      requestedLimit === null ? [jobId] : [jobId, requestedLimit],
+    );
+    return rows.rows.map((row) => {
+      const params = typeof row.job_params_json === "string" ? JSON.parse(row.job_params_json || "{}") : (row.job_params_json || {});
+      const mappings = normalizeClassMappings(params.classMappings, params.recognitionClasses);
+      const lookup = classMappingLookup(mappings, params.recognitionClasses);
+      const targets = mappedRecognitionClasses(mappings, params.recognitionClasses);
+      return {
+        ...row,
+        predictions_json: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
+          .map((prediction) => {
+            const label = mapPredictionClassName(prediction.label, lookup, targets);
+            return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
+          }).filter(Boolean),
+        thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
+        image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
+      };
+    });
+  }
+
+  async function listInferencePredictionRows(jobId) {
+    const rows = await query(
+      `SELECT project_image_id, predictions_json
+       FROM runtime_inference_results
+       WHERE inference_job_id=$1 AND project_image_id IS NOT NULL`,
       [jobId],
     );
-    return rows.rows.map((row) => ({
-      ...row,
-      thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
-      image_url: row.project_image_id ? `/api/project-images/${row.project_image_id}` : "",
-    }));
+    return rows.rows;
   }
 
   async function listInferenceLogs(jobId) {
@@ -284,25 +321,42 @@ function createRuntimeJobService({
   async function getInferenceEvaluation(jobId) {
     const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [jobId])).rows[0];
     if (!job) throw httpError(404, "inference job not found");
-    const resultRows = await listInferenceResults(jobId);
+    const jobParams = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    const classMappings = normalizeClassMappings(jobParams.classMappings, jobParams.recognitionClasses);
+    const classLookup = classMappingLookup(classMappings, jobParams.recognitionClasses);
+    const recognitionClasses = mappedRecognitionClasses(classMappings, normalizeRecognitionClasses(jobParams.recognitionClasses));
+    const resultRows = await listInferencePredictionRows(jobId);
     const predictionRows = resultRows.map((row) => ({
       projectImageId: row.project_image_id,
-      predictions: Array.isArray(row.predictions_json) ? row.predictions_json : [],
+      predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
+        .map((prediction) => {
+          const label = mapPredictionClassName(prediction.label, classLookup, recognitionClasses);
+          return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
+        }).filter(Boolean),
     }));
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
-    const project = job.dataset_project_id
-      ? (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0]
-      : null;
     let groundTruthRows = [];
-    if (project?.active_label_version_id && imageIds.length) {
+    if (imageIds.length) {
       groundTruthRows = (await query(
-        "SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h FROM image_annotations WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[]) AND lower(trim(label)) <> 'mosaic'",
-        [project.active_label_version_id, imageIds],
-      )).rows;
+        `SELECT a.project_image_id, a.label_version_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+         FROM image_annotations a
+         JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+         JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL AND p.active_label_version_id=a.label_version_id
+         WHERE a.project_image_id = ANY($1::uuid[]) AND lower(trim(a.label)) <> 'mosaic'`,
+        [imageIds],
+      )).rows.map((row) => {
+        const label = mapClassName(row.label, classLookup);
+        return label ? { ...row, label, original_label: row.label } : null;
+      }).filter(Boolean);
     }
     const labeledImageIds = new Set(groundTruthRows.map((row) => String(row.project_image_id)));
     const evaluationRows = predictionRows.filter((row) => labeledImageIds.has(String(row.projectImageId)));
-    const evaluation = evaluateDetections({ predictionRows: evaluationRows, groundTruthRows, iouThreshold: 0.5 });
+    const evaluation = evaluateDetections({
+      predictionRows: evaluationRows,
+      groundTruthRows,
+      iouThreshold: 0.5,
+      expectedLabels: recognitionClasses,
+    });
     evaluation.summary = {
       ...(evaluation.summary || {}),
       inferenceImages: predictionRows.length,
@@ -310,23 +364,35 @@ function createRuntimeJobService({
       skippedUnlabeledImages: predictionRows.length - evaluationRows.length,
     };
     const resultByImage = new Map(resultRows.map((row) => [row.project_image_id, row]));
+    const errorImageIds = Array.from(new Set((evaluation.errors || []).map((row) => row.projectImageId).filter(Boolean)));
+    const imageInfoRows = errorImageIds.length ? (await query(
+      `SELECT pi.id AS project_image_id, pi.display_name, ia.width AS image_width, ia.height AS image_height
+       FROM project_images pi
+       LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
+       WHERE pi.id = ANY($1::uuid[])`,
+      [errorImageIds],
+    )).rows : [];
+    const imageInfoById = new Map(imageInfoRows.map((row) => [row.project_image_id, row]));
     return {
       ...evaluation,
       jobId,
-      labelVersionId: project?.active_label_version_id || null,
+      recognitionClasses,
+      classMappings,
+      labelVersionIds: Array.from(new Set(groundTruthRows.map((row) => row.label_version_id).filter(Boolean))),
       reason: groundTruthRows.length
         ? "仅对存在真值标注的图片进行评估；未标注图片的推理结果仍已保存"
         : "推理结果已保存，但当前数据集没有可用于评估的活动标签版本或标注",
       errors: evaluation.errors.map((row) => {
         const source = resultByImage.get(row.projectImageId) || {};
+        const imageInfo = imageInfoById.get(row.projectImageId) || {};
         return {
           ...row,
-          display_name: source.display_name || source.project_image_id || "图片结果",
-          thumb_url: source.thumb_url || "",
-          image_url: source.image_url || "",
+          display_name: imageInfo.display_name || source.project_image_id || "图片结果",
+          thumb_url: row.projectImageId ? `/api/project-images/${row.projectImageId}/thumb` : "",
+          image_url: row.projectImageId ? `/api/project-images/${row.projectImageId}` : "",
           predictions_json: source.predictions_json || [],
-          image_width: source.image_width || 0,
-          image_height: source.image_height || 0,
+          image_width: imageInfo.image_width || 0,
+          image_height: imageInfo.image_height || 0,
         };
       }),
     };

@@ -1,8 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
-const { createImportService } = require("../../server/dataset/import-service");
+const { createImportService, createRawLabelArchive } = require("../../server/dataset/import-service");
 
 function emptySplitPlan() {
   return Object.fromEntries(["train", "val", "test"].map((split) => [split, { files: new Set(), directories: new Set() }]));
@@ -37,7 +40,7 @@ function createFixture(overrides = {}) {
     VIDEO_EXTS: new Set([".mp4"]),
     walk: overrides.walk || (() => []),
     walkAsync: overrides.walkAsync || (async () => []),
-    hashFile: async () => "sha",
+    hashFile: overrides.hashFile || (async () => "sha"),
     quickHash: () => "quick",
     inferModality: () => "visible",
     inferSceneFromPath: () => "UnknownScene",
@@ -88,7 +91,7 @@ test("importPath preserves creation transaction, ownership, lifecycle, and respo
     ["project-1"],
     ["project-1"],
     ["project-1"],
-    ["project-1", "display:C:\\data", "merge_project", "正在扫描文件"],
+    ["project-1", "display:C:\\data", "merge_project", "incremental", "正在扫描文件"],
   ]);
   assert.deepEqual(ownerCalls, [["import_batches", "batch-1", actor]]);
   assert.equal(tracked.length, 1);
@@ -200,4 +203,60 @@ test("runImportBatch propagates scanner failures unchanged", async () => {
     service.runImportBatch("batch-1", { id: "project-1", owner_user_id: "owner-1" }, { sourcePath: "C:\\data" }),
     (error) => error === failure,
   );
+});
+
+test("upsertImageAsset reuses an unambiguous quick-hash match without full hashing", async () => {
+  const calls = [];
+  let fullHashCalls = 0;
+  const existing = {
+    id: "asset-1",
+    quick_hash: "quick",
+    file_size: 123,
+    object_key: "objects/images/existing.jpg",
+    width: 640,
+    height: 480,
+  };
+  const { service } = createFixture({
+    fs: { statSync: () => ({ size: 123 }) },
+    hashFile: async () => { fullHashCalls += 1; return "sha"; },
+    store: { objectSize: async () => 123, putFile: async () => assert.fail("must not upload a reused asset") },
+  });
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes("WHERE quick_hash=$1")) return { rows: [existing] };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  const row = await service.upsertImageAsset(client, "C:\\data\\one.jpg");
+
+  assert.equal(row, existing);
+  assert.equal(fullHashCalls, 0);
+  assert.deepEqual(calls[0].params, ["quick", 123]);
+});
+
+test("createRawLabelArchive stores nested unicode label files in one streaming archive", async () => {
+  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-import-source-"));
+  const nested = path.join(sourceRoot, "标签");
+  fs.mkdirSync(nested, { recursive: true });
+  const first = path.join(nested, "one.json");
+  const second = path.join(sourceRoot, "two.json");
+  fs.writeFileSync(first, '{"label":"tank"}', "utf8");
+  fs.writeFileSync(second, '{"label":"car"}', "utf8");
+  let archive;
+  try {
+    archive = await createRawLabelArchive(fs, path, sourceRoot, [first, second]);
+    assert.equal(archive.fileCount, 2);
+    assert.ok(fs.statSync(archive.archivePath).size > 0);
+    const records = zlib.gunzipSync(fs.readFileSync(archive.archivePath)).toString("utf8")
+      .trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(records, [
+      { path: "标签/one.json", content: '{"label":"tank"}' },
+      { path: "two.json", content: '{"label":"car"}' },
+    ]);
+  } finally {
+    if (archive?.tempRoot) fs.rmSync(archive.tempRoot, { recursive: true, force: true });
+    fs.rmSync(sourceRoot, { recursive: true, force: true });
+  }
 });

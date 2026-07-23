@@ -1,4 +1,32 @@
 const { importedAnnotationAttributes } = require("../annotation/special-labels");
+const os = require("node:os");
+const zlib = require("node:zlib");
+const { once } = require("node:events");
+const { finished } = require("node:stream/promises");
+
+async function createRawLabelArchive(fs, path, sourceRoot, labelFiles) {
+  if (!labelFiles.length) return null;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-dashboard-labels-"));
+  const archivePath = path.join(tempRoot, "raw-labels.jsonl.gz");
+  const output = fs.createWriteStream(archivePath);
+  const gzip = zlib.createGzip({ level: 1 });
+  gzip.pipe(output);
+  try {
+    for (const file of labelFiles) {
+      const relativePath = path.relative(sourceRoot, file).split(path.sep).join("/");
+      const line = `${JSON.stringify({ path: relativePath, content: fs.readFileSync(file, "utf8") })}\n`;
+      if (!gzip.write(line, "utf8")) await once(gzip, "drain");
+    }
+    gzip.end();
+    await finished(output);
+    return { archivePath, tempRoot, fileCount: labelFiles.length };
+  } catch (error) {
+    gzip.destroy();
+    output.destroy();
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    throw new Error(`原始标注归档失败：${error.message}`);
+  }
+}
 
 function createImportService(deps) {
   const {
@@ -65,10 +93,28 @@ function createImportService(deps) {
   async function upsertImageAsset(client, filePath, meta = {}) {
     const stat = fs.statSync(filePath);
     const qh = quickHash(filePath);
-    const sha = await hashFile(filePath);
     const ext = path.extname(filePath).toLowerCase() || ".jpg";
     let width = Number(meta.imageWidth) || null;
     let height = Number(meta.imageHeight) || null;
+    const quickMatches = await client.query(
+      "SELECT * FROM image_assets WHERE quick_hash=$1 AND file_size=$2 ORDER BY id LIMIT 2",
+      [qh, stat.size],
+    );
+    if (quickMatches.rows.length === 1) {
+      let row = quickMatches.rows[0];
+      const storedSize = await store.objectSize(row.object_key).catch(() => -1);
+      if (storedSize === Number(row.file_size || stat.size)) {
+        if ((!row.width && width) || (!row.height && height)) {
+          row = (await client.query(
+            "UPDATE image_assets SET width=COALESCE(width,$1), height=COALESCE(height,$2) WHERE id=$3 RETURNING *",
+            [width, height, row.id],
+          )).rows[0];
+        }
+        return row;
+      }
+    }
+
+    const sha = await hashFile(filePath);
     if (!width || !height) {
       try {
         const imageMeta = await sharp(filePath).metadata();
@@ -154,9 +200,15 @@ function createImportService(deps) {
         throw error;
       }
       const batchRow = (await client.query(
-        `INSERT INTO import_batches (project_id, source_path, import_mode, source_type, status, total_files, processed_files, message)
-         VALUES ($1,$2,$3,'server_path','scanning',0,0,$4) RETURNING *`,
-        [projectId, sourcePaths.map((sourcePath) => toDisplayDataPath(sourcePath)).join(";"), body.importMode === "preserve_structure" ? "preserve_structure" : "merge_project", "正在扫描文件"],
+        `INSERT INTO import_batches (project_id, source_path, import_mode, import_strategy, source_type, status, total_files, processed_files, message)
+         VALUES ($1,$2,$3,$4,'server_path','scanning',0,0,$5) RETURNING *`,
+        [
+          projectId,
+          sourcePaths.map((sourcePath) => toDisplayDataPath(sourcePath)).join(";"),
+          body.importMode === "preserve_structure" ? "preserve_structure" : "merge_project",
+          ["incremental", "labels_only", "strict"].includes(body.importStrategy) ? body.importStrategy : "incremental",
+          "正在扫描文件",
+        ],
       )).rows[0];
       return { project: projectRow, batch: batchRow };
     });
@@ -227,7 +279,6 @@ function createImportService(deps) {
     const images = sourceGroups.flatMap((group) => group.images.map((file) => ({ file, sourceRoot: group.sourceRoot, matches: group.matches })));
     const videos = sourceGroups.flatMap((group) => group.videos.map((file) => ({ file, sourceRoot: group.sourceRoot })));
     const unresolved = sourceGroups.flatMap((group) => group.unresolved || []);
-    const usedLabelFiles = sourceGroups.flatMap((group) => (group.usedLabelFiles || []).map((file) => ({ file, sourceRoot: group.sourceRoot })));
     const formatCounts = sourceGroups.reduce((acc, group) => {
       acc.labelme += group.formatCounts?.labelme || 0;
       acc.coco += group.formatCounts?.coco || 0;
@@ -264,14 +315,31 @@ function createImportService(deps) {
       await query("UPDATE projects SET active_label_version_id=$1, updated_at=now() WHERE id=$2", [version.id, targetProjectId]);
     }
 
-    for (const item of usedLabelFiles) {
-      const relative = path.relative(item.sourceRoot, item.file).replace(/\.\.(?:[\\/]|$)/g, "").replace(/[\\/]+/g, "__");
-      for (const [targetProjectId, version] of versionsByProject) {
-        await store.putFile(rawLabelObjectKey(targetProjectId, version.id, relative || path.basename(item.file)), item.file);
+    for (let sourceIndex = 0; sourceIndex < sourceGroups.length; sourceIndex += 1) {
+      const group = sourceGroups[sourceIndex];
+      const labelFiles = Array.from(group.usedLabelFiles || []);
+      if (!labelFiles.length) continue;
+      await query(
+        "UPDATE import_batches SET message=$1 WHERE id=$2",
+        [`正在归档原始标注：${sourceIndex + 1} / ${sourceGroups.length}（${labelFiles.length} 文件）`, batchId],
+      );
+      const archive = await createRawLabelArchive(fs, path, group.sourceRoot, labelFiles);
+      try {
+        for (const [targetProjectId, version] of versionsByProject) {
+          const archiveName = sourceGroups.length === 1 ? "raw-labels.jsonl.gz" : `raw-labels-${sourceIndex + 1}.jsonl.gz`;
+          await store.putFile(rawLabelObjectKey(targetProjectId, version.id, archiveName), archive.archivePath);
+        }
+      } finally {
+        fs.rmSync(archive.tempRoot, { recursive: true, force: true });
       }
     }
 
+    const importStrategy = ["incremental", "labels_only", "strict"].includes(body.importStrategy)
+      ? body.importStrategy
+      : "incremental";
     let imageCount = 0;
+    let reusedImageCount = 0;
+    let labelOnlySkippedCount = 0;
     let annCount = 0;
     let unlabeledImageCount = 0;
     const actualSplitCounts = { train: 0, val: 0, test: 0 };
@@ -288,7 +356,36 @@ function createImportService(deps) {
       const version = versionsByProject.get(String(targetProjectId));
       const meta = matched?.meta || {};
       const scene = inferSceneFromPath(meta, imageFile, imageEntry.sourceRoot);
-      const asset = await upsertImageAsset(client, imageFile, meta);
+      const sourcePath = toDisplayDataPath(imageFile);
+      const sourceStat = fs.statSync(imageFile);
+      const existingProjectImage = (await client.query(
+        `SELECT pi.*, ia.width AS asset_width, ia.height AS asset_height
+         FROM project_images pi
+         JOIN image_assets ia ON ia.id=pi.image_asset_id
+         WHERE pi.project_id=$1 AND pi.source_path=$2 AND pi.deleted_at IS NULL
+         ORDER BY pi.created_at DESC LIMIT 1`,
+        [targetProjectId, sourcePath],
+      )).rows[0];
+      const sourceUnchanged = existingProjectImage
+        && Number(existingProjectImage.source_size) === Number(sourceStat.size)
+        && Number(existingProjectImage.source_mtime_ms) === Math.trunc(Number(sourceStat.mtimeMs));
+      if (importStrategy === "labels_only" && !existingProjectImage) {
+        unresolved.push({ labelFile: matched?.labelFile || "", reason: "label_only_image_not_found", imageFile });
+        labelOnlySkippedCount += 1;
+        imageCount += 1;
+        continue;
+      }
+      let asset;
+      if ((importStrategy === "labels_only" && existingProjectImage) || (importStrategy === "incremental" && sourceUnchanged)) {
+        asset = {
+          id: existingProjectImage.image_asset_id,
+          width: existingProjectImage.asset_width,
+          height: existingProjectImage.asset_height,
+        };
+        reusedImageCount += 1;
+      } else {
+        asset = await upsertImageAsset(client, imageFile, meta);
+      }
       const modality = inferModality(meta, imageFile);
       const displayName = body.rename
         ? `${cleanName(meta.view, "UnknownView")}_${cleanName(scene, "UnknownScene")}_${modality === "infrared" ? "IR" : "VIS"}_${String(imageCount + 1).padStart(6, "0")}${path.extname(imageFile).toLowerCase()}`
@@ -298,11 +395,14 @@ function createImportService(deps) {
         imageAssetId: asset.id,
         importBatchId: batchId,
         displayName,
-        sourcePath: toDisplayDataPath(imageFile),
+        sourcePath,
+        sourceSize: sourceStat.size,
+        sourceMtimeMs: Math.trunc(Number(sourceStat.mtimeMs)),
         scene,
         view: meta.view || "UnknownView",
         modality,
         keyword: meta.keyword || "",
+        existingProjectImageId: existingProjectImage?.id || null,
       });
       const shapes = Array.isArray(meta.shapes) ? meta.shapes : [];
       if (!shapes.length) unlabeledImageCount += 1;
@@ -351,7 +451,12 @@ function createImportService(deps) {
     const splitMessage = splitResult.detected
       ? `；划分 ${Object.entries(splitResult.splits).map(([name, value]) => `${name}:${value.listedImages}`).join("，")}`
       : "";
-    const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}${splitMessage}`;
+    const strategyMessage = importStrategy === "labels_only"
+      ? `；仅更新标签，复用 ${reusedImageCount} 图片，跳过 ${labelOnlySkippedCount} 张未登记图片`
+      : importStrategy === "incremental"
+        ? `；智能增量复用 ${reusedImageCount} 张未变化图片`
+        : "；严格内容校验";
+    const message = `导入完成：${imageCount} 图片，${unlabeledImageCount} 无目标图片，${videoCount} 视频，${annCount} 标注，${unresolved.length} 条警告；LabelMe ${formatCounts.labelme}，COCO ${formatCounts.coco}，YOLO ${formatCounts.yolo}${splitMessage}${strategyMessage}`;
     await query("UPDATE import_batches SET status='done', processed_files=$1, message=$2, finished_at=now() WHERE id=$3", [images.length + videos.length, message, batchId]);
   }
 
@@ -366,10 +471,31 @@ function createImportService(deps) {
       image.view,
       image.modality,
       image.keyword,
+      image.sourceSize ?? null,
+      image.sourceMtimeMs ?? null,
     ];
+    if (image.existingProjectImageId) {
+      return (await client.query(
+        `UPDATE project_images
+         SET image_asset_id=$2,
+             import_batch_id=$3,
+             display_name=$4,
+             source_path=$5,
+             scene=$6,
+             view=$7,
+             modality=$8,
+             keyword=$9,
+             source_size=$10,
+             source_mtime_ms=$11,
+             deleted_at=NULL
+         WHERE id=$12 AND project_id=$1
+         RETURNING *`,
+        [...params, image.existingProjectImageId],
+      )).rows[0];
+    }
     const upsertSql = `
-      INSERT INTO project_images (project_id, image_asset_id, import_batch_id, display_name, source_path, scene, view, modality, keyword)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      INSERT INTO project_images (project_id, image_asset_id, import_batch_id, display_name, source_path, scene, view, modality, keyword, source_size, source_mtime_ms)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       ON CONFLICT (project_id, image_asset_id, display_name)
       DO UPDATE SET
         import_batch_id=EXCLUDED.import_batch_id,
@@ -378,6 +504,8 @@ function createImportService(deps) {
         view=EXCLUDED.view,
         modality=EXCLUDED.modality,
         keyword=EXCLUDED.keyword,
+        source_size=EXCLUDED.source_size,
+        source_mtime_ms=EXCLUDED.source_mtime_ms,
         deleted_at=NULL
       RETURNING *`;
     try {
@@ -392,6 +520,8 @@ function createImportService(deps) {
              view=$7,
              modality=$8,
              keyword=$9,
+             source_size=$10,
+             source_mtime_ms=$11,
              deleted_at=NULL
          WHERE project_id=$1 AND image_asset_id=$2 AND display_name=$4
          RETURNING *`,
@@ -457,4 +587,4 @@ function createImportService(deps) {
   };
 }
 
-module.exports = { createImportService };
+module.exports = { createImportService, createRawLabelArchive };
