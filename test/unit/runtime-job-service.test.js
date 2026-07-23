@@ -405,6 +405,16 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
         }],
       };
     }
+    if (sql.includes("FROM project_images pi") && sql.includes("LEFT JOIN image_assets")) {
+      return {
+        rows: [{
+          project_image_id: "image-labeled",
+          display_name: "Labeled",
+          image_width: 1280,
+          image_height: 720,
+        }],
+      };
+    }
     throw new Error(`Unexpected query: ${sql}`);
   }, {
     evaluateDetections: (input) => {

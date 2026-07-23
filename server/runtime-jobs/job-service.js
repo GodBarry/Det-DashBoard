@@ -300,6 +300,16 @@ function createRuntimeJobService({
     });
   }
 
+  async function listInferencePredictionRows(jobId) {
+    const rows = await query(
+      `SELECT project_image_id, predictions_json
+       FROM runtime_inference_results
+       WHERE inference_job_id=$1 AND project_image_id IS NOT NULL`,
+      [jobId],
+    );
+    return rows.rows;
+  }
+
   async function listInferenceLogs(jobId) {
     const rows = await query(
       "SELECT id, job_id, stream, line, created_at FROM runtime_inference_logs WHERE job_id=$1 ORDER BY id DESC LIMIT 500",
@@ -315,7 +325,7 @@ function createRuntimeJobService({
     const classMappings = normalizeClassMappings(jobParams.classMappings, jobParams.recognitionClasses);
     const classLookup = classMappingLookup(classMappings, jobParams.recognitionClasses);
     const recognitionClasses = mappedRecognitionClasses(classMappings, normalizeRecognitionClasses(jobParams.recognitionClasses));
-    const resultRows = await listInferenceResults(jobId, { limit: null });
+    const resultRows = await listInferencePredictionRows(jobId);
     const predictionRows = resultRows.map((row) => ({
       projectImageId: row.project_image_id,
       predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
@@ -354,6 +364,15 @@ function createRuntimeJobService({
       skippedUnlabeledImages: predictionRows.length - evaluationRows.length,
     };
     const resultByImage = new Map(resultRows.map((row) => [row.project_image_id, row]));
+    const errorImageIds = Array.from(new Set((evaluation.errors || []).map((row) => row.projectImageId).filter(Boolean)));
+    const imageInfoRows = errorImageIds.length ? (await query(
+      `SELECT pi.id AS project_image_id, pi.display_name, ia.width AS image_width, ia.height AS image_height
+       FROM project_images pi
+       LEFT JOIN image_assets ia ON ia.id=pi.image_asset_id
+       WHERE pi.id = ANY($1::uuid[])`,
+      [errorImageIds],
+    )).rows : [];
+    const imageInfoById = new Map(imageInfoRows.map((row) => [row.project_image_id, row]));
     return {
       ...evaluation,
       jobId,
@@ -365,14 +384,15 @@ function createRuntimeJobService({
         : "推理结果已保存，但当前数据集没有可用于评估的活动标签版本或标注",
       errors: evaluation.errors.map((row) => {
         const source = resultByImage.get(row.projectImageId) || {};
+        const imageInfo = imageInfoById.get(row.projectImageId) || {};
         return {
           ...row,
-          display_name: source.display_name || source.project_image_id || "图片结果",
-          thumb_url: source.thumb_url || "",
-          image_url: source.image_url || "",
+          display_name: imageInfo.display_name || source.project_image_id || "图片结果",
+          thumb_url: row.projectImageId ? `/api/project-images/${row.projectImageId}/thumb` : "",
+          image_url: row.projectImageId ? `/api/project-images/${row.projectImageId}` : "",
           predictions_json: source.predictions_json || [],
-          image_width: source.image_width || 0,
-          image_height: source.image_height || 0,
+          image_width: imageInfo.image_width || 0,
+          image_height: imageInfo.image_height || 0,
         };
       }),
     };

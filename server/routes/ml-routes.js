@@ -259,7 +259,7 @@ function createMlRoutes(deps) {
     }
     if (method === "GET" && inferenceResultsMatch) {
       await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]);
-      sendJson(res, { results: await runtimeJobService.listInferenceResults(inferenceResultsMatch[1]) });
+      sendJson(res, { results: await runtimeJobService.listInferenceResults(inferenceResultsMatch[1], { limit: parsed.query.limit }) });
       return true;
     }
 
