@@ -71,6 +71,9 @@ export function PlatformPage({
   updateTrainingJobState,
   deleteTrainingJob,
   submitInferenceJob,
+  networkInferenceService,
+  startNetworkInference,
+  stopNetworkInference,
   deleteInferenceJob,
   deleteInferenceJobs,
   requeueInferenceJob,
@@ -199,6 +202,9 @@ export function PlatformPage({
             setInferenceForm={setInferenceForm}
             selectedInferenceEnv={selectedInferenceEnv}
             submitInferenceJob={submitInferenceJob}
+            networkInferenceService={networkInferenceService}
+            startNetworkInference={startNetworkInference}
+            stopNetworkInference={stopNetworkInference}
             viewInferenceResults={viewInferenceResults}
             deleteInferenceJob={deleteInferenceJob}
             deleteInferenceJobs={deleteInferenceJobs}

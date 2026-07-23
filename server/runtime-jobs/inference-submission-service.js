@@ -32,6 +32,7 @@ function createInferenceSubmissionService(deps) {
   } = deps;
 
   async function createInferenceJob(body = {}, actor) {
+    const networkListener = body.executionMode === "network_listener";
     const datasetProjectIds = [...new Set([...(body.datasetProjectIds || body.dataset_project_ids || []), body.datasetProjectId || body.dataset_project_id].filter(Boolean))];
     const datasetProjectId = datasetProjectIds[0] || null;
     if (!datasetProjectId) throw new Error("请选择推理数据集项目");
@@ -95,8 +96,8 @@ function createInferenceSubmissionService(deps) {
     const name = inferenceJobName(body.name, project.map((item) => item.name).join("+"), algorithm.name || algorithm.algorithm_key, now());
     const inserted = await query(
       `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message, priority)
-       VALUES ($1,$2,$3,'preparing',$4,$5,(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)) RETURNING *`,
-      [name, modelVersionId, datasetProjectId, JSON.stringify(params), "正在准备推理输入缓存"],
+       VALUES ($1,$2,$3,'${networkListener ? "listening" : "preparing"}',$4,$5,(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)) RETURNING *`,
+      [name, modelVersionId, datasetProjectId, JSON.stringify(params), networkListener ? "网络推理服务监听中" : "正在准备推理输入缓存"],
     );
     const job = inserted.rows[0];
     await resourceAccess.assignOwner("runtime_inference_jobs", job.id, actor);
@@ -107,7 +108,7 @@ function createInferenceSubmissionService(deps) {
       "UPDATE runtime_inference_jobs SET output_root=$1 WHERE id=$2 RETURNING *",
       [outputRoot, job.id],
     );
-    schedule(() => {
+    if (!networkListener) schedule(() => {
       prepareInferenceInputCache(updated.rows[0]).catch(async (error) => {
         logger.error("prepare inference input failed", error);
         await query(

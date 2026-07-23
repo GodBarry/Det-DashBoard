@@ -14,6 +14,7 @@ import {
   Play,
   Pause,
   RefreshCw,
+  Radio,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -59,6 +60,12 @@ setInferenceForm,
 selectedInferenceEnv,
 
 submitInferenceJob,
+
+networkInferenceService,
+
+startNetworkInference,
+
+stopNetworkInference,
 
 viewInferenceResults,
 
@@ -689,6 +696,15 @@ return (
           <button type="button">新建任务</button>
         </div>
         <div className="workspace-commandbar inference-commandbar">
+          <button
+            className={networkInferenceService?.running ? "danger-outline" : ""}
+            type="button"
+            onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
+            title={networkInferenceService?.running ? "停止 4180 监听并完成当前会话" : "固定当前模型、算法、GPU、类别和参数并监听 4180"}
+          >
+            <Radio size={15} />
+            {networkInferenceService?.running ? "关闭网络推理" : "开启网络推理"}
+          </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
           <button className="danger-outline" type="button" disabled={!sortedInferenceJobs.length} onClick={deleteInferenceQueue} title={selectedInferenceCount ? "删除选中的推理任务" : "删除全部推理任务队列"}><Trash2 size={16} />{selectedInferenceQueueLabel}</button>
@@ -806,7 +822,8 @@ return (
           </div>
           {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
-            const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
+            const normalizedStatus = String(job.status || "").toLowerCase();
+            const done = completedEvaluationStatuses.has(normalizedStatus) || normalizedStatus === "stopped";
             const progress = Math.max(0, Math.min(100, Number(job.progress ?? (done ? 100 : 0)) || 0));
             return (
               <div data-job-id={job.id} className={`inference-table-row${draggedJobId === job.id ? " is-dragging" : ""}${dragOverJobId === job.id ? " is-drag-over" : ""}`} key={job.id}>

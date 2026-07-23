@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   buildInferencePayload,
   createDefaultInferenceForm,
   normalizeInferenceJobIds,
   resolveInferenceAlgorithm,
+  validateNetworkInferenceSubmission,
   validateInferenceSubmission,
 } from "./inference-controller-core.js";
 
@@ -25,6 +26,22 @@ export function useInferenceController({
     () => createDefaultInferenceForm(restoredInferenceForm),
   );
   const [activeInferenceResult, setActiveInferenceResult] = useState(null);
+  const [networkInferenceService, setNetworkInferenceService] = useState({ running: false, status: "stopped", port: 4180 });
+
+  const refreshNetworkInferenceStatus = useCallback(() => request("/api/ml/network-inference/status")
+    .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
+    .then(([status, data]) => {
+      if (status >= 400) throw new Error(data.error || "读取网络推理服务状态失败");
+      setNetworkInferenceService(data.service || { running: false, status: "stopped", port: 4180 });
+      return data.service;
+    })
+    .catch(() => null), [request]);
+
+  useEffect(() => {
+    refreshNetworkInferenceStatus();
+    const timer = window.setInterval(refreshNetworkInferenceStatus, 5000);
+    return () => window.clearInterval(timer);
+  }, [refreshNetworkInferenceStatus]);
 
   function submitInferenceJob() {
     const algorithmResolution = resolveInferenceAlgorithm(inferenceForm, algorithmAssets);
@@ -49,6 +66,35 @@ export function useInferenceController({
 
         addInferenceJob?.(data.job);
         setInferenceForm({ ...inferenceForm, name: "" });
+        (refreshInferenceJobs || loadMlPlatform)();
+      })
+      .catch((error) => setError(error.message));
+  }
+
+  function startNetworkInference() {
+    const algorithmResolution = resolveInferenceAlgorithm(inferenceForm, algorithmAssets);
+    const validationError = validateNetworkInferenceSubmission(inferenceForm, algorithmResolution);
+    if (validationError) return setError(validationError);
+    request("/api/ml/network-inference/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildInferencePayload(inferenceForm, algorithmResolution.selectedAlgorithm)),
+    })
+      .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "开启网络推理服务失败");
+        setNetworkInferenceService(data.service);
+        (refreshInferenceJobs || loadMlPlatform)();
+      })
+      .catch((error) => setError(error.message));
+  }
+
+  function stopNetworkInference() {
+    request("/api/ml/network-inference/stop", { method: "POST", headers: { "content-type": "application/json" } })
+      .then((response) => Promise.all([response.status, response.json().catch(() => ({}))]))
+      .then(([status, data]) => {
+        if (status >= 400) throw new Error(data.error || "关闭网络推理服务失败");
+        setNetworkInferenceService(data.service);
         (refreshInferenceJobs || loadMlPlatform)();
       })
       .catch((error) => setError(error.message));
@@ -147,11 +193,14 @@ export function useInferenceController({
     deleteInferenceJob,
     deleteInferenceJobs,
     inferenceForm,
+    networkInferenceService,
     requeueInferenceJob,
     updateInferenceJobState,
     setActiveInferenceResult,
     setInferenceForm,
     submitInferenceJob,
+    startNetworkInference,
+    stopNetworkInference,
     viewInferenceResults,
   };
 }
