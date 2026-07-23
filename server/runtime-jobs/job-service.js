@@ -1,4 +1,4 @@
-const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeRecognitionClasses } = require("../recognition-classes");
+const { classMappingLookup, mapClassName, mapPredictionClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeRecognitionClasses } = require("../recognition-classes");
 
 function createRuntimeJobService({
   query,
@@ -225,11 +225,22 @@ function createRuntimeJobService({
     try {
       const scoped = scopedSql("runtime_inference_jobs", "ij", actor, scope);
       const rows = await query(
-        `SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name
+        `WITH RECURSIVE project_paths AS (
+           SELECT p.id, p.parent_id, p.name::text AS path, 1 AS depth
+           FROM projects p
+           WHERE p.parent_id IS NULL
+           UNION ALL
+           SELECT child.id, child.parent_id, (project_paths.path || '/' || child.name)::text AS path, project_paths.depth + 1
+           FROM projects child
+           JOIN project_paths ON project_paths.id = child.parent_id
+           WHERE project_paths.depth < 8
+         )
+         SELECT ij.*, mv.version_name, m.name AS model_name, p.name AS dataset_project_name, pp.path AS dataset_project_path
          FROM runtime_inference_jobs ij
          LEFT JOIN model_revisions mv ON mv.id=ij.model_version_id
          LEFT JOIN model_clusters m ON m.id=mv.model_id
          LEFT JOIN projects p ON p.id=ij.dataset_project_id
+         LEFT JOIN project_paths pp ON pp.id=ij.dataset_project_id
          WHERE ${scoped.sql}
          ORDER BY ij.priority DESC, ij.created_at DESC, ij.id DESC
          LIMIT 200`,
@@ -242,6 +253,7 @@ function createRuntimeJobService({
         const metrics = Object.keys(storedMetrics || {}).length ? storedMetrics : outputMetrics;
         return {
           ...row,
+          dataset_project_name: row.dataset_project_path || row.dataset_project_name,
           metrics_json: metrics,
           image_count: Number(metrics.images ?? params?.output?.resultCount ?? params?.input?.imageCount ?? 0),
           prediction_count: Number(metrics.predictions ?? params?.output?.predictionCount ?? 0),
@@ -279,7 +291,7 @@ function createRuntimeJobService({
         ...row,
         predictions_json: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
           .map((prediction) => {
-            const label = mapClassName(prediction.label, lookup);
+            const label = mapPredictionClassName(prediction.label, lookup, targets);
             return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
           }).filter(Boolean),
         thumb_url: row.project_image_id ? `/api/project-images/${row.project_image_id}/thumb` : "",
@@ -308,7 +320,7 @@ function createRuntimeJobService({
       projectImageId: row.project_image_id,
       predictions: (Array.isArray(row.predictions_json) ? row.predictions_json : [])
         .map((prediction) => {
-          const label = mapClassName(prediction.label, classLookup);
+          const label = mapPredictionClassName(prediction.label, classLookup, recognitionClasses);
           return label ? { ...prediction, label, ...(label === String(prediction.label || "").trim().toLowerCase() ? {} : { original_label: prediction.original_label || prediction.label }) } : null;
         }).filter(Boolean),
     }));

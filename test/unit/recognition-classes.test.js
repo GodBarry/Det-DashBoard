@@ -5,6 +5,7 @@ const {
   defaultRecognitionClasses,
   isRecognizedClass,
   mapClassName,
+  mapPredictionClassName,
   mappedRecognitionClasses,
   normalizeClassMappings,
   normalizeRecognitionClasses,
@@ -47,6 +48,8 @@ test("class mappings merge aliases into targets and block unmapped labels", () =
     { target: "vehicle", sources: ["car"] },
     { target: "civilian", sources: ["bus"] },
   ]);
+  assert.equal(mapPredictionClassName("person", mappings), null);
+  assert.equal(mapPredictionClassName("armor", mappings), "armor");
 });
 
 test("recognition class matching is case-insensitive and deduplicated", () => {

@@ -45,6 +45,10 @@ const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
 
 const [evaluation, setEvaluation] = useState(null);
 
+const [evaluationCache, setEvaluationCache] = useState(() => new Map());
+
+const [evaluationRefreshToken, setEvaluationRefreshToken] = useState(0);
+
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
 
 const [errorFilter, setErrorFilter] = useState("false_negative");
@@ -102,14 +106,25 @@ return;
 let ignore = false;
 
 Promise.all(selectedJobs.map((job) => Promise.all([
-  fetch("/api/ml/inference-jobs/" + job.id + "/results").then((response) => response.json()),
-  fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).results)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/results?limit=60").then((response) => response.json()),
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).evaluation)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
 ]))).then((payloads) => {
 
 if (ignore) return;
 
 const results = payloads.flatMap(([resultsData], jobIndex) => (resultsData.results || []).map((row) => ({ ...row, source_job_id: selectedJobs[jobIndex].id })));
 const evaluations = payloads.map(([, evaluationData]) => evaluationData.evaluation).filter(Boolean);
+setEvaluationCache((current) => {
+  const next = new Map(current);
+  payloads.forEach(([resultsData, evaluationData], index) => {
+    next.set(selectedJobs[index].id, { results: resultsData, evaluation: evaluationData });
+  });
+  return next;
+});
 const first = evaluations[0] || null;
 setPreviewRows(results);
 if (evaluations.length <= 1) {
@@ -154,7 +169,7 @@ setEvaluation(null);
 
 return () => { ignore = true; };
 
-}, [selectedJobKey]);
+}, [selectedJobKey, evaluationRefreshToken]);
 
 useEffect(() => {
   setSelectedTaskIds((current) => new Set(Array.from(current).filter((id) => tasks.some((task) => task.id === id))));
@@ -166,6 +181,18 @@ const toggleTaskSelection = (taskId) => {
     if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
     return next;
   });
+};
+
+const refreshSelectedEvaluations = () => {
+  const ids = selectedJobs.map((job) => job.id);
+  setEvaluationCache((current) => {
+    const next = new Map(current);
+    ids.forEach((id) => next.delete(id));
+    return next;
+  });
+  setEvaluation(null);
+  setPreviewRows([]);
+  setEvaluationRefreshToken((value) => value + 1);
 };
 
 const metrics = { ...storedMetrics, ...(evaluation?.summary || {}), avg_iou: evaluation?.summary?.avgIou ?? storedMetrics.avg_iou };
@@ -321,7 +348,7 @@ return (
 
 <div className="workspace-path-row"><FolderOpen size={15} /><span>推理记录</span><ChevronRight size={13} /><b>{selectedTask?.name || "评估结果"}</b><ChevronRight size={13} /><b>评估结果</b></div>
 
-<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={() => setSelectedTaskId(selectedJob.id)}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
+<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={refreshSelectedEvaluations}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
 
 </div>
 

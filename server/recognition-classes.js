@@ -56,6 +56,15 @@ function mapClassName(label, mappings, recognitionClasses) {
   return classMappingLookup(mappings, recognitionClasses).get(normalizeClassName(label)) || null;
 }
 
+function mapPredictionClassName(label, mappings, recognitionClasses) {
+  const normalized = normalizeClassName(label);
+  if (!normalized) return null;
+  const mapped = classMappingLookup(mappings, recognitionClasses).get(normalized);
+  if (mapped) return mapped;
+  const targets = new Set(mappedRecognitionClasses(mappings, recognitionClasses));
+  return targets.has(normalized) ? normalized : null;
+}
+
 function mappedRecognitionClasses(mappings, recognitionClasses) {
   return normalizeClassMappings(mappings, recognitionClasses).map((row) => row.target);
 }
@@ -76,6 +85,7 @@ module.exports = {
   normalizeRecognitionClasses,
   classMappingLookup,
   mapClassName,
+  mapPredictionClassName,
   mappedRecognitionClasses,
   recognitionInputClasses,
   recognitionClassSet,
