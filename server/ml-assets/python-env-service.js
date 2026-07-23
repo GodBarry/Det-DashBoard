@@ -78,6 +78,8 @@ function createPythonEnvService({
       "    info['cuda_available']=bool(torch.cuda.is_available())",
       "    info['cuda_version']=getattr(torch.version, 'cuda', '') or ''",
       "    info['device_count']=torch.cuda.device_count() if torch.cuda.is_available() else 0",
+      "    if importlib.util.find_spec('torch_npu'):",
+      "        import torch_npu",
       "    npu=getattr(torch, 'npu', None)",
       "    info['npu_available']=bool(npu is not None and npu.is_available())",
       "    info['npu_version']=getattr(torch, '__ascend版本__', '') or getattr(torch, '__version__', '') if info['npu_available'] else ''",
