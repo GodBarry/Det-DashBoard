@@ -2,8 +2,16 @@
 
 const http = require("http");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 
 const PROJECT_NAME = "网络接收数据";
+
+function networkRunnerKind(algorithmKey) {
+  if (algorithmKey === "ultralytics_yolo") return "ultralytics_yolo";
+  if (algorithmKey === "dinov3_faster_rcnn") return "dinov3_faster_rcnn";
+  if (["dummy_empty_detector", "fake_reference_detector"].includes(algorithmKey)) return "builtin";
+  return null;
+}
 
 function sendJson(res, status, value) {
   const payload = Buffer.from(JSON.stringify(value));
@@ -68,6 +76,9 @@ function createNetworkInferenceService({
   createInferenceJob,
   importService,
   inferenceWorkerController,
+  pythonEnvService,
+  modelService,
+  algorithmRuntimeSource,
   fs,
   path,
   sharp,
@@ -78,7 +89,364 @@ function createNetworkInferenceService({
   const maxBytes = Number(process.env.NETWORK_INFERENCE_MAX_BODY_BYTES || 64 * 1024 * 1024);
   let listener = null;
   let session = null;
+  let starting = false;
   let queue = Promise.resolve();
+
+  function normalizedDevice(value, cudaAvailable, accelerator = "") {
+    const isNpu = String(accelerator || "").toLowerCase() === "npu";
+    const requested = String(value ?? "").trim().toLowerCase();
+    if (!requested || requested === "-1") return isNpu ? "npu:0" : (cudaAvailable ? "cuda:0" : "cpu");
+    if (/^\d+$/.test(requested)) return isNpu ? `npu:${requested}` : (cudaAvailable ? `cuda:${requested}` : "cpu");
+    return requested;
+  }
+
+  async function createYoloRunner(job, params) {
+    const envId = params.pythonEnvId || params.python_env_id;
+    if (!envId) throw new Error("网络推理缺少 Python 运行环境资产");
+    await query(
+      "UPDATE runtime_inference_jobs SET status='preparing',progress=10,message=$1 WHERE id=$2",
+      ["正在恢复 Python 运行环境", job.id],
+    );
+    let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+    if (!env) throw new Error("网络推理运行环境不存在");
+    env = await pythonEnvService.resolveRuntimePythonEnv(env);
+    if (!fs.existsSync(env.python_path)) throw new Error(`网络推理 Python 不存在：${env.python_path}`);
+    const weightPath = await modelService.findWeightArtifact(job.model_version_id);
+    if (!weightPath) throw new Error("网络推理缺少可用模型权重文件");
+    const device = normalizedDevice(params.device, Boolean(env.cuda_available), env.accelerator);
+    const runnerRoot = path.join(storageRoot, "runtime", "network-inference", job.id, "model-runner");
+    fs.mkdirSync(runnerRoot, { recursive: true });
+    const configPath = path.join(runnerRoot, "config.json");
+    const scriptPath = path.join(runnerRoot, "persistent_yolo_worker.py");
+    fs.writeFileSync(configPath, JSON.stringify({
+      weights: weightPath,
+      device,
+      conf: Number(params.conf ?? 0.25),
+      iou: Number(params.iou ?? 0.7),
+      imgsz: Number(params.imgsz ?? 640),
+      recognitionClasses: params.recognitionClasses || [],
+    }), "utf8");
+    fs.writeFileSync(scriptPath, [
+      "import json, sys, traceback",
+      "from ultralytics import YOLO",
+      "with open(sys.argv[1], 'r', encoding='utf-8') as f: cfg = json.load(f)",
+      "try:",
+      "    model = YOLO(cfg['weights'])",
+      "    model.to(cfg['device'])",
+      "    names = getattr(model, 'names', {}) or {}",
+      "    allowed = {str(x).strip().lower() for x in cfg.get('recognitionClasses', []) if str(x).strip()}",
+      "    print(json.dumps({'event':'ready','device':cfg['device'],'model':cfg['weights']}), flush=True)",
+      "except Exception as error:",
+      "    print(json.dumps({'event':'fatal','error':str(error),'traceback':traceback.format_exc()}), flush=True)",
+      "    raise",
+      "for line in sys.stdin:",
+      "    try:",
+      "        request = json.loads(line)",
+      "        if request.get('action') == 'shutdown': break",
+      "        result = model.predict(source=request['imagePath'], conf=cfg['conf'], iou=cfg['iou'], imgsz=cfg['imgsz'], device=cfg['device'], verbose=False)[0]",
+      "        predictions = []",
+      "        boxes = getattr(result, 'boxes', None)",
+      "        if boxes is not None:",
+      "            xyxy = boxes.xyxy.cpu().tolist()",
+      "            confs = boxes.conf.cpu().tolist()",
+      "            classes = boxes.cls.cpu().tolist()",
+      "            for coords, score, class_id in zip(xyxy, confs, classes):",
+      "                x1, y1, x2, y2 = [float(v) for v in coords]",
+      "                class_id = int(class_id)",
+      "                label = names.get(class_id, str(class_id)) if isinstance(names, dict) else str(class_id)",
+      "                if allowed and str(label).strip().lower() not in allowed: continue",
+      "                predictions.append({'label':label,'score':float(score),'class_id':class_id,'bbox_x':x1,'bbox_y':y1,'bbox_w':max(0.0,x2-x1),'bbox_h':max(0.0,y2-y1)})",
+      "        print(json.dumps({'event':'result','id':request['id'],'predictions':predictions}, ensure_ascii=False), flush=True)",
+      "    except Exception as error:",
+      "        print(json.dumps({'event':'error','id':request.get('id') if 'request' in locals() else None,'error':str(error),'traceback':traceback.format_exc()}, ensure_ascii=False), flush=True)",
+    ].join("\n"), "utf8");
+    await query(
+      "UPDATE runtime_inference_jobs SET status='preparing',progress=35,message=$1 WHERE id=$2",
+      [`正在将模型加载到 ${device}`, job.id],
+    );
+    const child = spawn(env.python_path, ["-u", scriptPath, configPath], {
+      cwd: runnerRoot,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const pending = new Map();
+    let stopping = false;
+    let stdoutBuffer = "";
+    let readyResolve;
+    let readyReject;
+    const ready = new Promise((resolve, reject) => {
+      readyResolve = resolve;
+      readyReject = reject;
+    });
+    const rejectAll = (error) => {
+      readyReject(error);
+      for (const item of pending.values()) item.reject(error);
+      pending.clear();
+    };
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString("utf8");
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      for (const line of lines.filter(Boolean)) {
+        let message;
+        try { message = JSON.parse(line); } catch { continue; }
+        if (message.event === "ready") readyResolve(message);
+        if (message.event === "fatal") readyReject(new Error(message.error || "模型加载失败"));
+        if (message.event === "result" || message.event === "error") {
+          const item = pending.get(message.id);
+          if (!item) continue;
+          pending.delete(message.id);
+          if (message.event === "error") item.reject(new Error(message.error || "推理失败"));
+          else item.resolve(message.predictions || []);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString("utf8").trim();
+      if (text) logger.error(`[network-yolo ${job.id}] ${text}`);
+    });
+    child.once("error", rejectAll);
+    child.once("exit", (code) => {
+      const error = new Error(`常驻模型进程已退出（${code ?? "unknown"}）`);
+      rejectAll(error);
+      if (!stopping) query(
+        "UPDATE runtime_inference_jobs SET status='failed',progress=100,process_pid=NULL,message=$1,finished_at=now() WHERE id=$2",
+        [error.message, job.id],
+      ).catch(() => {});
+    });
+    const timer = setTimeout(() => readyReject(new Error("模型加载超时（180 秒）")), 180000);
+    try {
+      const readyInfo = await ready;
+      clearTimeout(timer);
+      return {
+        type: "ultralytics_yolo",
+        pid: child.pid,
+        device: readyInfo.device || device,
+        model: readyInfo.model || weightPath,
+        predict(imagePath) {
+          const id = crypto.randomUUID();
+          return new Promise((resolve, reject) => {
+            pending.set(id, { resolve, reject });
+            child.stdin.write(`${JSON.stringify({ id, imagePath })}\n`, (error) => {
+              if (!error) return;
+              pending.delete(id);
+              reject(error);
+            });
+          });
+        },
+        async stop() {
+          if (child.exitCode != null) return;
+          stopping = true;
+          child.stdin.write(`${JSON.stringify({ action: "shutdown" })}\n`);
+          await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              child.kill();
+              resolve();
+            }, 5000);
+            child.once("exit", () => {
+              clearTimeout(timeout);
+              resolve();
+            });
+          });
+        },
+      };
+    } catch (error) {
+      clearTimeout(timer);
+      if (child.exitCode == null) child.kill();
+      throw error;
+    }
+  }
+
+  async function createDinoRunner(job, params) {
+    const envId = params.pythonEnvId || params.python_env_id;
+    if (!envId) throw new Error("DINO 网络推理缺少 Python 运行环境资产");
+    await query(
+      "UPDATE runtime_inference_jobs SET status='preparing',progress=10,message=$1 WHERE id=$2",
+      ["正在恢复 DINO Python 运行环境", job.id],
+    );
+    let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
+    if (!env) throw new Error("DINO 网络推理运行环境不存在");
+    env = await pythonEnvService.resolveRuntimePythonEnv(env);
+    if (!env.python_path || !fs.existsSync(env.python_path)) throw new Error(`DINO Python 不存在：${env.python_path || "(empty)"}`);
+    const resolved = await algorithmRuntimeSource.resolveTrainingAlgorithmSource(params);
+    if (!resolved) throw new Error("DINO 算法源码资产不可用");
+    const { algorithm, cacheRoot } = resolved;
+    const weightPath = await modelService.findWeightArtifact(job.model_version_id);
+    if (!weightPath) throw new Error("DINO 网络推理缺少可用模型权重");
+    const runnerRoot = path.join(storageRoot, "runtime", "network-inference", job.id, "model-runner");
+    fs.mkdirSync(runnerRoot, { recursive: true });
+    const { configPath: modelConfigPath, sourceRoot } = await algorithmRuntimeSource.resolveDinoConfigPath({
+      env,
+      cacheRoot,
+      algorithm,
+      params,
+      weightPath,
+      outputRoot: runnerRoot,
+    });
+    const device = normalizedDevice(params.device, Boolean(env.cuda_available), env.accelerator);
+    const configPath = path.join(runnerRoot, "config.json");
+    const scriptPath = path.join(runnerRoot, "persistent_dino_worker.py");
+    fs.writeFileSync(configPath, JSON.stringify({
+      configPath: modelConfigPath,
+      weightPath,
+      device,
+      scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
+      recognitionClasses: params.recognitionClasses || [],
+    }), "utf8");
+    fs.writeFileSync(scriptPath, [
+      "import json, sys, traceback",
+      "import torch",
+      "import dino_detector",
+      "from mmcv.transforms import Compose",
+      "from mmengine.config import Config",
+      "from mmengine.dataset import pseudo_collate",
+      "from mmdet.apis import init_detector",
+      "from mmdet.utils import get_test_pipeline_cfg",
+      "with open(sys.argv[1], 'r', encoding='utf-8') as f: cfg = json.load(f)",
+      "try:",
+      "    model_cfg = Config.fromfile(cfg['configPath'])",
+      "    def normalize_dataset(node):",
+      "        if isinstance(node, dict):",
+      "            if str(node.get('type') or '') == 'MosaicCocoDataset': node['type'] = 'CocoDataset'",
+      "            if str(node.get('type') or '').endswith('Dataset'): node['lazy_init'] = True",
+      "            if isinstance(node.get('pipeline'), list): node['pipeline'] = [x for x in node['pipeline'] if not (isinstance(x, dict) and x.get('type') == 'ApplyMosaicMask')]",
+      "            for value in node.values(): normalize_dataset(value)",
+      "        elif isinstance(node, list):",
+      "            for value in node: normalize_dataset(value)",
+      "    normalize_dataset(model_cfg._cfg_dict)",
+      "    model = init_detector(model_cfg, cfg['weightPath'], device=cfg['device'])",
+      "    classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('recognitionClasses') or [])",
+      "    allowed = {str(x).strip().lower() for x in cfg.get('recognitionClasses', []) if str(x).strip()}",
+      "    pipeline = Compose(get_test_pipeline_cfg(model.cfg))",
+      "    print(json.dumps({'event':'ready','device':cfg['device'],'model':cfg['weightPath']}), flush=True)",
+      "except Exception as error:",
+      "    print(json.dumps({'event':'fatal','error':str(error),'traceback':traceback.format_exc()}), flush=True)",
+      "    raise",
+      "for line in sys.stdin:",
+      "    try:",
+      "        request = json.loads(line)",
+      "        if request.get('action') == 'shutdown': break",
+      "        item = pipeline(dict(img_path=request['imagePath'], img_id=0))",
+      "        with torch.inference_mode(): result = model.test_step(pseudo_collate([item]))[0]",
+      "        instances = result.pred_instances.to('cpu')",
+      "        boxes = instances.bboxes.numpy().tolist() if hasattr(instances, 'bboxes') else []",
+      "        scores = instances.scores.numpy().tolist() if hasattr(instances, 'scores') else [1.0] * len(boxes)",
+      "        labels = instances.labels.numpy().tolist() if hasattr(instances, 'labels') else [-1] * len(boxes)",
+      "        predictions = []",
+      "        for box, score, class_id in zip(boxes, scores, labels):",
+      "            if float(score) < cfg['scoreThreshold']: continue",
+      "            x1, y1, x2, y2 = [float(v) for v in box]",
+      "            class_id = int(class_id)",
+      "            label = str(classes[class_id]) if 0 <= class_id < len(classes) else str(class_id)",
+      "            if allowed and str(label).strip().lower() not in allowed: continue",
+      "            predictions.append({'label':label,'score':float(score),'class_id':class_id,'bbox_x':x1,'bbox_y':y1,'bbox_w':max(0.0,x2-x1),'bbox_h':max(0.0,y2-y1)})",
+      "        print(json.dumps({'event':'result','id':request['id'],'predictions':predictions}, ensure_ascii=False), flush=True)",
+      "    except Exception as error:",
+      "        print(json.dumps({'event':'error','id':request.get('id') if 'request' in locals() else None,'error':str(error),'traceback':traceback.format_exc()}, ensure_ascii=False), flush=True)",
+    ].join("\n"), "utf8");
+    await query(
+      "UPDATE runtime_inference_jobs SET status='preparing',progress=35,message=$1 WHERE id=$2",
+      [`正在将 DINO 模型加载到 ${device}`, job.id],
+    );
+    const child = spawn(env.python_path, ["-u", scriptPath, configPath], {
+      cwd: sourceRoot,
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUNBUFFERED: "1",
+        PYTHONPATH: [sourceRoot, cacheRoot, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+      },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const pending = new Map();
+    let stopping = false;
+    let stdoutBuffer = "";
+    let readyResolve;
+    let readyReject;
+    const ready = new Promise((resolve, reject) => {
+      readyResolve = resolve;
+      readyReject = reject;
+    });
+    const rejectAll = (error) => {
+      readyReject(error);
+      for (const item of pending.values()) item.reject(error);
+      pending.clear();
+    };
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString("utf8");
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      for (const line of lines.filter(Boolean)) {
+        let message;
+        try { message = JSON.parse(line); } catch { continue; }
+        if (message.event === "ready") readyResolve(message);
+        if (message.event === "fatal") readyReject(new Error(message.error || "DINO 模型加载失败"));
+        if (message.event === "result" || message.event === "error") {
+          const item = pending.get(message.id);
+          if (!item) continue;
+          pending.delete(message.id);
+          if (message.event === "error") item.reject(new Error(message.error || "DINO 推理失败"));
+          else item.resolve(message.predictions || []);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString("utf8").trim();
+      if (text) logger.error(`[network-dino ${job.id}] ${text}`);
+    });
+    child.once("error", rejectAll);
+    child.once("exit", (code) => {
+      const error = new Error(`DINO 常驻模型进程已退出（${code ?? "unknown"}）`);
+      rejectAll(error);
+      if (!stopping) query(
+        "UPDATE runtime_inference_jobs SET status='failed',progress=100,process_pid=NULL,message=$1,finished_at=now() WHERE id=$2",
+        [error.message, job.id],
+      ).catch(() => {});
+    });
+    const timer = setTimeout(() => readyReject(new Error("DINO 模型加载超时（300 秒）")), 300000);
+    try {
+      const readyInfo = await ready;
+      clearTimeout(timer);
+      return {
+        type: "dinov3_faster_rcnn",
+        pid: child.pid,
+        device: readyInfo.device || device,
+        model: readyInfo.model || weightPath,
+        predict(imagePath) {
+          const id = crypto.randomUUID();
+          return new Promise((resolve, reject) => {
+            pending.set(id, { resolve, reject });
+            child.stdin.write(`${JSON.stringify({ id, imagePath })}\n`, (error) => {
+              if (!error) return;
+              pending.delete(id);
+              reject(error);
+            });
+          });
+        },
+        async stop() {
+          if (child.exitCode != null) return;
+          stopping = true;
+          child.stdin.write(`${JSON.stringify({ action: "shutdown" })}\n`);
+          await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              child.kill();
+              resolve();
+            }, 8000);
+            child.once("exit", () => {
+              clearTimeout(timeout);
+              resolve();
+            });
+          });
+        },
+      };
+    } catch (error) {
+      clearTimeout(timer);
+      if (child.exitCode == null) child.kill();
+      throw error;
+    }
+  }
 
   async function ensureProject(actor) {
     let project = (await query(
@@ -180,23 +548,40 @@ function createNetworkInferenceService({
     const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [session.job.id])).rows[0];
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json) : job.params_json;
     const history = (await query("SELECT * FROM runtime_inference_results WHERE inference_job_id=$1 ORDER BY created_at", [job.id])).rows;
-    await inferenceWorkerController.runInferenceJob({
-      ...job,
-      output_root: root,
-      params_json: {
-        ...params,
-        input: { ...(params.input || {}), projectIds: [session.project.id], sourceType: "network_post", manifestPath },
-        output: { ...(params.output || {}), saveVisualization: true },
-      },
-    }, "network-inference-4180");
-    const after = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [job.id])).rows[0];
-    if (after.status === "failed") {
-      await query("UPDATE runtime_inference_jobs SET status='listening',progress=0,finished_at=NULL,message=$1 WHERE id=$2", [`监听中；最近请求失败：${after.message}`, job.id]);
-      throw new Error(after.message || "推理失败");
+    await query(
+      "UPDATE runtime_inference_jobs SET status='running',progress=65,message=$1,started_at=COALESCE(started_at,now()) WHERE id=$2",
+      [`正在推理网络图片 ${image.filename}`, job.id],
+    );
+    let predictions;
+    if (session.runner) {
+      try {
+        predictions = await session.runner.predict(image.localPath);
+      } catch (error) {
+        await query(
+          "UPDATE runtime_inference_jobs SET status='listening',progress=0,message=$1 WHERE id=$2",
+          [`监听中；最近请求失败：${error.message}`, job.id],
+        );
+        throw error;
+      }
+    } else {
+      await inferenceWorkerController.runInferenceJob({
+        ...job,
+        output_root: root,
+        params_json: {
+          ...params,
+          input: { ...(params.input || {}), projectIds: [session.project.id], sourceType: "network_post", manifestPath },
+          output: { ...(params.output || {}), saveVisualization: true },
+        },
+      }, "network-inference-4180");
+      const after = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [job.id])).rows[0];
+      if (after.status === "failed") {
+        await query("UPDATE runtime_inference_jobs SET status='listening',progress=0,finished_at=NULL,message=$1 WHERE id=$2", [`监听中；最近请求失败：${after.message}`, job.id]);
+        throw new Error(after.message || "推理失败");
+      }
+      const fresh = (await query("SELECT * FROM runtime_inference_results WHERE inference_job_id=$1 ORDER BY created_at", [job.id])).rows;
+      const result = fresh.find((row) => String(row.project_image_id) === String(image.image.id)) || fresh[0];
+      predictions = Array.isArray(result?.predictions_json) ? result.predictions_json : JSON.parse(result?.predictions_json || "[]");
     }
-    const fresh = (await query("SELECT * FROM runtime_inference_results WHERE inference_job_id=$1 ORDER BY created_at", [job.id])).rows;
-    const result = fresh.find((row) => String(row.project_image_id) === String(image.image.id)) || fresh[0];
-    const predictions = Array.isArray(result?.predictions_json) ? result.predictions_json : JSON.parse(result?.predictions_json || "[]");
     const visualPath = path.join(root, "visualization.jpg");
     await visualize(image.localPath, predictions, visualPath, image.width, image.height);
     session.images += 1;
@@ -213,9 +598,15 @@ function createNetworkInferenceService({
         [job.id, image.image.id, JSON.stringify(predictions), visualPath],
       );
       await client.query(
-        `UPDATE runtime_inference_jobs SET status='listening',progress=0,finished_at=NULL,process_pid=NULL,
-         params_json=$1,metrics_json=$2,message=$3 WHERE id=$4`,
-        [JSON.stringify(params), JSON.stringify({ images: session.images, received: session.images, predictions: session.predictions, listening: true }), `4180 监听中；已接收 ${session.images} 张`, job.id],
+        `UPDATE runtime_inference_jobs SET status='listening',progress=0,finished_at=NULL,process_pid=$1,
+         params_json=$2,metrics_json=$3,message=$4 WHERE id=$5`,
+        [
+          session.runner?.pid || null,
+          JSON.stringify(params),
+          JSON.stringify({ images: session.images, received: session.images, predictions: session.predictions, listening: true }),
+          `4180 监听中；已接收 ${session.images} 张`,
+          job.id,
+        ],
       );
     });
     const boxes = predictions.map((item) => ({
@@ -259,9 +650,11 @@ function createNetworkInferenceService({
   }
 
   async function start(body, actor) {
-    if (listener || session) throw new Error("网络推理服务已开启");
-    const project = await ensureProject(actor);
-    const job = await createInferenceJob({
+    if (starting || listener || session) throw new Error("网络推理服务正在启动或已经开启");
+    starting = true;
+    try {
+      const project = await ensureProject(actor);
+      const job = await createInferenceJob({
       ...body,
       name: body.name || "外部接口推理会话",
       datasetProjectId: project.id,
@@ -272,11 +665,27 @@ function createNetworkInferenceService({
         input: { ...(body.params?.input || {}), projectIds: [project.id], sourceType: "network_post" },
         networkInference: { enabled: true, port, startedBy: actor.id },
       },
-    }, actor);
-    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json) : job.params_json;
-    session = {
+      }, actor);
+      const params = typeof job.params_json === "string" ? JSON.parse(job.params_json) : job.params_json;
+      let runner = null;
+      try {
+        const runnerKind = networkRunnerKind(params.algorithmKey);
+        if (runnerKind === "ultralytics_yolo") runner = await createYoloRunner(job, params);
+        else if (runnerKind === "dinov3_faster_rcnn") runner = await createDinoRunner(job, params);
+        else if (!runnerKind) {
+          throw new Error(`算法 ${params.templateName || params.algorithmKey || "(unknown)"} 尚未实现网络推理常驻适配器`);
+        }
+      } catch (error) {
+        await query(
+          "UPDATE runtime_inference_jobs SET status='failed',progress=100,message=$1,finished_at=now() WHERE id=$2",
+          [`模型加载失败：${error.message}`, job.id],
+        );
+        throw error;
+      }
+      session = {
       job,
       project,
+      runner,
       images: 0,
       predictions: 0,
       config: {
@@ -288,32 +697,57 @@ function createNetworkInferenceService({
         conf: params.conf,
         iou: params.iou,
         imgsz: params.imgsz,
+        model: runner?.model || null,
+        resolvedDevice: runner?.device || params.device,
+        modelReady: Boolean(runner),
+        modelProcessPid: runner?.pid || null,
       },
-    };
-    listener = http.createServer(handle);
-    try {
-      await new Promise((resolve, reject) => {
-        listener.once("error", reject);
-        listener.listen(port, "0.0.0.0", resolve);
-      });
-    } catch (error) {
-      listener = null;
-      session = null;
-      await query("UPDATE runtime_inference_jobs SET status='failed',message=$1,finished_at=now() WHERE id=$2", [`4180 启动失败：${error.message}`, job.id]);
-      throw error;
+      };
+      listener = http.createServer(handle);
+      try {
+        await new Promise((resolve, reject) => {
+          listener.once("error", reject);
+          listener.listen(port, "0.0.0.0", resolve);
+        });
+      } catch (error) {
+        await runner?.stop().catch(() => {});
+        listener = null;
+        session = null;
+        await query("UPDATE runtime_inference_jobs SET status='failed',message=$1,finished_at=now() WHERE id=$2", [`4180 启动失败：${error.message}`, job.id]);
+        throw error;
+      }
+      await query(
+      `UPDATE runtime_inference_jobs
+       SET status='listening',progress=0,process_pid=$1,message=$2,started_at=COALESCE(started_at,now()),finished_at=NULL
+       WHERE id=$3`,
+      [
+        runner?.pid || null,
+        runner
+          ? `模型已加载到 ${runner.device}，4180 监听中`
+          : `${params.templateName || params.algorithmKey || "算法"} 已准备，4180 监听中`,
+        job.id,
+      ],
+      );
+      return status();
+    } finally {
+      starting = false;
     }
-    return status();
   }
 
   async function stop() {
     if (!listener || !session) return status();
     const active = session;
     const server = listener;
+    await query(
+      "UPDATE runtime_inference_jobs SET status='stopping',message=$1 WHERE id=$2",
+      ["正在停止 4180 并释放常驻模型", active.job.id],
+    );
     listener = null;
     await new Promise((resolve) => server.close(resolve));
     await queue;
+    await active.runner?.stop().catch((error) => logger.error("stop network inference model runner failed:", error));
     await query(
-      `UPDATE runtime_inference_jobs SET status='stopped',progress=100,finished_at=now(),
+      `UPDATE runtime_inference_jobs SET status='stopped',progress=100,process_pid=NULL,finished_at=now(),
        metrics_json=COALESCE(metrics_json,'{}'::jsonb)||$1::jsonb,message=$2 WHERE id=$3`,
       [JSON.stringify({ listening: false, images: active.images, received: active.images, predictions: active.predictions }), `网络推理会话已停止；共接收 ${active.images} 张`, active.job.id],
     );
@@ -324,16 +758,17 @@ function createNetworkInferenceService({
   function status() {
     return {
       running: Boolean(listener && session),
-      status: listener && session ? "listening" : "stopped",
+      status: starting ? "preparing" : (listener && session ? "listening" : "stopped"),
       port,
       sessionId: session?.job.id || null,
       projectId: session?.project.id || null,
       received: session?.images || 0,
       config: session?.config || null,
+      modelReady: Boolean(session?.runner),
     };
   }
 
   return { start, stop, status };
 }
 
-module.exports = { createNetworkInferenceService, parseImage };
+module.exports = { createNetworkInferenceService, networkRunnerKind, parseImage };

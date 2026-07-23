@@ -96,8 +96,8 @@ function createInferenceSubmissionService(deps) {
     const name = inferenceJobName(body.name, project.map((item) => item.name).join("+"), algorithm.name || algorithm.algorithm_key, now());
     const inserted = await query(
       `INSERT INTO runtime_inference_jobs (name, model_version_id, dataset_project_id, status, params_json, message, priority)
-       VALUES ($1,$2,$3,'${networkListener ? "listening" : "preparing"}',$4,$5,(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)) RETURNING *`,
-      [name, modelVersionId, datasetProjectId, JSON.stringify(params), networkListener ? "网络推理服务监听中" : "正在准备推理输入缓存"],
+       VALUES ($1,$2,$3,'preparing',$4,$5,(SELECT COALESCE(MAX(priority), 0) + 1 FROM runtime_inference_jobs)) RETURNING *`,
+      [name, modelVersionId, datasetProjectId, JSON.stringify(params), networkListener ? "正在准备网络推理运行环境" : "正在准备推理输入缓存"],
     );
     const job = inserted.rows[0];
     await resourceAccess.assignOwner("runtime_inference_jobs", job.id, actor);
