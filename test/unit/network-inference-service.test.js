@@ -5,6 +5,8 @@ const test = require("node:test");
 
 const {
   createNetworkInferenceService,
+  createRunId,
+  describePredictions,
   networkRunnerKind,
   parseImage,
 } = require("../../server/runtime-jobs/network-inference-service");
@@ -30,6 +32,19 @@ test("network inference parses JSON base64 and preserves remote identifiers", ()
   assert.equal(parsed.filename, "frame.jpg");
   assert.equal(parsed.sessionId, "remote-session");
   assert.equal(parsed.remoteProjectImageId, "remote-image");
+});
+
+test("network inference creates artifact-compatible run ids and descriptions", () => {
+  assert.match(createRunId(new Date("2026-07-23T14:12:19Z")), /^run_20260723221219_[a-f0-9]{8}$/);
+  assert.equal(
+    describePredictions([
+      { label: "tank" },
+      { label: "tank" },
+      { label: "hanma" },
+    ]),
+    "图像中共检测到 3 个目标，包括2 辆坦克、1 辆悍马。",
+  );
+  assert.equal(describePredictions([]), "本次图像中未检测到符合当前置信度阈值的目标。");
 });
 
 test("network inference reconciles stale listener jobs after service restart", async () => {

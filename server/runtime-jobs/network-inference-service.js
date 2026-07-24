@@ -23,6 +23,45 @@ function safeName(value) {
   return String(value || "network-image.jpg").split(/[\\/]/).pop().replace(/[^\w.\-\u4e00-\u9fff]+/g, "_");
 }
 
+function createRunId(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: process.env.TZ || "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((item) => [item.type, item.value]));
+  const stamp = `${values.year}${values.month}${values.day}${values.hour}${values.minute}${values.second}`;
+  return `run_${stamp}_${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function describePredictions(predictions) {
+  const names = {
+    car: "汽车",
+    tank: "坦克",
+    zhuangjiache: "装甲车",
+    fasheche: "发射车",
+    hanma: "悍马",
+    buzhanche: "步战车",
+    kache: "卡车",
+    daodanfasheche: "导弹发射车",
+  };
+  const counts = new Map();
+  for (const item of predictions) {
+    const label = String(item.label || item.class_name || "object");
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  if (!predictions.length) return "本次图像中未检测到符合当前置信度阈值的目标。";
+  const detail = [...counts.entries()]
+    .map(([label, count]) => `${count} 辆${names[label] || label}`)
+    .join("、");
+  return `图像中共检测到 ${predictions.length} 个目标，包括${detail}。`;
+}
+
 function parseImage(buffer, contentType, headers = {}) {
   if (contentType.includes("application/json")) {
     const body = JSON.parse(buffer.toString("utf8") || "{}");
@@ -91,6 +130,28 @@ function createNetworkInferenceService({
   let session = null;
   let starting = false;
   let queue = Promise.resolve();
+  const runs = new Map();
+  const runIndexRoot = storageRoot ? path.join(storageRoot, "runtime", "network-inference-runs") : null;
+
+  function persistRun(runId, artifacts) {
+    if (!runIndexRoot) return;
+    fs.mkdirSync(runIndexRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(runIndexRoot, `${runId}.json`),
+      JSON.stringify(Object.fromEntries(artifacts)),
+    );
+  }
+
+  function resolveRunArtifact(runId, filename) {
+    const cached = runs.get(runId);
+    if (cached) return cached.get(filename);
+    if (!runIndexRoot || !/^run_\d{14}_[a-f0-9]{8}$/.test(runId)) return null;
+    const indexPath = path.join(runIndexRoot, `${runId}.json`);
+    if (!fs.existsSync(indexPath)) return null;
+    const artifacts = new Map(Object.entries(JSON.parse(fs.readFileSync(indexPath, "utf8"))));
+    runs.set(runId, artifacts);
+    return artifacts.get(filename);
+  }
 
   async function reconcileStaleJobs(message = "服务进程已重启，网络监听会话已中断") {
     if (listener || session) return 0;
@@ -544,10 +605,10 @@ function createNetworkInferenceService({
       const text = `${escape(item.label || item.class_name || "object")} ${Number(item.score ?? item.confidence ?? 0).toFixed(2)}`;
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#31d0aa" stroke-width="3"/><text x="${x + 3}" y="${Math.max(16, y - 5)}" fill="#31d0aa" font-size="16" font-family="sans-serif">${text}</text>`;
     }).join("");
-    await sharp(imagePath).composite([{ input: Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${boxes}</svg>`), left: 0, top: 0 }]).jpeg({ quality: 90 }).toFile(outputPath);
+    await sharp(imagePath).composite([{ input: Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${boxes}</svg>`), left: 0, top: 0 }]).png().toFile(outputPath);
   }
 
-  async function infer(input) {
+  async function infer(input, publicBaseUrl) {
     if (!listener || !session) {
       const error = new Error("网络推理服务未开启");
       error.statusCode = 503;
@@ -609,7 +670,7 @@ function createNetworkInferenceService({
       const result = fresh.find((row) => String(row.project_image_id) === String(image.image.id)) || fresh[0];
       predictions = Array.isArray(result?.predictions_json) ? result.predictions_json : JSON.parse(result?.predictions_json || "[]");
     }
-    const visualPath = path.join(root, "visualization.jpg");
+    const visualPath = path.join(root, "detection_overlay.png");
     await visualize(image.localPath, predictions, visualPath, image.width, image.height);
     session.images += 1;
     session.predictions += predictions.length;
@@ -636,36 +697,53 @@ function createNetworkInferenceService({
         ],
       );
     });
-    const boxes = predictions.map((item) => ({
-      classId: item.class_id ?? null,
-      label: item.label || item.class_name || "object",
-      confidence: Number(item.score ?? item.confidence ?? 0),
-      x: Number(item.bbox_x ?? item.x ?? item.bbox?.[0] ?? 0),
-      y: Number(item.bbox_y ?? item.y ?? item.bbox?.[1] ?? 0),
-      width: Number(item.bbox_w ?? item.width ?? item.bbox?.[2] ?? 0),
-      height: Number(item.bbox_h ?? item.height ?? item.bbox?.[3] ?? 0),
-    }));
+    const runId = createRunId();
+    const primaryFilename = safeName(input.filename || image.filename);
+    const overlayFilename = "detection_overlay.png";
+    const runArtifacts = new Map([
+      [primaryFilename, { path: image.localPath, contentType: input.contentType || "application/octet-stream" }],
+      [overlayFilename, { path: visualPath, contentType: "image/png" }],
+    ]);
+    runs.set(runId, runArtifacts);
+    persistRun(runId, runArtifacts);
+    const artifactUrl = (filename) => `${publicBaseUrl}/v1/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(filename)}`;
     return {
-      code: 0,
-      message: "success",
-      requestId,
-      sessionId: input.sessionId || job.id,
-      inferenceSessionId: job.id,
-      projectImageId: image.image.id,
-      sourceProjectImageId: input.remoteProjectImageId,
-      predictions,
-      boxes,
-      visualization: { path: visualPath, contentType: "image/jpeg", base64: fs.readFileSync(visualPath).toString("base64") },
+      run_id: runId,
+      artifacts: [
+        { label: "primary_input", filename: primaryFilename, url: artifactUrl(primaryFilename) },
+        { label: "final_overlay", filename: overlayFilename, url: artifactUrl(overlayFilename) },
+        { label: "description", context: JSON.stringify({ description: describePredictions(predictions) }) },
+        { label: "others", context: "" },
+      ],
     };
   }
 
   async function handle(req, res) {
     try {
-      const pathname = new URL(req.url, `http://${req.headers.host || "localhost"}`).pathname;
+      const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      const pathname = requestUrl.pathname;
       if (req.method === "GET" && pathname === "/health") return sendJson(res, session ? 200 : 503, status());
+      const fileMatch = pathname.match(/^\/v1\/runs\/([^/]+)\/files\/([^/]+)$/);
+      if (req.method === "GET" && fileMatch) {
+        const runId = decodeURIComponent(fileMatch[1]);
+        const filename = decodeURIComponent(fileMatch[2]);
+        const artifact = resolveRunArtifact(runId, filename);
+        if (!artifact || !fs.existsSync(artifact.path)) return sendJson(res, 404, { code: 404, message: "文件不存在" });
+        const stat = fs.statSync(artifact.path);
+        res.writeHead(200, {
+          "content-type": artifact.contentType,
+          "content-length": stat.size,
+          "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        });
+        fs.createReadStream(artifact.path).pipe(res);
+        return;
+      }
       if (req.method === "POST" && pathname === "/infer") {
         const input = parseImage(await readRequest(req), String(req.headers["content-type"] || "").toLowerCase(), req.headers);
-        const work = queue.then(() => infer(input));
+        const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+        const origin = process.env.NETWORK_INFERENCE_PUBLIC_BASE_URL
+          || `${forwardedProto || "http"}://${req.headers.host || "localhost:4180"}`;
+        const work = queue.then(() => infer(input, origin.replace(/\/+$/, "")));
         queue = work.catch(() => {});
         return sendJson(res, 200, await work);
       }
@@ -799,4 +877,10 @@ function createNetworkInferenceService({
   return { reconcileStaleJobs, start, stop, status };
 }
 
-module.exports = { createNetworkInferenceService, networkRunnerKind, parseImage };
+module.exports = {
+  createNetworkInferenceService,
+  createRunId,
+  describePredictions,
+  networkRunnerKind,
+  parseImage,
+};
