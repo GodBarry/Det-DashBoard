@@ -15,6 +15,16 @@ const LABEL_NAMES_ZH = Object.freeze({
   kache: "卡车",
   daodanfasheche: "导弹发射车",
 });
+const LABEL_COLORS = Object.freeze({
+  car: "#22d3ee",
+  tank: "#f97316",
+  zhuangjiache: "#a78bfa",
+  fasheche: "#ef4444",
+  hanma: "#facc15",
+  buzhanche: "#34d399",
+  kache: "#60a5fa",
+  daodanfasheche: "#f472b6",
+});
 
 function networkRunnerKind(algorithmKey) {
   if (algorithmKey === "ultralytics_yolo") return "ultralytics_yolo";
@@ -52,6 +62,22 @@ function createRunId(now = new Date()) {
 function displayLabel(value) {
   const label = String(value || "object").trim();
   return LABEL_NAMES_ZH[label.toLowerCase()] || label;
+}
+
+function labelColor(value) {
+  const label = String(value || "object").trim().toLowerCase();
+  if (LABEL_COLORS[label]) return LABEL_COLORS[label];
+  const palette = ["#22d3ee", "#f97316", "#a78bfa", "#ef4444", "#facc15", "#34d399", "#60a5fa", "#f472b6"];
+  let hash = 0;
+  for (const char of label) hash = ((hash * 31) + char.codePointAt(0)) >>> 0;
+  return palette[hash % palette.length];
+}
+
+function formatConfidence(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return "0.00%";
+  const percentage = score > 1 ? score : score * 100;
+  return `${Math.max(0, Math.min(100, percentage)).toFixed(2)}%`;
 }
 
 function describePredictions(predictions) {
@@ -607,12 +633,14 @@ function createNetworkInferenceService({
       const y = Number(item.bbox_y ?? item.y ?? item.bbox?.[1] ?? 0);
       const w = Number(item.bbox_w ?? item.width ?? item.bbox?.[2] ?? 0);
       const h = Number(item.bbox_h ?? item.height ?? item.bbox?.[3] ?? 0);
-      const text = `${displayLabel(item.label || item.class_name)} ${Number(item.score ?? item.confidence ?? 0).toFixed(2)}`;
+      const rawLabel = item.label || item.class_name;
+      const color = labelColor(rawLabel);
+      const text = `${displayLabel(rawLabel)} ${formatConfidence(item.score ?? item.confidence ?? 0)}`;
       const textY = Math.max(20, y - 5);
       const textWidth = Math.max(72, Array.from(text).length * 17 + 10);
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#31d0aa" stroke-width="3"/>`
-        + `<rect x="${x}" y="${textY - 19}" width="${textWidth}" height="23" rx="3" fill="rgba(5,16,20,.78)"/>`
-        + `<text x="${x + 5}" y="${textY}" fill="#5eead4" font-size="16" font-weight="600" font-family="'Noto Sans CJK SC','Noto Sans SC',sans-serif">${escape(text)}</text>`;
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${color}" stroke-width="3"/>`
+        + `<rect x="${x}" y="${textY - 19}" width="${textWidth}" height="23" rx="3" fill="${color}" fill-opacity=".88"/>`
+        + `<text x="${x + 5}" y="${textY}" fill="#071014" font-size="16" font-weight="700" font-family="'Noto Sans CJK SC','Noto Sans SC',sans-serif">${escape(text)}</text>`;
     }).join("");
     await sharp(imagePath).composite([{ input: Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${boxes}</svg>`), left: 0, top: 0 }]).png().toFile(outputPath);
   }
@@ -891,6 +919,8 @@ module.exports = {
   createRunId,
   describePredictions,
   displayLabel,
+  formatConfidence,
+  labelColor,
   networkRunnerKind,
   parseImage,
 };

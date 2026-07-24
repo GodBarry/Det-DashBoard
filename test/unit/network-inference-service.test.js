@@ -8,6 +8,8 @@ const {
   createRunId,
   describePredictions,
   displayLabel,
+  formatConfidence,
+  labelColor,
   networkRunnerKind,
   parseImage,
 } = require("../../server/runtime-jobs/network-inference-service");
@@ -49,6 +51,11 @@ test("network inference creates artifact-compatible run ids and descriptions", (
   assert.equal(displayLabel("hanma"), "悍马");
   assert.equal(displayLabel("TANK"), "坦克");
   assert.equal(displayLabel("custom-label"), "custom-label");
+  assert.equal(formatConfidence(0.99943), "99.94%");
+  assert.equal(formatConfidence(1), "100.00%");
+  assert.equal(labelColor("tank"), "#f97316");
+  assert.notEqual(labelColor("tank"), labelColor("hanma"));
+  assert.equal(labelColor("custom-label"), labelColor("custom-label"));
 });
 
 test("network inference reconciles stale listener jobs after service restart", async () => {
