@@ -81,16 +81,17 @@ function formatConfidence(value) {
 }
 
 function describePredictions(predictions) {
+  const sceneDescription = "这是无人机从沙漠的城市正上方俯拍到的视角图片。";
   const counts = new Map();
   for (const item of predictions) {
     const label = String(item.label || item.class_name || "object");
     counts.set(label, (counts.get(label) || 0) + 1);
   }
-  if (!predictions.length) return "本次图像中未检测到符合当前置信度阈值的目标。";
+  if (!predictions.length) return `${sceneDescription}本次图像中未检测到符合当前置信度阈值的目标。`;
   const detail = [...counts.entries()]
     .map(([label, count]) => `${count} 辆${displayLabel(label)}`)
     .join("、");
-  return `图像中共检测到 ${predictions.length} 个目标，包括${detail}。`;
+  return `${sceneDescription}图像中共检测到 ${predictions.length} 个目标，包括${detail}。`;
 }
 
 function parseImage(buffer, contentType, headers = {}) {
