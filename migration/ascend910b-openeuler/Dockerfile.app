@@ -41,6 +41,7 @@ RUN apt-get update \
 COPY --from=build --chown=node:node /build/dist /app/dist
 COPY --from=build --chown=node:node /build/server.bundle.jsc /app/server/server.bundle.jsc
 COPY --chown=node:node migration/ascend910b-openeuler/launcher.cjs /app/server/launcher.cjs
+COPY migration/ascend910b-openeuler/fonts/NotoSansCJKsc-Regular.otf /usr/local/share/fonts/NotoSansCJKsc-Regular.otf
 
 ENV NODE_ENV=production \
     APP_ROOT=/app \

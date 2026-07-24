@@ -5,6 +5,16 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 
 const PROJECT_NAME = "网络接收数据";
+const LABEL_NAMES_ZH = Object.freeze({
+  car: "汽车",
+  tank: "坦克",
+  zhuangjiache: "装甲车",
+  fasheche: "发射车",
+  hanma: "悍马",
+  buzhanche: "步战车",
+  kache: "卡车",
+  daodanfasheche: "导弹发射车",
+});
 
 function networkRunnerKind(algorithmKey) {
   if (algorithmKey === "ultralytics_yolo") return "ultralytics_yolo";
@@ -39,17 +49,12 @@ function createRunId(now = new Date()) {
   return `run_${stamp}_${crypto.randomBytes(4).toString("hex")}`;
 }
 
+function displayLabel(value) {
+  const label = String(value || "object").trim();
+  return LABEL_NAMES_ZH[label.toLowerCase()] || label;
+}
+
 function describePredictions(predictions) {
-  const names = {
-    car: "汽车",
-    tank: "坦克",
-    zhuangjiache: "装甲车",
-    fasheche: "发射车",
-    hanma: "悍马",
-    buzhanche: "步战车",
-    kache: "卡车",
-    daodanfasheche: "导弹发射车",
-  };
   const counts = new Map();
   for (const item of predictions) {
     const label = String(item.label || item.class_name || "object");
@@ -57,7 +62,7 @@ function describePredictions(predictions) {
   }
   if (!predictions.length) return "本次图像中未检测到符合当前置信度阈值的目标。";
   const detail = [...counts.entries()]
-    .map(([label, count]) => `${count} 辆${names[label] || label}`)
+    .map(([label, count]) => `${count} 辆${displayLabel(label)}`)
     .join("、");
   return `图像中共检测到 ${predictions.length} 个目标，包括${detail}。`;
 }
@@ -602,8 +607,12 @@ function createNetworkInferenceService({
       const y = Number(item.bbox_y ?? item.y ?? item.bbox?.[1] ?? 0);
       const w = Number(item.bbox_w ?? item.width ?? item.bbox?.[2] ?? 0);
       const h = Number(item.bbox_h ?? item.height ?? item.bbox?.[3] ?? 0);
-      const text = `${escape(item.label || item.class_name || "object")} ${Number(item.score ?? item.confidence ?? 0).toFixed(2)}`;
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#31d0aa" stroke-width="3"/><text x="${x + 3}" y="${Math.max(16, y - 5)}" fill="#31d0aa" font-size="16" font-family="sans-serif">${text}</text>`;
+      const text = `${displayLabel(item.label || item.class_name)} ${Number(item.score ?? item.confidence ?? 0).toFixed(2)}`;
+      const textY = Math.max(20, y - 5);
+      const textWidth = Math.max(72, Array.from(text).length * 17 + 10);
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#31d0aa" stroke-width="3"/>`
+        + `<rect x="${x}" y="${textY - 19}" width="${textWidth}" height="23" rx="3" fill="rgba(5,16,20,.78)"/>`
+        + `<text x="${x + 5}" y="${textY}" fill="#5eead4" font-size="16" font-weight="600" font-family="'Noto Sans CJK SC','Noto Sans SC',sans-serif">${escape(text)}</text>`;
     }).join("");
     await sharp(imagePath).composite([{ input: Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${boxes}</svg>`), left: 0, top: 0 }]).png().toFile(outputPath);
   }
@@ -881,6 +890,7 @@ module.exports = {
   createNetworkInferenceService,
   createRunId,
   describePredictions,
+  displayLabel,
   networkRunnerKind,
   parseImage,
 };

@@ -7,6 +7,7 @@ const {
   createNetworkInferenceService,
   createRunId,
   describePredictions,
+  displayLabel,
   networkRunnerKind,
   parseImage,
 } = require("../../server/runtime-jobs/network-inference-service");
@@ -45,6 +46,9 @@ test("network inference creates artifact-compatible run ids and descriptions", (
     "图像中共检测到 3 个目标，包括2 辆坦克、1 辆悍马。",
   );
   assert.equal(describePredictions([]), "本次图像中未检测到符合当前置信度阈值的目标。");
+  assert.equal(displayLabel("hanma"), "悍马");
+  assert.equal(displayLabel("TANK"), "坦克");
+  assert.equal(displayLabel("custom-label"), "custom-label");
 });
 
 test("network inference reconciles stale listener jobs after service restart", async () => {

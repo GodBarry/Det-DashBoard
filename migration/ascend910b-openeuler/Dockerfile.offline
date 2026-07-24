@@ -10,6 +10,7 @@ COPY migration/ascend910b-openeuler/offline-build/node_modules/node_modules/dete
 COPY migration/ascend910b-openeuler/offline-build/dist /app/dist
 COPY migration/ascend910b-openeuler/offline-build/server.bundle.cjs /app/server.bundle.cjs
 COPY migration/ascend910b-openeuler/launcher-offline.cjs /app/launcher.cjs
+COPY migration/ascend910b-openeuler/fonts/NotoSansCJKsc-Regular.otf /usr/local/share/fonts/NotoSansCJKsc-Regular.otf
 
 ENV NODE_ENV=production \
     APP_ROOT=/app \
