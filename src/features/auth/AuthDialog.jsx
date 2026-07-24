@@ -91,7 +91,7 @@ export function AuthDialog({
           </button>
         )}
 
-        <h2 id="auth-dialog-title">{mode === "login" ? "登录 Det Dashboard" : "注册用户"}</h2>
+        <h2 id="auth-dialog-title">{mode === "login" ? "登录 209所数据-模型综合评估平台" : "注册用户"}</h2>
         <label>
           用户名
           <input
