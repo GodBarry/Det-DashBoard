@@ -13,7 +13,7 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     conf: 0.25,
     iou: 0.7,
     imgsz: 640,
-    batch: 16,
+    batch: 4,
     recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
     classMappings: null,
     classMappingsConfigured: false,
@@ -35,6 +35,7 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
   };
   return {
     ...form,
+    batch: Number(restoredInferenceForm?.batch) === 16 ? 4 : form.batch,
     recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
       ? [...form.recognitionClasses]
       : [...DEFAULT_RECOGNITION_CLASSES],

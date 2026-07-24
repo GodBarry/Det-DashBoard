@@ -30,7 +30,15 @@ test("createDefaultInferenceForm returns current defaults and applies restored v
   assert.equal(form.saveVisualization, true);
   assert.equal(form.createLabelVersion, false);
   assert.equal(form.fakeReferenceMode, false);
+  assert.equal(form.batch, 4);
   assert.deepEqual(form.recognitionClasses, ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"]);
+});
+
+test("createDefaultInferenceForm migrates the legacy batch default without overriding custom values", async () => {
+  const { createDefaultInferenceForm } = await coreModulePromise;
+
+  assert.equal(createDefaultInferenceForm({ batch: 16 }).batch, 4);
+  assert.equal(createDefaultInferenceForm({ batch: 8 }).batch, 8);
 });
 
 test("resolveInferenceAlgorithm follows normal and fake-reference selection", async () => {
