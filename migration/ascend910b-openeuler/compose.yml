@@ -78,6 +78,7 @@ services:
       LD_LIBRARY_PATH: /models_data/det-dashboard/runtime/system-libs:/models_data/det-dashboard/runtime/python39-dev/lib:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/ascend-toolkit/latest/lib64/plugin/opskernel:/usr/local/Ascend/ascend-toolkit/latest/lib64/plugin/nnengine:/usr/local/Ascend/cann-9.0.0/aarch64-linux/lib64:/usr/local/Ascend/cann-9.0.0/aarch64-linux/lib64/device/lib64
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-5173}:5173"
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${NETWORK_INFERENCE_PORT:-4180}:4180"
     volumes:
       - ${DEPLOY_ROOT}/runtime/app:/data:Z
       - ${DEPLOY_ROOT}/runtime:/models_data/det-dashboard/runtime:Z
