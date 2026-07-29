@@ -45,8 +45,10 @@ function createInferenceInputCacheService({
     const paramsJson = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
     const input = paramsJson.input || {};
     const filters = input.filters || {};
-    const sqlParams = [job.dataset_project_id];
-    const where = ["pi.project_id=$1", "pi.deleted_at IS NULL", "p.deleted_at IS NULL"];
+    const projectIds = inferenceListParam(input, "projectIds", "project_ids");
+    if (!projectIds.length && job.dataset_project_id) projectIds.push(String(job.dataset_project_id));
+    const sqlParams = [projectIds];
+    const where = ["pi.project_id=ANY($1::uuid[])", "pi.deleted_at IS NULL", "p.deleted_at IS NULL"];
 
     const sceneValues = inferenceListParam(filters, "scenes", "scene");
     const viewValues = inferenceListParam(filters, "views", "view");
@@ -96,7 +98,7 @@ function createInferenceInputCacheService({
      JOIN projects p ON p.id=pi.project_id
      LEFT JOIN import_batches ib ON ib.id=pi.import_batch_id
      WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
-     ORDER BY pi.created_at, pi.id
+     ORDER BY ${limit > 0 ? "random()" : "pi.created_at, pi.id"}
      ${limit > 0 ? `LIMIT $${sqlParams.length}` : ""}`,
       sqlParams,
     )).rows;

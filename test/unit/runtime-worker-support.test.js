@@ -17,7 +17,7 @@ function createChild(events, code) {
   return child;
 }
 
-test("stopProcess preserves Windows taskkill fallback", () => {
+test("stopProcess terminates the full Windows process tree", () => {
   const calls = [];
   const processRef = {
     pid: 42,
@@ -33,10 +33,7 @@ test("stopProcess preserves Windows taskkill fallback", () => {
   assert.equal(stopProcess("123"), true);
   assert.equal(stopProcess(42), false);
   assert.equal(stopProcess("invalid"), false);
-  assert.deepEqual(calls, [
-    ["kill", 123],
-    ["spawn", "taskkill", ["/PID", "123", "/T", "/F"], { windowsHide: true, stdio: "ignore" }],
-  ]);
+  assert.deepEqual(calls, [["spawn", "taskkill", ["/PID", "123", "/T", "/F"], { windowsHide: true, stdio: "ignore" }]]);
 });
 
 test("runChildProcess preserves combined output arrival order", async () => {
@@ -74,6 +71,19 @@ test("runChildProcess streams output callbacks without passing them to spawn", a
 
   assert.deepEqual(calls, [["python", ["worker.py"], { windowsHide: true, cwd: "job" }]]);
   assert.deepEqual(streamed, [["stdout", "one\n"], ["stderr", "two\n"]]);
+});
+
+test("runChildProcess exposes the spawned child without forwarding the callback", async () => {
+  const child = createChild([], 0);
+  const spawnCalls = [];
+  let spawnedChild = null;
+  const spawn = (...args) => { spawnCalls.push(args); return child; };
+  const { runChildProcess } = createRuntimeWorkerSupport({ query: async () => {}, spawn, processRef: {} });
+
+  await runChildProcess("python", ["worker.py"], { onSpawn: (value) => { spawnedChild = value; } });
+
+  assert.strictEqual(spawnedChild, child);
+  assert.deepEqual(spawnCalls, [["python", ["worker.py"], { windowsHide: true }]]);
 });
 
 test("runChildProcess preserves nonzero exit details", async () => {

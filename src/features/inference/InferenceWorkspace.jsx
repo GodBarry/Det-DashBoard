@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  ArrowDown,
-  ArrowUp,
   Boxes,
   ChevronDown,
   ChevronRight,
@@ -12,8 +10,11 @@ import {
   Eye,
   Folder,
   FolderOpen,
+  GripVertical,
   Play,
+  Pause,
   RefreshCw,
+  Radio,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -26,6 +27,12 @@ import {
 } from "../../shared/presentation.js";
 import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { useWorkspaceColumns, WorkspaceResizeHandle } from "../../shared/useWorkspaceColumns.jsx";
+import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
+import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
+import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
+import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
+import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
+import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
 
 projects,
@@ -54,6 +61,16 @@ selectedInferenceEnv,
 
 submitInferenceJob,
 
+networkInferenceService,
+
+networkInferenceBusy,
+
+networkInferenceStatusReady,
+
+startNetworkInference,
+
+stopNetworkInference,
+
 viewInferenceResults,
 
 deleteInferenceJob,
@@ -61,6 +78,7 @@ deleteInferenceJob,
 deleteInferenceJobs,
 
 requeueInferenceJob,
+updateInferenceJobState,
 
 moveRuntimeQueueJob,
 
@@ -131,6 +149,13 @@ const inferenceMetadataValues = (key) => Array.from(new Set(projects.flatMap((pr
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
 const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), views: inferenceMetadataValues("views"), modalities: inferenceMetadataValues("modalities"), labels: inferenceMetadataValues("labels") };
+const selectedInferenceProjectIds = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean);
+const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => selectedInferenceProjectIds.includes(project.id)).flatMap((project) => {
+  const value = project.labels;
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
+}).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
 
@@ -139,6 +164,22 @@ const inferenceFilterOptions = { scenes: inferenceMetadataValues("scenes"), view
   const selectedAlgorithm = visibleInferenceAlgorithms.find((algorithm) => algorithm.id === inferenceForm.templateId);
 
 const sortedInferenceJobs = sortRuntimeJobsByTime(inferenceJobs);
+const [queueOrder, setQueueOrder] = useState(() => sortedInferenceJobs.map((job) => job.id));
+const queueOrderRef = useRef(queueOrder);
+const [draggedJobId, setDraggedJobId] = useState("");
+const [dragOverJobId, setDragOverJobId] = useState("");
+
+useEffect(() => {
+  const incomingIds = sortedInferenceJobs.map((job) => job.id);
+  setQueueOrder((current) => {
+    const incomingSet = new Set(incomingIds);
+    const retained = current.filter((id) => incomingSet.has(id));
+    const added = incomingIds.filter((id) => !retained.includes(id));
+    const next = [...added, ...retained];
+    queueOrderRef.current = next;
+    return next;
+  });
+}, [inferenceJobs]);
 
 const latestJob = sortedInferenceJobs[0];
 
@@ -150,6 +191,8 @@ const [previewRows, setPreviewRows] = useState([]);
 
 const [liveLogs, setLiveLogs] = useState([]);
 
+const [matchingImageCount, setMatchingImageCount] = useState(null);
+
 const [evaluation, setEvaluation] = useState(null);
 
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
@@ -158,9 +201,46 @@ const [errorFilter, setErrorFilter] = useState("false_negative");
   const [sampleOffset, setSampleOffset] = useState(0);
   const [sampleViewer, setSampleViewer] = useState(null);
 
-const [expandedGroups, setExpandedGroups] = useState(() => new Set(["算法适配", "Python 环境"]));
+useEffect(() => {
+  const countProjectIds = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean);
+  if (!countProjectIds.length) {
+    setMatchingImageCount(null);
+    return undefined;
+  }
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => {
+    const query = new URLSearchParams();
+    if (inferenceForm.inputViews) query.set("views", inferenceForm.inputViews);
+    if (inferenceForm.inputScenes) query.set("scenes", inferenceForm.inputScenes);
+    if (inferenceForm.inputModalities) query.set("modalities", inferenceForm.inputModalities);
+    if (inferenceForm.inputLabels) query.set("labels", inferenceForm.inputLabels);
+    if (inferenceForm.inputQuery) query.set("q", inferenceForm.inputQuery);
+    Promise.all(countProjectIds.map((projectId) => fetch(`/api/projects/${projectId}/images-count?${query}`, { signal: controller.signal }).then((response) => response.json())))
+      .then((rows) => setMatchingImageCount(rows.reduce((sum, data) => sum + Number(data.count || 0), 0)))
+      .catch((error) => { if (error.name !== "AbortError") setMatchingImageCount(null); });
+  }, 250);
+  return () => { window.clearTimeout(timer); controller.abort(); };
+}, [inferenceForm.datasetProjectId, JSON.stringify(inferenceForm.datasetProjectIds || []), inferenceForm.inputViews, inferenceForm.inputScenes, inferenceForm.inputModalities, inferenceForm.inputLabels, inferenceForm.inputQuery]);
+
+const effectiveInferenceImageCount = matchingImageCount == null
+  ? null
+  : (Number(inferenceForm.inputLimit || 0) > 0 ? Math.min(matchingImageCount, Number(inferenceForm.inputLimit)) : matchingImageCount);
+
+const [expandedGroups, setExpandedGroups] = usePersistentSet("det-dashboard.inference-resource-groups", ["算法适配", "Python 环境"]);
+const [expandedDataNodes, setExpandedDataNodes] = usePersistentSet("det-dashboard.inference-data-nodes", []);
 
 const setField = (key, value) => setInferenceForm({ ...inferenceForm, [key]: value });
+const selectInferenceModelVersion = (versionId) => {
+  const version = modelVersions.find((item) => item.id === versionId);
+  const detectedClasses = parseMaybeJson(version?.params_json)?.detectedClasses;
+  setInferenceForm({
+    ...inferenceForm,
+    modelVersionId: versionId,
+    ...(Array.isArray(detectedClasses) && detectedClasses.length
+      ? { recognitionClasses: detectedClasses, classMappings: null, classMappingsConfigured: false }
+      : {}),
+  });
+};
 
 const inferenceProjectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
@@ -306,7 +386,7 @@ setInferenceForm({ ...inferenceForm, modelId: modelIds[0] || "", modelVersionId:
 
 };
 
-const datasetRows = projectTreeRows(projects).slice(0, 14);
+const datasetRows = projectTreeRows(projects).filter((project) => { let parentId = project.parent_id; while (parentId) { if (!expandedDataNodes.has(parentId)) return false; parentId = inferenceProjectById.get(parentId)?.parent_id; } return true; }).slice(0, 40);
 
 const modelTreeRows = familyRows.flatMap((family) => [
 
@@ -376,11 +456,14 @@ depth: project.depth,
 
 icon: project.hasChildren ? FolderOpen : Folder,
 
-active: project.id === inferenceForm.datasetProjectId,
+active: (inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId]).includes(project.id),
+hasChildren: project.hasChildren,
+expanded: expandedDataNodes.has(project.id),
+onToggle: () => setExpandedDataNodes((current) => { const next = new Set(current); if (next.has(project.id)) next.delete(project.id); else next.add(project.id); return next; }),
 
 title: `${project.name}\n图片：${project.image_count || 0}\n视频：${project.video_count || 0}`,
 
-onClick: () => setField("datasetProjectId", project.id),
+onClick: () => { const current = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean); const next = current.includes(project.id) ? current.filter((id) => id !== project.id) : [...current, project.id]; setInferenceForm({ ...inferenceForm, datasetProjectIds: next, datasetProjectId: next[0] || "" }); },
 
 })),
 
@@ -464,7 +547,42 @@ onClick: () => setField("pythonEnvId", env.id),
 
 ].filter((group) => group.rows.length);
 
-const displayJobs = sortedInferenceJobs;
+const jobById = new Map(sortedInferenceJobs.map((job) => [job.id, job]));
+const displayJobs = queueOrder.map((id) => jobById.get(id)).filter(Boolean);
+const activeNetworkJob = displayJobs.find((job) => {
+  const status = String(job.status || "").toLowerCase();
+  return ["preparing", "listening", "running", "stopping"].includes(status)
+    && Boolean(parseMaybeJson(job.params_json)?.networkInference?.enabled);
+});
+const beginJobDrag = (event, jobId) => {
+  event.preventDefault();
+  setDraggedJobId(jobId);
+  setDragOverJobId(jobId);
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+};
+const moveDraggedJob = (event, explicitTargetId) => {
+  if (!draggedJobId) return;
+  event.preventDefault();
+  const targetId = explicitTargetId || document.elementFromPoint(event.clientX, event.clientY)?.closest(".inference-table-row")?.dataset.jobId;
+  if (!draggedJobId || draggedJobId === targetId) return;
+  setDragOverJobId(targetId);
+  setQueueOrder((current) => {
+    const sourceIndex = current.indexOf(draggedJobId);
+    const targetIndex = current.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return current;
+    const next = [...current];
+    next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, draggedJobId);
+    queueOrderRef.current = next;
+    return next;
+  });
+};
+const finishJobDrag = (event) => {
+  if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  if (draggedJobId) moveRuntimeQueueJob?.("inference", draggedJobId, queueOrderRef.current);
+  setDraggedJobId("");
+  setDragOverJobId("");
+};
 const [selectedInferenceJobIds, setSelectedInferenceJobIds] = useState(() => new Set());
 
 const selectedInferenceCount = selectedInferenceJobIds.size;
@@ -545,7 +663,10 @@ const executionLog = liveLogs.length
 return (
   <div className="inference-workspace resizable-workspace" style={{ "--workspace-left": `${columns.left}px`, "--workspace-right": `${columns.right}px` }}>
     <aside className="inference-sidebar reference-sidebar">
-      <h2>推理资源</h2>
+      <div className="resource-sidebar-head"><h2>推理资源</h2></div>
+      <div className="resource-mode-tabs inference-resource-tabs" aria-label="推理资源类型">
+        <button className="active" type="button">推理</button>
+      </div>
       <div className="resource-tree">
         {resourceGroups.map((group) => {
           const GroupIcon = group.icon;
@@ -561,19 +682,15 @@ return (
               {isOpen && group.rows.map((row) => {
                 const RowIcon = row.icon;
                 return (
-                  <button
-                    className={`${row.active ? "active" : ""} depth-${row.depth || 0}`}
+                  <div
+                    className={`resource-tree-row ${row.active ? "active" : ""} depth-${row.depth || 0}`}
                     key={`${group.title}-${row.id}`}
                     title={row.title}
-                    onClick={row.onClick}
                     style={{ "--depth": row.depth || 0 }}
-                    type="button"
                   >
-                    <RowIcon size={14} />
-                    <span>{row.name}</span>
-                    {row.badge && <i>{row.badge}</i>}
-                    <em>{row.right}</em>
-                  </button>
+                    <button className="resource-node-toggle" type="button" disabled={!row.hasChildren} onClick={row.onToggle}>{row.hasChildren ? (row.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span />}</button>
+                    <button className="resource-node-select" type="button" onClick={row.onClick}><RowIcon size={14} /><span>{row.name}</span>{row.badge && <i>{row.badge}</i>}<em>{row.right}</em></button>
+                  </div>
                 );
               })}
               {isOpen && !group.rows.length && <p className="resource-empty">暂无资源</p>}
@@ -599,6 +716,22 @@ return (
           <button type="button">新建任务</button>
         </div>
         <div className="workspace-commandbar inference-commandbar">
+          <button
+            className={networkInferenceService?.running ? "danger-outline" : ""}
+            type="button"
+            onClick={networkInferenceService?.running ? stopNetworkInference : startNetworkInference}
+            disabled={networkInferenceBusy || !networkInferenceStatusReady}
+            title={networkInferenceService?.running ? "停止 4180 监听并完成当前会话" : "固定当前模型、算法、GPU、类别和参数并监听 4180"}
+          >
+            <Radio size={15} />
+            {!networkInferenceStatusReady
+              ? "正在确认服务状态…"
+              : networkInferenceBusy
+                ? "模型加载中…"
+                : networkInferenceService?.running
+                  ? "关闭网络推理"
+                  : "开启网络推理"}
+          </button>
           <button className="primary" type="button" onClick={submitInferenceJob}><Play size={15} />开始推理</button>
           <button type="button"><Copy size={16} />批量运行</button>
           <button className="danger-outline" type="button" disabled={!sortedInferenceJobs.length} onClick={deleteInferenceQueue} title={selectedInferenceCount ? "删除选中的推理任务" : "删除全部推理任务队列"}><Trash2 size={16} />{selectedInferenceQueueLabel}</button>
@@ -614,38 +747,21 @@ return (
             <input
               value={inferenceForm.name}
               onChange={(e) => setField("name", e.target.value)}
-              placeholder="请输入推理任务名称，留空则自动生成"
+              placeholder="可留空，将按 数据集_模型_时间 自动生成"
             />
           </div>
           <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
-            <div className="segmented">
-              <button type="button" className="active"><Database size={14} />数据集</button>
-              <button type="button"><Folder size={14} />文件目录</button>
-              <button type="button">文件列表</button>
-            </div>
-            <div className="inference-dataset-picker">
-              <label className="path-select dataset-root-select">
-                <FolderOpen size={15} />
-                <select value={selectedRootProjectId} onChange={(e) => selectDatasetRoot(e.target.value)}>
-                  <option value="">选择一级项目</option>
-                  {topLevelDatasetProjects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="path-select dataset-child-select">
-                <Folder size={15} />
-                <select value={inferenceForm.datasetProjectId} onChange={(e) => setField("datasetProjectId", e.target.value)} disabled={!selectedRootProjectId}>
-                  <option value="">{selectedRootProjectId ? "选择二级数据集" : "先选择一级项目"}</option>
-                  {secondLevelDatasetOptions.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.datasetOptionLabel || project.name} · {formatCount(project.image_count || 0)} 图像
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <span className="dataset-source-kind"><Database size={14} />数据集</span>
+            <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={(projectIds) => setInferenceForm({ ...inferenceForm, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" })} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
+          </div>
+          <div className="config-row recognition-class-row">
+            <span className="row-label">识别类别</span>
+            <RecognitionClassPicker values={inferenceForm.recognitionClasses} onChange={(recognitionClasses) => setInferenceForm((current) => ({ ...current, recognitionClasses }))} />
+          </div>
+          <div className="config-row class-mapping-config-row">
+            <span className="row-label">类别映射</span>
+            <ClassMappingPicker availableSources={selectedInferenceLabels} defaultTargets={inferenceForm.recognitionClasses} configured={inferenceForm.classMappingsConfigured} mappings={inferenceForm.classMappings} onChange={({ configured, mappings }) => setInferenceForm((current) => ({ ...current, classMappingsConfigured: configured, classMappings: mappings, ...(configured && mappings.length ? { recognitionClasses: mappings.map((row) => row.target) } : {}) }))} />
           </div>
           <div className="config-row filter-row">
             <span className="row-label">筛选条件</span>
@@ -655,6 +771,8 @@ return (
             <select value={inferenceForm.inputLabels} onChange={(e) => setField("inputLabels", e.target.value)}><option value="">标签：全部</option>{inferenceFilterOptions.labels.map((value) => <option key={value} value={value}>{value}</option>)}</select>
             <input value={inferenceForm.inputQuery} onChange={(e) => setField("inputQuery", e.target.value)} placeholder="其他标签/关键词" />
             <button type="button" onClick={() => setInferenceForm({ ...inferenceForm, inputViews: "", inputScenes: "", inputModalities: "", inputLabels: "", inputQuery: "" })}>清空</button>
+            <label className="inference-sample-count" title="留空表示使用全部筛选结果"><span>随机数量</span><input type="number" min="1" step="1" value={inferenceForm.inputLimit || ""} onChange={(e) => setField("inputLimit", e.target.value)} placeholder="全部" /></label>
+            <strong className="inference-match-count">{effectiveInferenceImageCount == null ? "等待统计" : `已选 ${formatCount(effectiveInferenceImageCount)} / ${formatCount(matchingImageCount)} 张`}</strong>
           </div>
         </div>
 
@@ -672,7 +790,7 @@ return (
               {familyRows.map((family) => <option key={family.family} value={family.family}>{family.family}</option>)}
             </select>
             <span className="row-label">模型版本</span>
-            <select value={inferenceForm.modelVersionId} onChange={(e) => setField("modelVersionId", e.target.value)} title={versionTooltip(selectedVersion)}>
+            <select value={inferenceForm.modelVersionId} onChange={(e) => selectInferenceModelVersion(e.target.value)} title={versionTooltip(selectedVersion)}>
               <option value="">请选择模型版本</option>
               {inferenceVersions.map((version) => <option key={version.id} value={version.id} title={versionTooltip(version)}>{version.model_name} / {version.version_name}</option>)}
             </select>
@@ -717,6 +835,13 @@ return (
           <h2>推理任务队列</h2>
           <span className="muted">共 {inferenceJobs.length} 条</span>
         </div>
+        {activeNetworkJob && (
+          <div className={`network-inference-live-state status-${activeNetworkJob.status}`}>
+            <Radio size={13} />
+            <b>{runStatusLabel(activeNetworkJob.status)}</b>
+            <span>{activeNetworkJob.message || "正在更新网络推理状态"}</span>
+          </div>
+        )}
         <div className="inference-table" ref={inferenceTableRef} style={inferenceTableStyle}>
           <div className="inference-table-head">
             {[
@@ -731,15 +856,16 @@ return (
           </div>
           {displayJobs.map((job) => {
             const metrics = parseMaybeJson(job.metrics_json);
-            const done = completedEvaluationStatuses.has(String(job.status || "").toLowerCase());
+            const normalizedStatus = String(job.status || "").toLowerCase();
+            const done = completedEvaluationStatuses.has(normalizedStatus) || normalizedStatus === "stopped";
             const progress = Math.max(0, Math.min(100, Number(job.progress ?? (done ? 100 : 0)) || 0));
             return (
-              <div className="inference-table-row" key={job.id}>
+              <div data-job-id={job.id} className={`inference-table-row${draggedJobId === job.id ? " is-dragging" : ""}${dragOverJobId === job.id ? " is-drag-over" : ""}`} key={job.id}>
                 <b className="inference-task-name"><input type="checkbox" checked={selectedInferenceJobIds.has(job.id)} onChange={() => toggleInferenceJobSelection(job.id)} /><span>{job.name || `推理任务 ${job.id.slice(0, 8)}`}</span></b>
                 <span>{job.dataset_project_name || "未绑定"}</span>
                 <span title={versionTooltip(modelVersions.find((version) => version.id === job.model_version_id) || {})}>{job.model_name || selectedVersion?.model_name || "未绑定模型"}</span>
-                <em className={`status-badge status-${job.status}`}>{runStatusLabel(job.status)}</em>
-                <span className="inference-progress" title={`进度 ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
+                <em className={`status-badge status-${job.status}`} title={job.message || ""}>{runStatusLabel(job.status)}</em>
+                <span className="inference-progress" title={`${job.message || "任务进度"} · ${progress}%`}><progress value={progress} max="100" /><small>{progress}%</small></span>
                 <span>{metrics.images ?? job.image_count ?? 0}</span>
                 <span>{metrics.predictions ?? job.prediction_count ?? 0}</span>
                 <span>{formatMetric(metrics.precision)}</span>
@@ -747,14 +873,12 @@ return (
                 <span>{formatMetric(metrics.map50)}</span>
                 <div className="queue-actions">
                   <span className="queue-action-row">
-                    <button type="button" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
+                    <button type="button" title="查看详情" disabled={!done} onClick={() => viewInferenceResults(job)}><Eye size={14} /></button>
+                    <button type="button" title={job.status === "paused" ? "继续任务" : "暂停任务"} disabled={done} onClick={() => updateInferenceJobState?.(job.id, job.status === "paused" ? "resume" : "pause")}>{job.status === "paused" ? <Play size={14} /> : <Pause size={14} />}</button>
                     <button className="restart-action" type="button" title="重新开始" onClick={() => requeueInferenceJob?.(job.id)}><RotateCcw size={15} strokeWidth={2.2} /></button>
                     <button className="danger-icon" type="button" title="删除任务" onClick={() => deleteInferenceJob(job.id)}><Trash2 size={14} /></button>
                   </span>
-                  <span className="queue-priority">
-                    <button type="button" title="优先级上移" onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("inference", job.id, "up"); }}><ArrowUp size={13} /></button>
-                    <button type="button" title="优先级下移" onClick={(event) => { event.stopPropagation(); moveRuntimeQueueJob?.("inference", job.id, "down"); }}><ArrowDown size={13} /></button>
-                  </span>
+                  <button className="queue-drag-handle" type="button" title="按住拖动任务排序" aria-label="拖动任务排序" onPointerDown={(event) => beginJobDrag(event, job.id)} onPointerMove={moveDraggedJob} onPointerUp={finishJobDrag} onPointerCancel={finishJobDrag}><GripVertical size={15} /></button>
                 </div>
               </div>
             );
@@ -781,12 +905,12 @@ return (
         <div><span>mAP50-95</span><b>{formatMetric(latestMetrics.map)}</b></div>
       </div>
       <div className="result-preview-strip reference-preview">
-        <h3>结果预览 <span>（最近 12 张）</span><button type="button">查看全部</button></h3>
+        <h3>结果预览 <span>（最近 12 张）</span><button type="button" disabled={!previewRows.length} onClick={() => setSampleViewer(0)}>查看全部</button></h3>
         <div className="reference-preview-grid">
           {(previewItems.length ? previewItems : Array.from({ length: 8 }, (_, index) => ({ id: `empty-${index}`, display_name: "等待结果" }))).map((item, index) => (
-            <div className={`result-thumb thumb-${index}`} key={item.id || item.display_name || index}>
+            <button className={`result-thumb thumb-${index}`} type="button" disabled={!item.thumb_url && !item.image_url && !item.project_image_id} onDoubleClick={() => setSampleViewer(index)} key={item.id || item.display_name || index}>
               <div className="result-thumb-media">
-                {item.thumb_url && <img src={item.thumb_url} alt={item.display_name || "推理结果"} loading="lazy" />}
+                {item.thumb_url && <AuthenticatedImage src={item.thumb_url} alt={item.display_name || "推理结果"} loading="lazy" />}
                 {predictionItems(item.predictions_json).map((prediction, predictionIndex) => {
                   const boxStyle = predictionBoxStyle(prediction, item);
                   if (!boxStyle) return null;
@@ -797,12 +921,12 @@ return (
                       key={prediction.id || predictionIndex}
                       style={{ ...boxStyle, borderColor: color, "--box-color": color }}
                     >
-                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(0)}%</small>}
+                      {prediction.score != null && <small>{(Number(prediction.score) * 100).toFixed(2)}%</small>}
                     </i>
                   );
                 })}
               </div>
-            </div>
+            </button>
           ))}
         </div>
         <div className="bbox-legend-row">
@@ -816,6 +940,7 @@ return (
         <pre>{executionLog}</pre>
       </div>
     </aside>
+    {sampleViewer != null && <InferenceResultViewer rows={previewRows} initialIndex={sampleViewer} onClose={() => setSampleViewer(null)} predictionItems={predictionItems} predictionBoxStyle={predictionBoxStyle} predictionColor={predictionColor} />}
   </div>
 );
 }

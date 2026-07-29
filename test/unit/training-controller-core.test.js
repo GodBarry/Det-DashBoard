@@ -27,6 +27,7 @@ test("createDefaultTrainingForm returns the current defaults and applies restore
   assert.equal(form.initializationMode, "random");
   assert.equal(form.taskType, "detect");
   assert.deepEqual(form.trainProjectIds, []);
+  assert.deepEqual(form.recognitionClasses, ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"]);
   assert.deepEqual(form.datasetFilters, {
     train: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
     val: { scenes: [], views: [], modalities: [], labels: [], keywords: [] },
@@ -103,6 +104,7 @@ test("buildTrainingPayload preserves split fallbacks, conversions, and algorithm
   assert.equal(payload.params.epochs, 20);
   assert.equal(payload.params.imgsz, 512);
   assert.equal(payload.params.batch, 8);
+  assert.deepEqual(payload.params.recognitionClasses, ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"]);
   assert.equal(payload.params.learningRate, 0.01);
   assert.equal(payload.params.lr0, 0.01);
   assert.equal(payload.params.savePeriod, 5);

@@ -1,8 +1,21 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const { createInferenceWorker } = require("../../server/runtime-jobs/inference-worker");
+
+test("DINO runner uses true batches with safe GPU fallback", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../server/runtime-jobs/inference-worker.js"), "utf8");
+
+  assert.match(source, /batchSize: Math\.max\(1, Math\.floor\(Number\(params\.batch/);
+  assert.match(source, /model\.test_step\(pseudo_collate\(data\)\)/);
+  assert.match(source, /safe_cap = 2 if total_gb < 6 else \(4 if total_gb < 12 else 8\)/);
+  assert.match(source, /except torch\.cuda\.OutOfMemoryError/);
+  assert.match(source, /active_batch = max\(1, active_batch \/\/ 2\)/);
+  assert.match(source, /allowed_classes = \{str\(name\)\.strip\(\)\.lower\(\)/);
+  assert.match(source, /if str\(label\)\.strip\(\)\.lower\(\) not in allowed_classes: continue/);
+});
 
 function deferred() {
   let resolve;
@@ -130,7 +143,7 @@ test("runInferenceJob records command failure output and the injected failure ti
   }, "worker-9");
 
   const failed = fixture.calls.queries.at(-1);
-  assert.equal(failed.sql, "UPDATE runtime_inference_jobs SET status='failed', message=$1, params_json=$2, finished_at=now() WHERE id=$3");
+  assert.equal(failed.sql, "UPDATE runtime_inference_jobs SET status='failed', process_pid=NULL, message=$1, params_json=$2, finished_at=now() WHERE id=$3");
   assert.equal(failed.params[0], "python failed");
   assert.equal(failed.params[2], "job-failure");
   assert.deepEqual(JSON.parse(failed.params[1]).output, {
@@ -161,7 +174,7 @@ test("startInferenceWorker prevents reentry and stop clears timers after the act
   assert.equal(fixture.calls.timeouts[0].delay, 250);
   const firstTick = fixture.calls.intervals[0].callback();
   const overlappingTick = fixture.calls.timeouts[0].callback();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(claimCount, 1);
   assert.deepEqual(fixture.calls.claims, ["local-infer-99"]);
 

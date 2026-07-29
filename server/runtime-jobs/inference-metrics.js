@@ -134,7 +134,7 @@ function averagePrecision(points, totalGt) {
     const best = curve.reduce((max, point) => point.recall >= recallThreshold ? Math.max(max, point.precision) : max, 0);
     ap += best / 101;
   }
-  return ap;
+  return Math.min(1, Math.max(0, ap));
 }
 
 module.exports = {

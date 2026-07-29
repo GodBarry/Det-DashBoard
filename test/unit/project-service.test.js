@@ -110,6 +110,20 @@ test("listProjects preserves scope and active-or-latest label version SQL", asyn
   assert.match(queryCall.sql, /a\.label_version_id=COALESCE\(p\.active_label_version_id/);
 });
 
+test("trash listing returns only deleted subtree roots", async () => {
+  let queryCall;
+  const query = async (sql, params) => {
+    queryCall = { sql, params };
+    return { rows: [] };
+  };
+  const { service } = createFixture(query);
+
+  await service.listProjects(true, { id: "user-2" }, "mine");
+
+  assert.match(queryCall.sql, /p\.deleted_at IS NOT NULL/);
+  assert.match(queryCall.sql, /p\.parent_id IS NULL OR NOT EXISTS \(SELECT 1 FROM projects parent WHERE parent\.id=p\.parent_id AND parent\.deleted_at IS NOT NULL\)/);
+});
+
 test("projectSummary preserves recursive label fallback and result shape", async () => {
   const expected = { image_count: 7, annotation_count: 11, labels: ["car"] };
   let queryCall;

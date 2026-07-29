@@ -1,5 +1,6 @@
-import React from "react";
-import { X } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, File, Folder, X } from "lucide-react";
+import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 
 import { getAssetDrawerSubtitle, getAssetDrawerTitle } from "./assetDrawerPresentation.js";
 import { DrawerField } from "./DrawerField.jsx";
@@ -19,16 +20,98 @@ export function AssetDrawer({
   setEnvForm,
   createModel,
   createModelVersion,
+  inspectModelWeight,
   createPythonEnv,
 }) {
   const drawerTitle = getAssetDrawerTitle(mode);
   const drawerSubtitle = getAssetDrawerSubtitle(mode);
 
-  const submit = () => {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [analysis, setAnalysis] = useState(null);
+  const [filePicker, setFilePicker] = useState(null);
+  const [filePickerBusy, setFilePickerBusy] = useState(false);
+  const previousAutoName = useRef("");
+  const analysisSequence = useRef(0);
+  const selectedModel = mlModels.find((model) => model.id === versionForm.modelId);
+  const selectedProject = projects.find((project) => project.id === versionForm.datasetProjectId);
+  const automaticVersionName = useMemo(() => {
+    const clean = (value) => String(value || "").trim().replace(/[\\/:*?"<>|\s]+/g, "_").replace(/_+/g, "_");
+    const epoch = String(versionForm.sourcePath || "").match(/epoch[_-]?(\d+)/i)?.[1];
+    return [clean(selectedModel?.name || "model"), clean(selectedProject?.name || "unknown"), epoch ? `epoch${epoch}` : null].filter(Boolean).join("_");
+  }, [selectedModel?.name, selectedProject?.name, versionForm.sourcePath]);
+
+  useEffect(() => {
+    if (mode !== "version" && mode !== "pretrained") return;
+    if (!versionForm.versionName || versionForm.versionName === previousAutoName.current) {
+      previousAutoName.current = automaticVersionName;
+      setVersionForm((current) => ({ ...current, versionName: automaticVersionName }));
+    }
+  }, [automaticVersionName, mode, setVersionForm, versionForm.versionName]);
+
+  useEffect(() => {
+    if ((mode !== "version" && mode !== "pretrained") || !versionForm.modelId || !versionForm.sourcePath.trim()) {
+      setAnalysis(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const sequence = ++analysisSequence.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        setAnalysis({ loading: true });
+        const timeout = window.setTimeout(() => controller.abort(), 65000);
+        const result = await inspectModelWeight({ modelId: versionForm.modelId, sourcePath: versionForm.sourcePath }, controller.signal);
+        window.clearTimeout(timeout);
+        if (sequence === analysisSequence.current) {
+          setAnalysis(result);
+          if (Array.isArray(result.classes) && result.classes.length) {
+            setVersionForm((current) => ({
+              ...current,
+              params: {
+                ...(current.params || {}),
+                detectedClasses: result.classes,
+                detectedClassSource: result.classSource || null,
+              },
+            }));
+          }
+        }
+      } catch (error) {
+        if (sequence === analysisSequence.current) setAnalysis({ error: error.name === "AbortError" ? "自动解析超过 65 秒，可直接登记或检查 Python/Torch 环境" : error.message });
+      }
+    }, 450);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [inspectModelWeight, mode, versionForm.modelId, versionForm.sourcePath]);
+
+  const submit = async () => {
+    setSubmitMessage("");
     if (mode === "cluster") createModel();
-    if (mode === "version") createModelVersion();
+    if (mode === "version" || mode === "pretrained") {
+      setSubmitting(true);
+      try {
+        await createModelVersion();
+        onClose();
+      } catch (error) {
+        setSubmitMessage(error.message);
+      } finally {
+        setSubmitting(false);
+      }
+    }
     if (mode === "env") createPythonEnv();
     if (mode === "algorithm") window.alert("算法适配器导入接口待接入，当前已完成界面布局");
+  };
+
+  const openServerFilePicker = async (target = "__roots__") => {
+    setFilePickerBusy(true);
+    try {
+      const response = await fetch(`/api/fs/files?path=${encodeURIComponent(target)}&extensions=.pt,.pth,.onnx`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "读取服务器目录失败");
+      setFilePicker(data);
+    } catch (error) {
+      setSubmitMessage(error.message);
+    } finally {
+      setFilePickerBusy(false);
+    }
   };
 
   return (
@@ -41,8 +124,9 @@ export function AssetDrawer({
         <button className="drawer-close" onClick={onClose} aria-label="关闭"><X size={17} /></button>
       </div>
       <div className="drawer-tabs">
-        <button type="button" className={mode === "cluster" ? "active" : ""} onClick={() => setMode("cluster")}>模型</button>
-        <button type="button" className={mode === "version" ? "active" : ""} onClick={() => setMode("version")}>模型版本</button>
+        <button type="button" className={mode === "cluster" ? "active" : ""} onClick={() => setMode("cluster")}>模型簇</button>
+        <button type="button" className={mode === "version" ? "active" : ""} onClick={() => { setVersionForm({ ...versionForm, stage: "candidate" }); setMode("version"); }}>模型库模型</button>
+        <button type="button" className={mode === "pretrained" ? "active" : ""} onClick={() => { setVersionForm({ ...versionForm, stage: "pretrained" }); setMode("pretrained"); }}>预训练模型</button>
         <button type="button" className={mode === "algorithm" ? "active" : ""} onClick={() => setMode("algorithm")}>算法适配</button>
         <button type="button" className={mode === "env" ? "active" : ""} onClick={() => setMode("env")}>Python 环境</button>
       </div>
@@ -55,17 +139,17 @@ export function AssetDrawer({
             <DrawerField label="说明" tall><textarea value={modelForm.description} onChange={(e) => setModelForm({ ...modelForm, description: e.target.value })} placeholder="模型簇用途、适用场景、版本策" /></DrawerField>
           </>
         )}
-        {mode === "version" && (
+        {(mode === "version" || mode === "pretrained") && (
           <>
             <DrawerField label="所属模型簇"><select value={versionForm.modelId} onChange={(e) => setVersionForm({ ...versionForm, modelId: e.target.value })}><option value="">请选择模型</option>{mlModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></DrawerField>
             <DrawerField label="版本名称"><input value={versionForm.versionName} onChange={(e) => setVersionForm({ ...versionForm, versionName: e.target.value })} placeholder="yolov8n_ultralytics_8.4.80_cpu" /></DrawerField>
-            <DrawerField label="权重来源"><div className="drawer-segment"><button className="active" type="button">本地路径</button><button type="button">MinIO路径</button><button type="button">训练产物</button></div></DrawerField>
-            <DrawerField label="权重文件路径"><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} placeholder="C:\\Users\\Administrator\\Downloads\\v8_s.pt" /></DrawerField>
-            <DrawerField label="训练数据"><select value={versionForm.datasetProjectId || ""} onChange={(e) => setVersionForm({ ...versionForm, datasetProjectId: e.target.value })}><option value="">请选择训练数据</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></DrawerField>
-            <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })}><option value="pretrained">pretrained</option><option value="candidate">candidate</option><option value="published">published</option></select></DrawerField>
+            <DrawerField label="权重来源"><div className="drawer-segment">{[["local", "本地路径"], ["server", "服务器路径"], ["network", "网络路径"]].map(([value, label]) => <button className={(versionForm.sourceType || "local") === value ? "active" : ""} type="button" key={value} onClick={() => { setVersionForm({ ...versionForm, sourceType: value, sourcePath: "" }); setAnalysis(null); }}>{label}</button>)}</div></DrawerField>
+            <DrawerField label={(versionForm.sourceType || "local") === "network" ? "SSH / SCP 路径" : "权重文件路径"}><DrawerInputWithIcon value={versionForm.sourcePath} onChange={(e) => setVersionForm({ ...versionForm, sourcePath: e.target.value })} onIconClick={(versionForm.sourceType || "local") === "network" ? undefined : () => openServerFilePicker("__roots__")} iconTitle="浏览服务器权重文件" placeholder={(versionForm.sourceType || "local") === "network" ? "scp://user@server/path/best.pth" : "E:\\models\\best.pth 或 /srv/models/best.pth"} /></DrawerField>
+            {(versionForm.sourceType || "local") === "network" && <p className="drawer-source-hint">{"服务器将使用已配置的 SSH 密钥通过 SCP 下载；支持 scp://user@host/path 或 user@host:/path。"}</p>}
+            <DrawerField label="训练数据"><div className="asset-dataset-picker"><CascadingProjectPicker projects={projects} value={versionForm.datasetProjectId === "unknown" ? "" : versionForm.datasetProjectId} onChange={(value) => setVersionForm({ ...versionForm, datasetProjectId: value || "unknown" })} storageKey="asset-version-dataset" ariaLabel="选择训练数据集" /><button type="button" className={`asset-unknown-dataset ${versionForm.datasetProjectId === "unknown" ? "active" : ""}`} onClick={() => setVersionForm({ ...versionForm, datasetProjectId: "unknown" })}>未知</button></div></DrawerField>
+            <DrawerField label="阶段"><select value={versionForm.stage} onChange={(e) => setVersionForm({ ...versionForm, stage: e.target.value })} disabled={mode === "pretrained"}><option value="pretrained">预训练</option><option value="candidate">模型库</option><option value="published">已发布</option></select></DrawerField>
             <DrawerField label="说明" tall><textarea value={versionForm.description || ""} onChange={(e) => setVersionForm({ ...versionForm, description: e.target.value })} placeholder="请输入说明（可选）" maxLength={500} /></DrawerField>
-            <DrawerField label="MinIO目标路径"><DrawerInputWithIcon readOnly copyIcon value={`assets/models/${versionForm.versionName || "model-version"}/best.pt`} /></DrawerField>
-            <div className="auto-parse-card"><h3>自动解析</h3><p><span>文件大小</span><b>--</b></p><p><span>SHA256</span><b>提交后计</b></p><p><span>框架</span><b>Ultralytics</b></p><p><span>任务</span><b>detect</b></p></div>
+            <div className={`auto-parse-card ${analysis?.error ? "has-error" : ""}`}><h3>自动解析</h3><p><span>文件大小</span><b>{analysis?.loading ? "解析中..." : analysis?.sizeLabel || "--"}</b></p><p><span>SHA256</span><b title={analysis?.sha256}>{analysis?.sha256 ? `${analysis.sha256.slice(0, 16)}...` : analysis?.sha256Pending ? "登记时计算" : "--"}</b></p><p><span>框架</span><b>{analysis?.framework || selectedModel?.framework || "待解析"}</b></p><p><span>任务</span><b>{analysis?.taskType || selectedModel?.task_type || "detect"}</b></p><p><span>内置标签</span><b title={(analysis?.classes || []).join(", ")}>{analysis?.loading ? "解析中..." : analysis?.classes?.length ? `${analysis.classes.length} 类：${analysis.classes.slice(0, 4).join("、")}${analysis.classes.length > 4 ? "…" : ""}` : "未发现"}</b></p>{analysis?.classWarning && !analysis?.classes?.length && <p className="drawer-source-hint">{analysis.classWarning}</p>}{analysis?.error && <p className="drawer-inline-error">{analysis.error}</p>}</div>
           </>
         )}
         {mode === "algorithm" && (
@@ -93,9 +177,11 @@ export function AssetDrawer({
           </>
         )}
       </div>
+      {filePicker && <div className="asset-file-picker"><div className="asset-file-picker-head"><button type="button" disabled={!filePicker.parent || filePickerBusy} onClick={() => openServerFilePicker(filePicker.parent)}><ChevronLeft size={14} /></button><b title={filePicker.current}>{filePicker.current}</b><button type="button" onClick={() => setFilePicker(null)}><X size={14} /></button></div><div className="asset-file-picker-list">{(filePicker.dirs || []).map((dir) => <button type="button" key={dir.path} onClick={() => openServerFilePicker(dir.path)}><Folder size={15} /><span>{dir.name}</span></button>)}{(filePicker.files || []).map((file) => <button type="button" key={file.path} onClick={() => { setVersionForm({ ...versionForm, sourcePath: file.path }); setFilePicker(null); }}><File size={15} /><span>{file.name}</span><em>{file.size >= 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.ceil(file.size / 1024)} KB`}</em></button>)}{filePickerBusy && <p>正在读取目录...</p>}{!filePickerBusy && !(filePicker.dirs || []).length && !(filePicker.files || []).length && <p>此目录没有可用的模型文件</p>}</div></div>}
       <div className="drawer-actions">
+        {submitMessage && <span className="drawer-submit-message">{submitMessage}</span>}
         <button onClick={onClose}>取消</button>
-        <button className="primary" onClick={submit}>{drawerTitle}</button>
+        <button className="primary" onClick={submit} disabled={submitting}>{submitting ? "登记中..." : drawerTitle}</button>
       </div>
     </aside>
   );

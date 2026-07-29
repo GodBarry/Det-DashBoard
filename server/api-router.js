@@ -279,6 +279,7 @@ function createMultiUserRouter(deps = {}) {
   const updateUserPermissions = pickFunction(deps, ["updateUserPermissions", "setUserPermissions"]);
   const listPublicAssets = pickFunction(deps, ["listPublicAssets"]);
   const removePublicAsset = pickFunction(deps, ["removePublicAsset"]);
+  const annotationStandardService = deps.annotationStandardService;
   const router = createRouter({
     authenticate,
     requireAdmin: adminGuard,
@@ -394,6 +395,23 @@ function createMultiUserRouter(deps = {}) {
   router.get("/api/admin/audit", { access: "admin" }, async ({ query, user }) => ({ logs: await accessControl.listAuditLogs(query, user) }));
   router.get("/api/audit", { access: "admin" }, async ({ query, user }) => ({ logs: await accessControl.listAuditLogs(query, user) }));
   router.get("/api/audit-logs", { access: "admin" }, async ({ query, user }) => ({ logs: await accessControl.listAuditLogs(query, user) }));
+
+  router.get("/api/annotation-standard", async () => {
+    if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
+    return annotationStandardService.getStandard();
+  });
+  router.put("/api/admin/annotation-standard/principles", { access: "admin" }, async ({ body, user }) => {
+    if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
+    return { version: await annotationStandardService.updatePrinciples(body, user) };
+  });
+  router.put("/api/admin/annotation-standard/categories/:categoryId", { access: "admin" }, async ({ params, body, user }) => {
+    if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
+    return { category: await annotationStandardService.saveCategory(params.categoryId, body, user) };
+  });
+  router.put("/api/admin/annotation-standard/terms/:termId", { access: "admin" }, async ({ params, body, user }) => {
+    if (!annotationStandardService) throw httpError(501, "annotation standard service is not configured");
+    return { term: await annotationStandardService.saveTerm(params.termId, body, user) };
+  });
 
   router.get("/api/annotation-tasks", async ({ query, user }) => collaborationService.listTasks(query, user));
   router.post("/api/annotation-tasks", async ({ body, user }) => collaborationService.createTask(body, user));

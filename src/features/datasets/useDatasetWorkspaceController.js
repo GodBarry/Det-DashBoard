@@ -8,6 +8,7 @@ import {
   DATASET_WORKSPACE_POLL_INTERVAL,
   findRunningImport,
 } from "./dataset-workspace-core.js";
+import { recordDatasetActivity } from "./datasetActivityLog.js";
 
 const requestWithFetch = (...args) => fetch(...args);
 
@@ -33,12 +34,24 @@ export function useDatasetWorkspaceController({
   const [checkedIds, setCheckedIds] = useState([]);
   const [lastCheckedId, setLastCheckedId] = useState(null);
   const importRefreshKeyRef = useRef("");
+  const loggedJobStatesRef = useRef(null);
+  const activeProjectIdRef = useRef(activeProject?.id || null);
+  const workspaceRequestRef = useRef({ sequence: 0, controller: null });
+  const summaryRequestRef = useRef({ sequence: 0, controller: null });
+  const importsRequestRef = useRef({ sequence: 0, controller: null });
+  activeProjectIdRef.current = activeProject?.id || null;
+
+  useEffect(() => () => {
+    workspaceRequestRef.current.controller?.abort();
+    summaryRequestRef.current.controller?.abort();
+    importsRequestRef.current.controller?.abort();
+  }, []);
 
   useEffect(() => {
     if (!activeProject) return;
 
     loadWorkspace(activeProject.id);
-  }, [activeProject, page, filters]);
+  }, [activeProject?.id, page, filters]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -55,7 +68,7 @@ export function useDatasetWorkspaceController({
     }, DATASET_WORKSPACE_POLL_INTERVAL);
 
     return () => window.clearInterval(timer);
-  }, [activeProject, currentUser?.id]);
+  }, [activeProject?.id, currentUser?.id]);
 
   useEffect(() => {
     if (!activeProject) return;
@@ -65,13 +78,34 @@ export function useDatasetWorkspaceController({
     if (!refreshKey || importRefreshKeyRef.current === refreshKey) return;
 
     importRefreshKeyRef.current = refreshKey;
+    const terminal = imports.find((row) => ["completed", "failed", "cancelled", "canceled"].includes(String(row.status || "").toLowerCase()));
+    if (terminal) recordDatasetActivity("导入", terminal.status === "completed" ? `导入完成：${activeProject.name}` : `导入${terminal.status === "failed" ? "失败" : "已取消"}：${activeProject.name}`, terminal.status === "failed" ? "error" : "info", terminal.error_message || terminal.message || "");
     loadWorkspace(activeProject.id);
   }, [activeProject, imports]);
 
+  useEffect(() => {
+    if (loggedJobStatesRef.current == null) {
+      loggedJobStatesRef.current = new Set(jobs.map((job) => `${job.id}:${job.status}`));
+      return;
+    }
+    for (const job of jobs) {
+      if (!['done', 'completed', 'failed'].includes(String(job.status || '').toLowerCase())) continue;
+      const key = `${job.id}:${job.status}`;
+      if (loggedJobStatesRef.current.has(key)) continue;
+      loggedJobStatesRef.current.add(key);
+      if (job.type === 'export') recordDatasetActivity('导出', String(job.status).toLowerCase() === 'failed' ? '导出任务失败' : '导出任务完成', String(job.status).toLowerCase() === 'failed' ? 'error' : 'info', job.error || job.message || '');
+    }
+  }, [jobs]);
+
   function loadWorkspace(projectId) {
+    workspaceRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = workspaceRequestRef.current.sequence + 1;
+    workspaceRequestRef.current = { sequence, controller };
     const params = buildWorkspaceSearchParams(page, filters);
 
-    request(`/api/projects/${projectId}/images?${params}`).then((response) => response.json()).then((data) => {
+    request(`/api/projects/${projectId}/images?${params}`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (controller.signal.aborted || activeProjectIdRef.current !== projectId || workspaceRequestRef.current.sequence !== sequence) return;
       setItems(data.items || []);
       setTotalItems(Number(data.total) || 0);
 
@@ -86,13 +120,19 @@ export function useDatasetWorkspaceController({
       if (selected && !data.items?.some((item) => item.id === selected.id)) setSelected(data.items?.[0] || null);
 
       setCheckedIds((ids) => ids.filter((id) => data.items?.some((item) => item.id === id)));
-    }).catch(() => {});
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
 
     loadSummary(projectId);
     loadImports(projectId);
   }
 
   function resetWorkspace() {
+    workspaceRequestRef.current.controller?.abort();
+    summaryRequestRef.current.controller?.abort();
+    importsRequestRef.current.controller?.abort();
+    workspaceRequestRef.current.sequence += 1;
+    summaryRequestRef.current.sequence += 1;
+    importsRequestRef.current.sequence += 1;
     setPage(1);
     setSelected(null);
     setItems([]);
@@ -102,18 +142,31 @@ export function useDatasetWorkspaceController({
   }
 
   function loadSummary(projectId) {
-    request(`/api/projects/${projectId}/summary`).then((response) => response.json()).then((data) => setSummary(data.summary || null)).catch(() => {});
+    summaryRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = summaryRequestRef.current.sequence + 1;
+    summaryRequestRef.current = { sequence, controller };
+    request(`/api/projects/${projectId}/summary`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (!controller.signal.aborted && activeProjectIdRef.current === projectId && summaryRequestRef.current.sequence === sequence) setSummary(data.summary || null);
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
   }
 
   function loadImports(projectId) {
-    request(`/api/projects/${projectId}/imports`).then((response) => response.json()).then((data) => {
+    importsRequestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const sequence = importsRequestRef.current.sequence + 1;
+    importsRequestRef.current = { sequence, controller };
+    request(`/api/projects/${projectId}/imports`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (controller.signal.aborted || activeProjectIdRef.current !== projectId || importsRequestRef.current.sequence !== sequence) return;
       const rows = data.imports || [];
 
       setImports(rows);
       setLatestImport(findRunningImport(rows));
-    }).catch(() => {});
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
 
-    request(`/api/projects/${projectId}/imports?trash=1`).then((response) => response.json()).then((data) => setTrashImports(data.imports || [])).catch(() => {});
+    request(`/api/projects/${projectId}/imports?trash=1`, { signal: controller.signal }).then((response) => response.json()).then((data) => {
+      if (!controller.signal.aborted && activeProjectIdRef.current === projectId && importsRequestRef.current.sequence === sequence) setTrashImports(data.imports || []);
+    }).catch((error) => { if (error?.name !== "AbortError") setError(error.message); });
   }
 
   function cancelLatestImport() {
@@ -159,9 +212,10 @@ export function useDatasetWorkspaceController({
     })
       .then((response) => response.json().then((data) => {
         if (!response.ok) throw new Error(data.error || "导出失败");
+        recordDatasetActivity("导出", `已创建导出任务：${activeProject.name}（${exportFormat}）`);
         return data;
       }))
-      .catch((error) => setError("导出失败: " + error.message));
+      .catch((error) => { recordDatasetActivity("导出", `导出失败：${activeProject.name}`, "error", error.message); setError("导出失败: " + error.message); });
   }
 
   function openWorkspaceTrash() {

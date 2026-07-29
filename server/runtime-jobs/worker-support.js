@@ -2,26 +2,25 @@ function createRuntimeWorkerSupport({ query, spawn, processRef }) {
   function stopProcess(pid) {
     const numericPid = Number(pid);
     if (!numericPid || numericPid === processRef.pid) return false;
+    if (processRef.platform === "win32") {
+      try {
+        spawn("taskkill", ["/PID", String(numericPid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        return true;
+      } catch (_) {}
+    }
     try {
       processRef.kill(numericPid);
       return true;
     } catch (error) {
-      if (processRef.platform === "win32") {
-        try {
-          spawn("taskkill", ["/PID", String(numericPid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-          return true;
-        } catch (_) {
-          return false;
-        }
-      }
       return false;
     }
   }
 
   function runChildProcess(command, args, options = {}) {
     return new Promise((resolve, reject) => {
-      const { onStdout, onStderr, onOutput, ...spawnOptions } = options;
+      const { onSpawn, onStdout, onStderr, onOutput, ...spawnOptions } = options;
       const child = spawn(command, args, { windowsHide: true, ...spawnOptions });
+      try { onSpawn?.(child); } catch (_) {}
       let stdout = "";
       let stderr = "";
       let combined = "";

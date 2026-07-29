@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Edit3,
@@ -9,12 +10,14 @@ import {
   Image as ImageIcon,
   RefreshCw,
   RotateCcw,
+  Square,
   Tags,
   Trash2,
   Video,
 } from "lucide-react";
 
 import { formatCount } from "../../shared/presentation.js";
+import { readDatasetActivityLogs, subscribeDatasetActivity } from "./datasetActivityLog.js";
 
 export function HomeSidebar({ projects, currentFolder, currentFolderId, setCurrentFolderId, expandedIds, setExpandedIds, openProject, openHomeFolder, createProject, stats }) {
 
@@ -204,7 +207,41 @@ depth={depth + 1}
 
 }
 
-export function HomeInspector({ stats, trashProjects, restoreProject, restoreAllProjects, emptyProjectTrash, deleteProjectPermanently }) {
+export function HomeInspector({ stats, trashProjects, restoreProject, restoreAllProjects, emptyProjectTrash, deleteProjectPermanently, refreshHome }) {
+
+const [activityLogs, setActivityLogs] = useState(readDatasetActivityLogs);
+const [activeImports, setActiveImports] = useState([]);
+const importPollRef = useRef({ tick: 0, activeIds: new Set() });
+const refreshHomeRef = useRef(refreshHome);
+refreshHomeRef.current = refreshHome;
+useEffect(() => subscribeDatasetActivity(() => setActivityLogs(readDatasetActivityLogs())), []);
+useEffect(() => {
+  let mounted = true;
+  const load = () => fetch("/api/imports?scope=mine", { cache: "no-store" })
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    .then((data) => {
+      if (!mounted) return;
+      const rows = data.imports || [];
+      const nextIds = new Set(rows.map((row) => row.id));
+      const completed = [...importPollRef.current.activeIds].some((id) => !nextIds.has(id));
+      importPollRef.current = { tick: importPollRef.current.tick + 1, activeIds: nextIds };
+      setActiveImports(rows);
+      if (completed || (rows.length && importPollRef.current.tick % 3 === 0)) refreshHomeRef.current?.();
+    })
+    .catch(() => {});
+  load();
+  const timer = window.setInterval(load, 1000);
+  return () => { mounted = false; window.clearInterval(timer); };
+}, []);
+const cancelImport = (row) => {
+  setActiveImports((current) => current.map((item) => item.id === row.id ? { ...item, status: "cancel_requested", message: "正在取消导入" } : item));
+  fetch(`/api/imports/${encodeURIComponent(row.id)}/cancel`, { method: "POST" }).catch(() => {});
+};
+const [activityPage, setActivityPage] = useState(1);
+const activityPageSize = 5;
+const activityPages = Math.max(1, Math.ceil(activityLogs.length / activityPageSize));
+const visibleActivityLogs = activityLogs.slice((activityPage - 1) * activityPageSize, activityPage * activityPageSize);
+useEffect(() => setActivityPage((value) => Math.min(value, activityPages)), [activityPages]);
 
 return (
 
@@ -232,6 +269,14 @@ return (
 
 </div>
 
+</section>
+
+<section className="home-inspector-block global-import-panel">
+<div className="section-title-row compact-title"><h2>导入任务</h2><span>进行中 {formatCount(activeImports.length)} 项</span></div>
+<div className="global-import-list">
+{activeImports.map((row) => { const progress = Math.max(0, Math.min(100, Number(row.progress) || 0)); const scanning = ["pending", "preparing", "scanning"].includes(row.status) && !Number(row.total_files); return <article className="global-import-row" key={row.id}><div className="global-import-head"><div><b title={row.project_name}>{row.project_name || "未命名项目"}</b><span>{row.status === "cancel_requested" ? "正在中止" : scanning ? "建立索引" : "导入文件"}</span></div><button type="button" title="中止导入" disabled={row.status === "cancel_requested"} onClick={() => cancelImport(row)}><Square size={12} /></button></div><div className="global-import-progress"><progress className={scanning ? "indeterminate" : ""} value={scanning ? undefined : progress} max="100" /><b>{scanning ? "索引中" : `${progress}%`}</b></div><p title={row.message}>{row.message || "正在准备导入"}</p></article>; })}
+{!activeImports.length && <div className="muted global-import-empty">当前没有导入任务</div>}
+</div>
 </section>
 
 <section className="home-inspector-block home-trash-panel">
@@ -278,6 +323,12 @@ return (
 
 </div>
 
+</section>
+
+<section className="home-inspector-block dataset-operation-log">
+<div className="section-title-row compact-title"><h2>操作日志</h2><span>共 {formatCount(activityLogs.length)} 条</span></div>
+<div className="dataset-log-list">{visibleActivityLogs.map((row) => <article className={`dataset-log-row level-${row.level}`} key={row.id}><div className="dataset-log-row-head"><time>{new Date(row.createdAt).toLocaleString()}</time><b>{row.action}</b></div><span className="dataset-log-message">{row.message}</span>{row.details && <details><summary>查看详情</summary><pre>{row.details}</pre></details>}</article>)}{!activityLogs.length && <div className="muted dataset-log-empty">暂无数据操作日志</div>}</div>
+{activityLogs.length > 0 && <div className="dataset-log-pagination"><span>共 {activityPages} 页</span><button title="上一页" disabled={activityPage <= 1} onClick={() => setActivityPage((value) => Math.max(1, value - 1))}><ChevronLeft size={14} /></button><label>第<input aria-label="操作日志页码" type="number" min="1" max={activityPages} value={activityPage} onChange={(event) => setActivityPage(Math.max(1, Math.min(activityPages, Number(event.target.value) || 1)))} />页</label><button title="下一页" disabled={activityPage >= activityPages} onClick={() => setActivityPage((value) => Math.min(activityPages, value + 1))}><ChevronRight size={14} /></button></div>}
 </section>
 
 </aside>

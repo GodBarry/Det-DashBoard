@@ -1,7 +1,10 @@
+export const DEFAULT_RECOGNITION_CLASSES = ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"];
+
 export function createDefaultInferenceForm(restoredInferenceForm) {
-  return {
+  const form = {
     name: "",
     datasetProjectId: "",
+    datasetProjectIds: [],
     modelId: "",
     modelVersionId: "",
     templateId: "",
@@ -11,6 +14,9 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     iou: 0.7,
     imgsz: 640,
     batch: 16,
+    recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: null,
+    classMappingsConfigured: false,
     device: "0",
     inputScope: "project",
     inputScenes: "",
@@ -26,6 +32,14 @@ export function createDefaultInferenceForm(restoredInferenceForm) {
     createLabelVersion: false,
     fakeReferenceMode: false,
     ...(restoredInferenceForm || {}),
+  };
+  return {
+    ...form,
+    recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
+      ? [...form.recognitionClasses]
+      : [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: form.classMappingsConfigured ? (Array.isArray(form.classMappings) ? form.classMappings : []) : null,
+    classMappingsConfigured: Boolean(form.classMappingsConfigured),
   };
 }
 
@@ -49,7 +63,7 @@ export function resolveInferenceAlgorithm(inferenceForm, algorithmAssets) {
 }
 
 export function validateInferenceSubmission(inferenceForm, algorithmResolution) {
-  if (!inferenceForm.datasetProjectId) return "请选择数据集项目";
+  if (!(inferenceForm.datasetProjectIds?.length || inferenceForm.datasetProjectId)) return "请选择数据集项目";
   if (!algorithmResolution.selectedAlgorithm) return "请选择算法名称";
 
   if (!algorithmResolution.isBuiltInNoEnvAlgorithm) {
@@ -57,6 +71,15 @@ export function validateInferenceSubmission(inferenceForm, algorithmResolution) 
     if (!inferenceForm.modelVersionId) return "真实算法推理需要先选择模型权重版本";
   }
 
+  return null;
+}
+
+export function validateNetworkInferenceSubmission(inferenceForm, algorithmResolution) {
+  if (!algorithmResolution.selectedAlgorithm) return "请选择算法名称";
+  if (!algorithmResolution.isBuiltInNoEnvAlgorithm) {
+    if (!inferenceForm.pythonEnvId) return "真实算法推理需要先选择运行环境资产";
+    if (!inferenceForm.modelVersionId) return "真实算法推理需要先选择模型权重版本";
+  }
   return null;
 }
 
@@ -68,6 +91,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
   return {
     name: inferenceForm.name,
     datasetProjectId: inferenceForm.datasetProjectId,
+    datasetProjectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),
     modelVersionId: inferenceForm.fakeReferenceMode
       ? null
       : (inferenceForm.modelVersionId || null),
@@ -82,11 +106,14 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
       iou: Number(inferenceForm.iou),
       imgsz: Number(inferenceForm.imgsz),
       batch: Number(inferenceForm.batch),
+      recognitionClasses: [...(inferenceForm.recognitionClasses || DEFAULT_RECOGNITION_CLASSES)],
+      classMappings: inferenceForm.classMappingsConfigured ? (inferenceForm.classMappings || []) : null,
       device: inferenceForm.device,
       input: {
+        projectIds: inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean),
         sourceType: "project_images",
         scope: inferenceForm.inputScope,
-        filters: inferenceForm.inputScope === "project" ? {} : {
+        filters: {
           scenes: splitCommaSeparated(inferenceForm.inputScenes),
           views: splitCommaSeparated(inferenceForm.inputViews),
           modalities: splitCommaSeparated(inferenceForm.inputModalities),
@@ -94,7 +121,7 @@ export function buildInferencePayload(inferenceForm, selectedAlgorithm) {
           labels: splitCommaSeparated(inferenceForm.inputLabels),
           q: inferenceForm.inputQuery,
         },
-        limit: 0,
+        limit: Math.max(0, Number(inferenceForm.inputLimit || 0)),
         cachePolicy: "reuse_asset_cache",
       },
       output: {

@@ -1,5 +1,10 @@
+export const DEFAULT_RECOGNITION_CLASSES = ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"];
+
 export function createDefaultTrainingForm(restoredTrainingForm) {
-  return {
+  const storage = typeof localStorage === "undefined" ? null : localStorage;
+  const legacySavePeriod = storage ? storage.getItem("det-dashboard.save-period-default-v2") !== "1" : false;
+  if (legacySavePeriod) storage.setItem("det-dashboard.save-period-default-v2", "1");
+  const form = {
     name: "",
     datasetProjectId: "",
     trainProjectId: "",
@@ -25,15 +30,27 @@ export function createDefaultTrainingForm(restoredTrainingForm) {
     epochs: 100,
     imgsz: 640,
     batch: 16,
+    recognitionClasses: [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: null,
+    classMappingsConfigured: false,
     learningRate: 0.0032,
     optimizer: "SGD",
-    savePeriod: 10,
+    savePeriod: 0,
     earlyStop: true,
     amp: true,
     freezeBackbone: false,
     device: "0",
     algorithmParams: {},
     ...(restoredTrainingForm || {}),
+    savePeriod: legacySavePeriod ? 0 : Number(restoredTrainingForm?.savePeriod || 0),
+  };
+  return {
+    ...form,
+    recognitionClasses: Array.isArray(form.recognitionClasses) && form.recognitionClasses.length
+      ? [...form.recognitionClasses]
+      : [...DEFAULT_RECOGNITION_CLASSES],
+    classMappings: form.classMappingsConfigured ? (Array.isArray(form.classMappings) ? form.classMappings : []) : null,
+    classMappingsConfigured: Boolean(form.classMappingsConfigured),
   };
 }
 
@@ -83,6 +100,8 @@ export function buildTrainingPayload(trainingForm) {
       epochs: Number(trainingForm.epochs),
       imgsz: Number(trainingForm.imgsz),
       batch: Number(trainingForm.batch),
+      recognitionClasses: [...(trainingForm.recognitionClasses || DEFAULT_RECOGNITION_CLASSES)],
+      classMappings: trainingForm.classMappingsConfigured ? (trainingForm.classMappings || []) : null,
       learningRate: Number(trainingForm.learningRate),
       lr0: Number(trainingForm.learningRate),
       optimizer: trainingForm.optimizer,

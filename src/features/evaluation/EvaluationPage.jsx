@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import {
   ArrowLeft,
   Boxes,
@@ -15,6 +15,7 @@ import {
   Search,
   SlidersHorizontal,
   Tags,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -23,14 +24,16 @@ import {
   formatDateTime,
   formatDuration,
   runStatusLabel,
+  categoryColor,
 } from "../../shared/presentation.js";
-import { EvaluationConfusionMatrix } from "./EvaluationConfusionMatrix.jsx";
-import { EvaluationCurve } from "./EvaluationCurve.jsx";
+const EvaluationConfusionMatrix = lazy(() => import("./EvaluationConfusionMatrix.jsx").then((module) => ({ default: module.EvaluationConfusionMatrix })));
+const EvaluationCurve = lazy(() => import("./EvaluationCurve.jsx").then((module) => ({ default: module.EvaluationCurve })));
 import { EvaluationSampleViewer } from "./EvaluationSampleViewer.jsx";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
-import { evaluationBarPalette, evaluationErrorBoxes } from "./evaluationPresentation.js";
+import { evaluationErrorBoxes, evaluationErrorDescriptions } from "./evaluationPresentation.js";
+import { EvaluationErrorLegend } from "./EvaluationErrorLegend.jsx";
 
-export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
+export function EvaluationPage({ tasks, selectedTaskId, setSelectedTaskId, onDelete, parseMaybeJson, predictionItems, predictionBoxStyle, formatMetric }) {
 
 const [searchText, setSearchText] = useState("");
 
@@ -38,7 +41,13 @@ const [statusFilter, setStatusFilter] = useState("all");
 
 const [previewRows, setPreviewRows] = useState([]);
 
+const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
+
 const [evaluation, setEvaluation] = useState(null);
+
+const [evaluationCache, setEvaluationCache] = useState(() => new Map());
+
+const [evaluationRefreshToken, setEvaluationRefreshToken] = useState(0);
 
 const [activeAnalysis, setActiveAnalysis] = useState("overview");
 
@@ -70,11 +79,21 @@ const selectedTask = tasks.find((task) => task.id === selectedTaskId) || filtere
 
 const selectedJob = selectedTask?.sourceJob || {};
 
+const selectedTasks = selectedTaskIds.size
+  ? tasks.filter((task) => selectedTaskIds.has(task.id))
+  : (selectedTask ? [selectedTask] : []);
+
+const selectedJobs = selectedTasks.map((task) => task.sourceJob).filter((job) => job?.id);
+
+const selectedJobKey = selectedJobs.map((job) => job.id).sort().join(",");
+
+const taskIdsKey = tasks.map((task) => task.id).sort().join(",");
+
 const storedMetrics = parseMaybeJson(selectedJob.metrics_json);
 
 useEffect(() => {
 
-if (!selectedJob.id) {
+if (!selectedJobs.length) {
 
 setPreviewRows([]);
 
@@ -86,19 +105,57 @@ return;
 
 let ignore = false;
 
-Promise.all([
-
-fetch("/api/ml/inference-jobs/" + selectedJob.id + "/results").then((response) => response.json()),
-
-fetch("/api/ml/inference-jobs/" + selectedJob.id + "/evaluation").then((response) => response.json()),
-
-]).then(([resultsData, evaluationData]) => {
+Promise.all(selectedJobs.map((job) => Promise.all([
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).results)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/results?limit=60").then((response) => response.json()),
+  evaluationCache.has(job.id)
+    ? Promise.resolve(evaluationCache.get(job.id).evaluation)
+    : fetch("/api/ml/inference-jobs/" + job.id + "/evaluation").then((response) => response.json()),
+]))).then((payloads) => {
 
 if (ignore) return;
 
-setPreviewRows(resultsData.results || []);
-
-setEvaluation(evaluationData.evaluation || null);
+const results = payloads.flatMap(([resultsData], jobIndex) => (resultsData.results || []).map((row) => ({ ...row, source_job_id: selectedJobs[jobIndex].id })));
+const evaluations = payloads.map(([, evaluationData]) => evaluationData.evaluation).filter(Boolean);
+setEvaluationCache((current) => {
+  const next = new Map(current);
+  payloads.forEach(([resultsData, evaluationData], index) => {
+    next.set(selectedJobs[index].id, { results: resultsData, evaluation: evaluationData });
+  });
+  return next;
+});
+const first = evaluations[0] || null;
+setPreviewRows(results);
+if (evaluations.length <= 1) {
+  setEvaluation(first);
+  return;
+}
+const summaries = evaluations.map((item) => item.summary || {});
+const sum = (key) => summaries.reduce((total, item) => total + Number(item[key] || 0), 0);
+const weighted = (key) => {
+  const pairs = summaries.map((item) => [Number(item[key]), Number(item.groundTruth || item.images || 1)]).filter(([value]) => Number.isFinite(value));
+  const weight = pairs.reduce((total, pair) => total + pair[1], 0);
+  return weight ? pairs.reduce((total, pair) => total + pair[0] * pair[1], 0) / weight : 0;
+};
+const tp = sum("tp");
+const fp = sum("fp");
+const fn = sum("fn");
+const precision = tp + fp ? tp / (tp + fp) : weighted("precision");
+const recall = tp + fn ? tp / (tp + fn) : weighted("recall");
+setEvaluation({
+  ...first,
+  evaluated: evaluations.some((item) => item.evaluated),
+  summary: {
+    ...(first?.summary || {}),
+    images: sum("images"), predictions: sum("predictions"), groundTruth: sum("groundTruth"),
+    tp, fp, fn, precision, recall, f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
+    map50: weighted("map50"), map: weighted("map"), avgIou: weighted("avgIou"),
+    inferenceImages: sum("inferenceImages"), skippedUnlabeledImages: sum("skippedUnlabeledImages"),
+  },
+  errors: evaluations.flatMap((item) => item.errors || []),
+  combinedJobCount: evaluations.length,
+});
 
 }).catch(() => {
 
@@ -112,7 +169,31 @@ setEvaluation(null);
 
 return () => { ignore = true; };
 
-}, [selectedJob.id]);
+}, [selectedJobKey, evaluationRefreshToken]);
+
+useEffect(() => {
+  setSelectedTaskIds((current) => new Set(Array.from(current).filter((id) => tasks.some((task) => task.id === id))));
+}, [taskIdsKey]);
+
+const toggleTaskSelection = (taskId) => {
+  setSelectedTaskIds((current) => {
+    const next = new Set(current);
+    if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+    return next;
+  });
+};
+
+const refreshSelectedEvaluations = () => {
+  const ids = selectedJobs.map((job) => job.id);
+  setEvaluationCache((current) => {
+    const next = new Map(current);
+    ids.forEach((id) => next.delete(id));
+    return next;
+  });
+  setEvaluation(null);
+  setPreviewRows([]);
+  setEvaluationRefreshToken((value) => value + 1);
+};
 
 const metrics = { ...storedMetrics, ...(evaluation?.summary || {}), avg_iou: evaluation?.summary?.avgIou ?? storedMetrics.avg_iou };
 
@@ -142,25 +223,30 @@ const kpis = [
 
 ];
 
-const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => Number(b.ap50 || 0) - Number(a.ap50 || 0));
+const allClassRows = (evaluation?.perClass || []).slice().sort((a, b) => {
+  if (a.evaluable !== b.evaluable) return a.evaluable ? -1 : 1;
+  return Number(b.ap50 || 0) - Number(a.ap50 || 0);
+});
 
   const classRows = allClassRows.slice(0, 8);
 
-const rankRows = allClassRows.length > 8 && allClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
+const evaluableClassRows = allClassRows.filter((row) => row.evaluable && row.ap50 != null);
 
-? [...allClassRows.slice(0, 4), ...allClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+const rankRows = evaluableClassRows.length > 8 && evaluableClassRows.slice(0, 8).every((row) => Number(row.ap50 || 0) >= 0.995)
 
-: classRows;
+? [...evaluableClassRows.slice(0, 4), ...evaluableClassRows.slice(-4)].filter((row, index, rows) => rows.findIndex((item) => item.label === row.label) === index)
+
+: evaluableClassRows.slice(0, 8);
 
 const curves = evaluation?.curves || [];
 
-  const weakestClass = allClassRows.filter((row) => Number.isFinite(Number(row.ap50))).slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
+  const weakestClass = evaluableClassRows.slice().sort((a, b) => Number(a.ap50) - Number(b.ap50))[0];
 
 const insightRows = evaluation?.evaluated ? [
 
 weakestClass ? weakestClass.label + " 的 AP50 最低，为 " + formatMetric(weakestClass.ap50) + "" : "暂无类别级结论",
 
-"当前漏检 " + formatCount(evaluation.summary?.fn || 0) + " 个，误检 " + formatCount(evaluation.summary?.fp || 0) + " 个",
+"当前漏检 " + formatCount(evaluation.summary?.fn || 0) + " 个，误检（虚警） " + formatCount(evaluation.summary?.fp || 0) + " 个",
 
 "平均匹配 IoU 为 " + formatMetric(evaluation.summary?.avgIou || 0) + "",
 
@@ -182,12 +268,11 @@ class_error: result.class_error + Number(row.counts?.class_error || 0),
 
 const errorRows = (evaluation?.errors || []).filter((row) => Number(row.counts?.[errorFilter] || 0) > 0);
 
-const samples = (errorRows.length ? errorRows : previewRows).slice(0, 5);
-
-const visibleSampleRows = errorRows.length ? errorRows : previewRows;
+const visibleSampleRows = evaluation?.evaluated ? errorRows : previewRows;
+const samples = visibleSampleRows.slice(0, 5);
   const sampleWindow = visibleSampleRows.slice(sampleOffset, sampleOffset + 5);
   const shiftSamples = (delta) => setSampleOffset((value) => Math.max(0, Math.min(Math.max(0, visibleSampleRows.length - 5), value + delta)));
-  const errorTabs = [["false_negative", "漏检"], ["false_positive", "误检"], ["localization", "定位偏差"], ["class_error", "类别错误"]];
+  const errorTabs = [["false_negative", "漏检"], ["false_positive", "误检（虚警）"], ["localization", "定位偏差"], ["class_error", "类别错误"]];
 
 return (
 
@@ -211,6 +296,8 @@ return (
 
 <div className="evaluation-run-list">
 
+{selectedTaskIds.size > 0 && <div className="evaluation-selection-summary">已选择 {selectedTaskIds.size} 条记录，正在汇总展示</div>}
+
 {filteredTasks.map((task) => {
 
 const job = task.sourceJob || {};
@@ -223,9 +310,11 @@ const rowMetrics = parseMaybeJson(job.metrics_json);
 
 return (
 
-<button className={"evaluation-run-row " + (active ? "active" : "")} key={task.id} onClick={() => setSelectedTaskId(task.id)}>
+<div className={"evaluation-run-row " + (active ? "active " : "") + (selectedTaskIds.has(task.id) ? "selected" : "")} key={task.id} onClick={() => setSelectedTaskId(task.id)} role="button" tabIndex={0}>
 
-<span className="evaluation-run-check">{active ? <CheckCircle2 size={14} /> : <span />}</span>
+<button className="evaluation-run-check" type="button" title="选择记录进行汇总展示" onClick={(event) => { event.stopPropagation(); setSelectedTaskId(task.id); toggleTaskSelection(task.id); }}>{selectedTaskIds.has(task.id) ? <CheckCircle2 size={14} /> : <span />}</button>
+
+<button className="evaluation-run-delete" type="button" title="删除推理记录" onClick={(event) => { event.stopPropagation(); onDelete?.(job.id); }}><Trash2 size={13} /></button>
 
 <span className="evaluation-run-content">
 
@@ -239,7 +328,7 @@ return (
 
 <i className={done ? "done" : "failed"}>{done ? "已完" : runStatusLabel(job.status)}</i>
 
-</button>
+</div>
 
 );
 
@@ -259,7 +348,7 @@ return (
 
 <div className="workspace-path-row"><FolderOpen size={15} /><span>推理记录</span><ChevronRight size={13} /><b>{selectedTask?.name || "评估结果"}</b><ChevronRight size={13} /><b>评估结果</b></div>
 
-<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={() => setSelectedTaskId(selectedJob.id)}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
+<div><button><Copy size={14} />对比基线</button><button><Download size={14} />导出报告</button><button onClick={refreshSelectedEvaluations}><RefreshCw size={14} />重新评估</button><button><ArrowLeft size={14} />返回推理</button></div>
 
 </div>
 
@@ -283,6 +372,8 @@ return (
 
 <section className="evaluation-analysis-stage">
 
+<Suspense fallback={<div className="evaluation-chart-loading">正在加载评估图表...</div>}>
+
 {activeAnalysis === "overview" && <div className="evaluation-overview-grid">
 
 <article className="evaluation-pr-chart"><h3>Precision-Recall 曲线</h3><EvaluationCurve kind="pr" curves={curves} /></article>
@@ -297,7 +388,7 @@ return (
 
 </div>
 
-<article className="evaluation-live-class-bars"><h3>类别 AP 排名</h3>{rankRows.map((row, index) => <p key={row.label}><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><em>{formatMetric(row.ap50)}</em></p>)}</article>
+<article className="evaluation-live-class-bars"><h3>类别 AP 排名</h3>{rankRows.map((row) => <p key={row.label}><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: categoryColor(row.label) }} /></i><em>{formatMetric(row.ap50)}</em></p>)}</article>
 
 <article className="evaluation-histogram"><h3>置信度 / F1 分布</h3><div>{curves.map((row) => <i key={row.confidence} style={{ height: Number(row.f1 || 0) * 100 + "%" }} />)}<span style={{ left: Number(evaluation?.summary?.recommendedConfidence || 0) * 100 + "%" }}>推荐阈值</span></div></article>
 
@@ -307,7 +398,7 @@ return (
 
 <h3>类别指标明细</h3><div className="evaluation-class-table"><b>类别</b><b>GT</b><b>预测</b><b>TP</b><b>FP</b><b>FN</b><b>Precision</b><b>Recall</b><b>AP50</b>
 
-{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{formatMetric(row.precision)}</span><span>{formatMetric(row.recall)}</span><span>{formatMetric(row.ap50)}</span></React.Fragment>)}
+{classRows.map((row) => <React.Fragment key={row.label}><span>{row.label}</span><span>{row.groundTruth}</span><span>{row.predictions}</span><span>{row.tp}</span><span>{row.fp}</span><span>{row.fn}</span><span>{row.precision == null ? "--" : formatMetric(row.precision)}</span><span>{row.recall == null ? "无真值" : formatMetric(row.recall)}</span><span>{row.ap50 == null ? "无真值" : formatMetric(row.ap50)}</span></React.Fragment>)}
 
 </div></div>}
 
@@ -321,19 +412,22 @@ return (
 
 </div>}
 
-</section>
+</Suspense></section>
 
 <section className="evaluation-error-samples">
 
 <div className="evaluation-sample-head"><h3>错误样本</h3><div>{errorTabs.map(([id, label]) => <button key={id} className={errorFilter === id ? "active" : ""} onClick={() => { setErrorFilter(id); setSampleOffset(0); }}>{label}</button>)}</div><span>{visibleSampleRows.length} </span></div>
+<p className="evaluation-error-description">{evaluationErrorDescriptions[errorFilter]}</p>
 
 <div className="evaluation-sample-grid">
 
-<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}<span>{row.display_name || "图片结果"}</span>{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={style}><small>{box.label}</small>{box.type.includes("false_positive") && <strong>×</strong>}</i> : null; })}</article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
+<button className="sample-scroll prev" disabled={sampleOffset <= 0} onClick={() => shiftSamples(-1)}><ChevronRight size={18} /></button>{sampleWindow.map((row, index) => <article key={row.id || row.projectImageId || index} onDoubleClick={() => setSampleViewer({ rows: visibleSampleRows, index: sampleOffset + index })}><div className="evaluation-sample-media" style={{ aspectRatio: `${Number(row.image_width || 16)} / ${Number(row.image_height || 9)}` }}>{row.thumb_url ? <AuthenticatedImage src={row.thumb_url} alt={row.display_name || "错误样本"} /> : <div className={"evaluation-sample-placeholder sample-" + index} />}{evaluationErrorBoxes(row, errorFilter, predictionItems).map((box, boxIndex) => { const style = predictionBoxStyle(box.item, row); return style ? <i className={`sample-box ${box.type}`} key={boxIndex} style={{ ...style, "--box-color": box.color }}><small>{box.label}</small></i> : null; })}</div><span>{row.display_name || "图片结果"}</span></article>)}<button className="sample-scroll next" disabled={sampleOffset >= Math.max(0, visibleSampleRows.length - 5)} onClick={() => shiftSamples(1)}><ChevronRight size={18} /></button>
 
 {!samples.length && <div className="empty-state">当前类型没有错误样本</div>}
 
 </div>
+
+<EvaluationErrorLegend filter={errorFilter} />
 
 </section>
 
@@ -345,11 +439,11 @@ return (
 
 <section className="evaluation-rating"><span>总体评级</span><div><b>{evaluation?.evaluated ? (Number(metrics.map50 || 0) >= .7 ? "A" : Number(metrics.map50 || 0) >= .4 ? "B" : "C") : "--"}</b><strong>{evaluation?.evaluated ? "已评估" : "无标注"}</strong></div><p>发布建议 <em>{Number(metrics.map50 || 0) >= .5 ? "可进入验证" : "暂不建议发布"}</em></p></section>
 
-<section className="evaluation-problems"><h3>问题统计</h3><div><p><span>漏检</span><b>{problemCounts.false_negative}</b></p><p><span>误检</span><b>{problemCounts.false_positive}</b></p><p><span>定位偏差</span><b>{problemCounts.localization}</b></p><p><span>类别错误</span><b>{problemCounts.class_error}</b></p></div></section>
+<section className="evaluation-problems"><h3>问题统计</h3><div><p><span>漏检</span><b>{problemCounts.false_negative}</b></p><p><span>误检（虚警）</span><b>{problemCounts.false_positive}</b></p><p><span>定位偏差</span><b>{problemCounts.localization}</b></p><p><span>类别错误</span><b>{problemCounts.class_error}</b></p></div></section>
 
 <section className="evaluation-key-insights"><h3>关键结论</h3>{insightRows.map((text) => <p key={text}>{text}</p>)}</section>
 
-<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50）</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: evaluationBarPalette[index % evaluationBarPalette.length] }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
+<section className="evaluation-class-rank"><h3>类别表现 <span>（按 AP50）</span></h3>{rankRows.map((row, index) => <p key={row.label}><em>{index + 1}</em><span>{row.label}</span><i><b style={{ width: Number(row.ap50 || 0) * 100 + "%", background: categoryColor(row.label) }} /></i><strong>{formatMetric(row.ap50)}</strong></p>)}</section>
 
 <div className="evaluation-insight-actions"><button onClick={() => setActiveAnalysis("confusion")}><Grid size={14} />查看混淆矩阵</button><button className="primary"><Download size={14} />生成评估报告</button></div>
 

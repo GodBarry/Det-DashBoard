@@ -32,6 +32,26 @@ function createRuntimeQueueService({ query, transaction, accessControl }) {
     });
   }
 
+  async function reorderRuntimeJobs(tableName, orderedIds, actor) {
+    const allowedTables = new Set(["runtime_training_jobs", "runtime_inference_jobs"]);
+    if (!allowedTables.has(tableName)) throw new Error("unsupported queue type");
+    const ids = [...new Set((Array.isArray(orderedIds) ? orderedIds : []).map(String).filter(Boolean))];
+    if (!ids.length) throw new Error("orderedIds is required");
+    return transaction(async (client) => {
+      const ownerFilter = accessControl.isAdmin(actor)
+        ? { sql: "", params: [] }
+        : { sql: "WHERE created_by_user_id=$1", params: [actor.id] };
+      const accessible = (await client.query(`SELECT id FROM ${tableName} ${ownerFilter.sql}`, ownerFilter.params)).rows;
+      const accessibleIds = new Set(accessible.map((row) => String(row.id)));
+      if (ids.some((id) => !accessibleIds.has(id))) throw new Error("queue contains an inaccessible job");
+      const priorityBase = ids.length;
+      for (let index = 0; index < ids.length; index += 1) {
+        await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [priorityBase - index, ids[index]]);
+      }
+      return ids;
+    });
+  }
+
   async function claimTrainingJob(workerId) {
     return transaction(async (client) => {
       const row = (await client.query(
@@ -71,7 +91,7 @@ function createRuntimeQueueService({ query, transaction, accessControl }) {
     });
   }
 
-  return { moveRuntimeJobPriority, claimTrainingJob, claimInferenceJob };
+  return { moveRuntimeJobPriority, reorderRuntimeJobs, claimTrainingJob, claimInferenceJob };
 }
 
 module.exports = { createRuntimeQueueService };

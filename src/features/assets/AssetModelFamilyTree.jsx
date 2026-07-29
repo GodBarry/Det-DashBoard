@@ -3,9 +3,9 @@ import React, { useEffect, useState } from "react";
 import { Brain, ChevronDown, ChevronRight, Database, Download, Folder, FolderOpen } from "lucide-react";
 
 export function AssetModelFamilyTree({ families, onSelect }) {
-  const [modelGroupOpen, setModelGroupOpen] = useState(true);
-  const [expandedFamilies, setExpandedFamilies] = useState(() => new Set(families.map((family) => family.family)));
-  const [expandedVersions, setExpandedVersions] = useState(() => new Set());
+  const [modelGroupOpen, setModelGroupOpen] = useState(() => localStorage.getItem("det-dashboard.asset-model-group") !== "0");
+  const [expandedFamilies, setExpandedFamilies] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem("det-dashboard.asset-model-families") || "null") || families.map((family) => family.family)); } catch { return new Set(families.map((family) => family.family)); } });
+  const [expandedVersions, setExpandedVersions] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem("det-dashboard.asset-model-versions") || "[]")); } catch { return new Set(); } });
   const [contextMenu, setContextMenu] = useState(null);
 
   useEffect(() => {
@@ -29,6 +29,7 @@ export function AssetModelFamilyTree({ families, onSelect }) {
       const next = new Set(current);
       if (next.has(familyName)) next.delete(familyName);
       else next.add(familyName);
+      localStorage.setItem("det-dashboard.asset-model-families", JSON.stringify([...next]));
       return next;
     });
   };
@@ -38,6 +39,7 @@ export function AssetModelFamilyTree({ families, onSelect }) {
       const next = new Set(current);
       if (next.has(versionId)) next.delete(versionId);
       else next.add(versionId);
+      localStorage.setItem("det-dashboard.asset-model-versions", JSON.stringify([...next]));
       return next;
     });
   };
@@ -64,7 +66,7 @@ export function AssetModelFamilyTree({ families, onSelect }) {
   return (
     <>
       <section className="asset-tree-group asset-model-tree">
-        <button className="asset-tree-head" type="button" onClick={() => setModelGroupOpen((open) => !open)}>
+        <button className="asset-tree-head" type="button" onClick={() => setModelGroupOpen((open) => { localStorage.setItem("det-dashboard.asset-model-group", open ? "0" : "1"); return !open; })}>
           {modelGroupOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Database size={15} />
           <b>模型</b>

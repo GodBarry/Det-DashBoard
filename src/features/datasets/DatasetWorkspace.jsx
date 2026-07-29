@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, CheckCircle, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Copy, Database, Download, Edit3, Eye,
   Folder, FolderOpen, FolderPlus, Globe2, Grid, Image as ImageIcon, Import, List, MoreVertical, Move,
@@ -12,6 +12,7 @@ import { AnnotationTaskPanel, PublicRequestDialog, ScopeTabs, ShareDialog } from
 import { formatCount } from "../../shared/presentation.js";
 import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { metadataOption, modalityLabel, sceneLabel, viewLabel } from "../../shared/datasetMetadata.js";
+import { buildWorkspaceSearchParams } from "./dataset-workspace-core.js";
 
 export function DatasetWorkspace({ mode, viewModel }) {
   const {
@@ -25,6 +26,7 @@ export function DatasetWorkspace({ mode, viewModel }) {
     openHomeFolder,
     createProject,
     homeStats,
+    refreshHome,
     breadcrumbs,
     datasetScope,
     setDatasetScope,
@@ -92,6 +94,10 @@ export function DatasetWorkspace({ mode, viewModel }) {
     showImportDialog,
     setShowImportDialog,
     parsedImportPaths,
+    importMode,
+    setImportMode,
+    importStrategy,
+    setImportStrategy,
     importPath,
     setImportPath,
     browseFolder,
@@ -122,6 +128,73 @@ export function DatasetWorkspace({ mode, viewModel }) {
     resolveSelectedConflicts,
     setItems
   } = viewModel;
+
+  const [projectVideos, setProjectVideos] = useState([]);
+  const [showVideoExtractDialog, setShowVideoExtractDialog] = useState(false);
+  const [selectedVideoId, setSelectedVideoId] = useState("");
+  const [frameInterval, setFrameInterval] = useState(10);
+  const [videoExtractionTask, setVideoExtractionTask] = useState(null);
+
+  const refreshProjectVideos = async () => {
+    if (!activeProject?.id) { setProjectVideos([]); return; }
+    const [response, taskResponse] = await Promise.all([
+      fetch(`/api/projects/${activeProject.id}/videos`),
+      fetch("/api/compute/tasks?purpose=video"),
+    ]);
+    const [data, taskData] = await Promise.all([response.json(), taskResponse.json()]);
+    if (!response.ok) throw new Error(data.error || "加载视频资产失败");
+    setProjectVideos(data.videos || []);
+    setSelectedVideoId((current) => (data.videos || []).some((video) => video.id === current) ? current : (data.videos?.[0]?.id || ""));
+    if (taskResponse.ok) {
+      const videoIds = new Set((data.videos || []).map((video) => String(video.id)));
+      const activeTask = (taskData.tasks || []).find((task) => videoIds.has(String(task.session_key)) && ["pending", "running", "paused"].includes(task.status));
+      if (activeTask) setVideoExtractionTask(activeTask);
+    }
+  };
+
+  useEffect(() => {
+    refreshProjectVideos().catch((loadError) => setError(loadError.message));
+  }, [activeProject?.id]);
+
+  useEffect(() => {
+    if (!videoExtractionTask?.id || ["done", "failed", "cancelled"].includes(videoExtractionTask.status)) return undefined;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/compute/tasks?purpose=video&sessionKey=${videoExtractionTask.session_key || selectedVideoId}`);
+        const data = await response.json();
+        const current = (data.tasks || []).find((task) => task.id === videoExtractionTask.id);
+        if (!current || stopped) return;
+        setVideoExtractionTask(current);
+        if (current.status === "failed") setError(current.message || "视频抽帧失败，请查看计算任务日志");
+        if (current.status === "done") {
+          await refreshProjectVideos();
+          const imageResponse = await fetch(`/api/projects/${activeProject.id}/images?${buildWorkspaceSearchParams(1, filters)}`);
+          const imageData = await imageResponse.json();
+          if (!stopped && imageResponse.ok) { setItems(imageData.items || []); setPage(1); }
+        }
+      } catch (pollError) {
+        if (!stopped) setError(pollError.message);
+      }
+    };
+    const timer = window.setInterval(poll, 800);
+    poll();
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [videoExtractionTask?.id, videoExtractionTask?.status, selectedVideoId, activeProject?.id]);
+
+  const startVideoExtraction = async () => {
+    if (!selectedVideoId) { setError("当前项目没有可抽帧的视频"); return; }
+    const interval = Math.max(1, Math.floor(Number(frameInterval) || 1));
+    const response = await fetch(`/api/project-videos/${selectedVideoId}/extract`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ interval }),
+    });
+    const data = await response.json();
+    if (!response.ok) { setError(data.error || "创建视频抽帧任务失败"); return; }
+    setVideoExtractionTask(data.task);
+    setShowVideoExtractDialog(false);
+  };
 
   if (mode === "home") {
     return (
@@ -334,6 +407,8 @@ emptyProjectTrash={emptyProjectTrash}
 
 deleteProjectPermanently={deleteProjectPermanently}
 
+refreshHome={refreshHome}
+
 />
 
 </main>
@@ -347,6 +422,15 @@ deleteProjectPermanently={deleteProjectPermanently}
       </>
     );
   }
+
+  const loadViewerPage = async (targetPage) => {
+    if (!activeProject?.id) return [];
+    const params = buildWorkspaceSearchParams(targetPage, filters);
+    const response = await fetch(`/api/projects/${activeProject.id}/images?${params}`);
+    if (!response.ok) throw new Error("加载图片页失败");
+    const data = await response.json();
+    return data.items || [];
+  };
 
   return (
     <>
@@ -406,6 +490,8 @@ setExpandedIds={setHomeExpandedIds}
 
 <button onClick={importData}><Import size={16} />导入数据</button>
 
+<button onClick={() => { refreshProjectVideos().then(() => setShowVideoExtractDialog(true)).catch((loadError) => setError(loadError.message)); }}><Video size={16} />视频抽帧</button>
+
 <button onClick={exportProject}><Upload size={16} />导出数据</button>
 
 <button onClick={openWorkspaceTrash}><Trash2 size={16} />回收</button>
@@ -430,7 +516,7 @@ setExpandedIds={setHomeExpandedIds}
 
 {hasCurrentImages && <FilterPanel summary={summary} filters={filters} setFilters={(next) => { setFilters(next); setPage(1); }} imports={imports} />}
 
-<ProgressStrip latestImport={latestImport} jobs={jobs} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
+<ProgressStrip latestImport={latestImport} jobs={jobs} videoTask={videoExtractionTask} error={error} onCloseError={() => setError(null)} onCancelImport={cancelLatestImport} />
 
 <WorkspaceFolders
 
@@ -459,8 +545,6 @@ projectLastImportAt={projectLastImportAt}
 {hasCurrentImages ? (
 
 <>
-
-<ImportRecords imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 <ImageGrid
 
@@ -500,7 +584,7 @@ deleteCheckedImages={deleteCheckedImages}
 
 </main>
 
-<Inspector item={hasCurrentImages ? selected : null} summary={summary} />
+<Inspector item={hasCurrentImages ? selected : null} summary={summary} imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </div>
 
@@ -606,7 +690,22 @@ rows={4}
 
 <span>扫描方式</span>
 
-<b>递归扫描</b>
+<select value={importStrategy} onChange={(event) => setImportStrategy(event.target.value)}>
+<option value="incremental">智能增量（推荐）</option>
+<option value="labels_only">仅更新已有图片标签</option>
+<option value="strict">严格内容校验</option>
+</select>
+
+</div>
+
+<div className="import-profile-block">
+
+<span>目录方式</span>
+
+<select value={importMode} onChange={(event) => setImportMode(event.target.value)}>
+<option value="merge_project">合并到当前文件夹</option>
+<option value="preserve_structure">保持原目录结构</option>
+</select>
 
 </div>
 
@@ -812,15 +911,48 @@ resolveSelected={resolveSelectedConflicts}
 
 )}
 
+{showVideoExtractDialog && <div className="overlay video-extract-overlay" onClick={() => setShowVideoExtractDialog(false)}>
+<section className="dialog video-extract-dialog" role="dialog" aria-modal="true" aria-labelledby="video-extract-title" onClick={(event) => event.stopPropagation()}>
+<header><div className="dialog-heading"><span className="dialog-title-icon"><Video size={18} /></span><div><h2 id="video-extract-title">固定间隔抽帧</h2><p>{activeProject?.name || "当前项目"} · 正式帧将登记为数据集图片</p></div></div><button className="icon-button" aria-label="关闭视频抽帧" onClick={() => setShowVideoExtractDialog(false)}><X size={17} /></button></header>
+<div className="video-extract-body">
+<label><span>视频资产</span><select aria-label="选择视频资产" value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)}><option value="">选择视频</option>{projectVideos.map((video) => <option key={video.id} value={video.id}>{video.display_name}</option>)}</select></label>
+<label><span>抽帧间隔</span><div className="video-interval-control"><input aria-label="抽帧间隔" type="number" min="1" max="100000" step="1" value={frameInterval} onChange={(event) => setFrameInterval(Math.max(1, Math.floor(Number(event.target.value) || 1)))} /><em>每 N 帧保存 1 张</em></div></label>
+{selectedVideoId && <div className="video-extract-summary">{(() => { const video = projectVideos.find((item) => item.id === selectedVideoId); const metadata = video?.metadata_json || {}; return <><span>已抽取 <b>{video?.extracted_frame_count || 0}</b> 张</span><span>总帧数 <b>{metadata.totalFrames || "待解析"}</b></span><span>帧率 <b>{metadata.fps ? Number(metadata.fps).toFixed(2) : "待解析"}</b></span></>; })()}</div>}
+{!projectVideos.length && <div className="video-extract-empty">当前项目没有视频，请先通过“导入数据”登记视频资产。</div>}
+</div>
+
+<div className="import-profile-block">
+<span>导入方式</span>
+<select value={importMode} onChange={(event) => setImportMode(event.target.value)}>
+<option value="merge_project">合并导入到当前文件夹</option>
+<option value="preserve_structure">保持原来的目录结构</option>
+</select>
+</div>
+<footer><button onClick={() => setShowVideoExtractDialog(false)}>取消</button><button className="primary" disabled={!selectedVideoId} onClick={startVideoExtraction}>创建抽帧任务</button></footer>
+</section>
+</div>}
+
 {viewerIndex != null && items[viewerIndex] && (
 
 <ImageViewer
 
 items={items}
 
+sequenceUrl={activeProject?.id ? `/api/projects/${activeProject.id}/images?${buildWorkspaceSearchParams(1, filters).toString().replace("pageSize=48", "pageSize=10000")}&sequence=1` : ""}
+
 index={viewerIndex}
 
 setIndex={setViewerIndex}
+
+page={page}
+
+pageSize={48}
+
+totalItems={totalItems}
+
+loadPage={loadViewerPage}
+
+onPageChange={setPage}
 
 onClose={() => setViewerIndex(null)}
 
@@ -949,7 +1081,7 @@ return (
 );
 
 }
-function ProgressStrip({ latestImport, jobs, error, onCloseError, onCancelImport }) {
+function ProgressStrip({ latestImport, jobs, videoTask, error, onCloseError, onCancelImport }) {
 
 const runningStatuses = new Set(["pending", "scanning", "running", "cancel_requested", "preparing"]);
 
@@ -978,6 +1110,8 @@ return (
 {visibleImport && <ProgressBar title="导入进度" message={visibleImport.message || visibleImport.status} progress={visibleImport.progress || 0} onCancel={canCancelImport ? onCancelImport : null} />}
 
 {latestExport && <ProgressBar title="导出进度" message={latestExport.message || latestExport.status} progress={latestExport.progress || 0} />}
+
+{videoTask && runningStatuses.has(videoTask.status) && <ProgressBar title="视频抽帧" message={videoTask.message || videoTask.status} progress={videoTask.progress || 0} />}
 
 </div>
 
@@ -1104,9 +1238,6 @@ return (
 <span className="thumb-tags"><em>{viewLabel(item.view)}</em><em>{modalityLabel(item.modality)}</em></span>
 
 
-
-<b className="thumb-name">{item.display_name}</b>
-
 </div>
 
 </button>
@@ -1151,11 +1282,11 @@ return (
 
 }
 
-function ImportRecords({ imports, trashImports, deleteImport, restoreImport, emptyImportTrash }) {
+function ImportRecords({ imports, trashImports, deleteImport, restoreImport, emptyImportTrash, compact = false }) {
 
 return (
 
-<section className="records-panel">
+<section className={`records-panel ${compact ? "inspector-import-records" : ""}`}>
 
 <h2>导入记录</h2>
 
@@ -1303,7 +1434,7 @@ return (
 
 }
 
-function Inspector({ item, summary }) {
+function Inspector({ item, summary, imports, trashImports, deleteImport, restoreImport, emptyImportTrash }) {
 
 const topLabels = optionList(summary?.labels).slice(0, 6);
 
@@ -1318,6 +1449,8 @@ return (
 <InspectorStats summary={summary} labels={topLabels} />
 
 <p className="muted">选择一张图片查看详情</p>
+
+<ImportRecords compact imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </aside>
 
@@ -1365,7 +1498,7 @@ return (
 
 <section className="annotation-list">
 
-<h3>标签（{annotations.length}</h3>
+<h3>标签（{annotations.length}）</h3>
 
 <div className="annotation-table-head"><span>类别</span><span>数量</span><span>操作</span></div>
 
@@ -1386,6 +1519,8 @@ return (
 {!annotations.length && <p className="muted">当前筛选下没有标注框</p>}
 
 </section>
+
+<ImportRecords compact imports={imports} trashImports={trashImports} deleteImport={deleteImport} restoreImport={restoreImport} emptyImportTrash={emptyImportTrash} />
 
 </aside>
 
@@ -1433,7 +1568,7 @@ return (
 
 <p key={item.label}>
 
-<span><i style={{ background: labelColor(item.label) }} />{item.label}</span>
+<span><i style={{ background: labelColor(item.label) }} /><em title={item.label}>{item.label}</em></span>
 
 <strong><em style={{ width: `${Math.max(8, Math.round((item.count / maxLabelCount) * 100))}%`, background: labelColor(item.label) }} /></strong>
 

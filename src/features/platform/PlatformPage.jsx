@@ -46,6 +46,7 @@ export function PlatformPage({
   algorithmAssets,
   pythonEnvs,
   assetLinks,
+  loadMlPlatform,
   activeTrainingJobId,
   setActiveTrainingJobId,
   trainingLogs,
@@ -62,15 +63,23 @@ export function PlatformPage({
   setEnvForm,
   createModel,
   createModelVersion,
+  deleteModelVersion,
+  inspectModelWeight,
   createPythonEnv,
   renameModelVersion,
   submitTrainingJob,
   updateTrainingJobState,
   deleteTrainingJob,
   submitInferenceJob,
+  networkInferenceService,
+  networkInferenceBusy,
+  networkInferenceStatusReady,
+  startNetworkInference,
+  stopNetworkInference,
   deleteInferenceJob,
   deleteInferenceJobs,
   requeueInferenceJob,
+  updateInferenceJobState,
   moveRuntimeQueueJob,
   activeInferenceResult,
   setActiveInferenceResult,
@@ -156,7 +165,7 @@ export function PlatformPage({
           </div>
         )}
 
-        {view === "training" && (
+        <div className="workspace-keepalive" hidden={view !== "training"}>
           <TrainingWorkspace
             projects={projects}
             mlModels={mlModels}
@@ -178,9 +187,9 @@ export function PlatformPage({
             moveRuntimeQueueJob={moveRuntimeQueueJob}
             helpers={{ bestAssetLink, formatCount, formatMetric, parseMaybeJson, runStatusLabel }}
           />
-        )}
+        </div>
 
-        {view === "inference" && (
+        <div className="workspace-keepalive" hidden={view !== "inference"}>
           <InferenceWorkspace
             projects={projects}
             mlModels={mlModels}
@@ -195,16 +204,22 @@ export function PlatformPage({
             setInferenceForm={setInferenceForm}
             selectedInferenceEnv={selectedInferenceEnv}
             submitInferenceJob={submitInferenceJob}
+            networkInferenceService={networkInferenceService}
+            networkInferenceBusy={networkInferenceBusy}
+            networkInferenceStatusReady={networkInferenceStatusReady}
+            startNetworkInference={startNetworkInference}
+            stopNetworkInference={stopNetworkInference}
             viewInferenceResults={viewInferenceResults}
             deleteInferenceJob={deleteInferenceJob}
             deleteInferenceJobs={deleteInferenceJobs}
             requeueInferenceJob={requeueInferenceJob}
+            updateInferenceJobState={updateInferenceJobState}
             moveRuntimeQueueJob={moveRuntimeQueueJob}
             helpers={{ bestAssetLink, envTooltip, formatMetric, modelFamilyLabel, parseMaybeJson, predictionBoxStyle, predictionColor, predictionItems, predictionLegend, projectTreeRows, versionTooltip }}
           />
-        )}
+        </div>
 
-        {view === "evaluation" && (activeEvaluationReportTask ? (
+        <div className="workspace-keepalive" hidden={view !== "evaluation"}>{activeEvaluationReportTask ? (
           <EvaluationReportPage
             task={activeEvaluationReportTask}
             onBack={() => setActiveEvaluationReportTask(null)}
@@ -232,15 +247,15 @@ export function PlatformPage({
             algorithms={algorithmAssets.length ? algorithmAssets : trainingTemplates}
             environments={pythonEnvs}
             onDetail={setActiveEvaluationTask}
-            onDelete={hideEvaluationTask}
+            onDelete={deleteInferenceJob}
             parseMaybeJson={parseMaybeJson}
             predictionItems={predictionItems}
             predictionBoxStyle={predictionBoxStyle}
             formatMetric={formatMetric}
           />
-        ))}
+        )}</div>
 
-        {view === "models" && (
+        <div className="workspace-keepalive" hidden={view !== "models"}>
           <AssetManagementWorkspace
             projects={projects}
             mlModels={mlModels}
@@ -249,6 +264,7 @@ export function PlatformPage({
             trainingTemplates={trainingTemplates}
             pythonEnvs={pythonEnvs}
             assetLinks={assetLinks}
+            refreshAssets={loadMlPlatform}
             modelForm={modelForm}
             setModelForm={setModelForm}
             versionForm={versionForm}
@@ -257,6 +273,8 @@ export function PlatformPage({
             setEnvForm={setEnvForm}
             createModel={createModel}
             createModelVersion={createModelVersion}
+            deleteModelVersion={deleteModelVersion}
+            inspectModelWeight={inspectModelWeight}
             createPythonEnv={createPythonEnv}
             renameModelVersion={renameModelVersion}
             drawerMode={assetDrawerMode}
@@ -272,7 +290,7 @@ export function PlatformPage({
             modelFamilyLabel={modelFamilyLabel}
             envTooltip={envTooltip}
           />
-        )}
+        </div>
 
         {view === "admin" && <AdminCenter />}
         {authMode && (

@@ -55,7 +55,7 @@ test("builtin fallbacks expose only the supported training and inference assets"
 
   const templates = service.getBuiltinTrainingTemplateFallbacks();
 
-  assert.deepEqual(templates.map((item) => item.template_key), ["ultralytics_yolo", "dinov3_faster_rcnn"]);
+  assert.deepEqual(templates.map((item) => item.template_key), ["ultralytics_yolo", "dinov3_faster_rcnn", "sam2_segmentation", "samurai_tracking"]);
   assert.deepEqual(templates[0].capabilities_json.tasks, ["detect", "segment", "classify"]);
   assert.equal(templates[0].capabilities_json.builtin, true);
 });
@@ -65,14 +65,14 @@ test("ensureBuiltinAlgorithmAssets preserves manifests, adapters, SQL, and retir
 
   await service.ensureBuiltinAlgorithmAssets();
 
-  assert.equal(calls.putJson.length, 2);
-  assert.equal(calls.putText.length, 2);
+  assert.equal(calls.putJson.length, 4);
+  assert.equal(calls.putText.length, 4);
   assert.equal(calls.putJson[0].key, "code-assets/algorithms/ultralytics_yolo/builtin/manifest.json");
-  assert.deepEqual(calls.putJson[0].value.entry, { type: "python", adapter: "adapter.py", function: "run_inference" });
+  assert.deepEqual(calls.putJson[0].value.entry, { type: "python", adapter: "adapter.py", function: "execute" });
   assert.equal(calls.putText[0].contentType, "text/x-python");
   const inserts = calls.queries.filter((entry) => /INSERT INTO algorithm_assets/.test(entry.sql));
-  assert.equal(inserts.length, 2);
-  assert.deepEqual(inserts.map((entry) => entry.params[1]), ["ultralytics_yolo", "dinov3_faster_rcnn"]);
+  assert.equal(inserts.length, 4);
+  assert.deepEqual(inserts.map((entry) => entry.params[1]), ["ultralytics_yolo", "dinov3_faster_rcnn", "sam2_segmentation", "samurai_tracking"]);
   assert.deepEqual(inserts[0].params.slice(5, 10), [
     "builtin",
     "code-assets/algorithms/ultralytics_yolo/builtin",
@@ -80,7 +80,8 @@ test("ensureBuiltinAlgorithmAssets preserves manifests, adapters, SQL, and retir
     "code-assets/algorithms/ultralytics_yolo/builtin/adapter.py",
     "code-assets/algorithms/ultralytics_yolo/builtin/source/",
   ]);
-  assert.deepEqual(calls.queries.find((entry) => /algorithm_key <> ALL/.test(entry.sql)).params, [["ultralytics_yolo", "dinov3_faster_rcnn"]]);
+  assert.deepEqual(calls.queries.find((entry) => /algorithm_key <> ALL/.test(entry.sql)).params, [["ultralytics_yolo", "dinov3_faster_rcnn", "sam2_segmentation", "samurai_tracking"]]);
+  assert.match(calls.queries.find((entry) => /version='21'/.test(entry.sql)).sql, /sam2_segmentation/);
   assert.match(calls.queries.at(-1).sql, /DELETE FROM training_templates/);
 });
 
@@ -139,6 +140,9 @@ test("listAlgorithmAssets normalizes owner and visibility before applying the re
 
   assert.deepEqual(await service.listAlgorithmAssets(actor, "public"), rows);
 
+  assert.equal(calls.objectExists.length, 0, "listing assets must not probe MinIO");
+  assert.equal(calls.listObjectKeys.length, 0, "listing assets must not scan MinIO");
+  assert.equal(calls.putJson.length + calls.putText.length, 0, "listing assets must not write MinIO");
   assert.deepEqual(calls.scopes, [{ table: "algorithm_assets", alias: "a", actor, scope: "public", params: [] }]);
   assert.deepEqual(calls.queries.find((entry) => /owner_user_id=\$1/.test(entry.sql)).params, ["admin-7"]);
   assert.match(calls.queries.find((entry) => /visibility='public'/.test(entry.sql)).sql, /source_type='builtin' OR version='builtin'/);
@@ -153,7 +157,7 @@ test("listAlgorithmAssets preserves recoverable fallback errors and rethrows oth
   const recoverableFixture = createFixture({ query: async () => { throw recoverable; } });
 
   const fallback = await recoverableFixture.service.listAlgorithmAssets({ id: "user-1" }, "mine");
-  assert.deepEqual(fallback.map((item) => item.algorithm_key), ["ultralytics_yolo", "dinov3_faster_rcnn"]);
+  assert.deepEqual(fallback.map((item) => item.algorithm_key), ["ultralytics_yolo", "dinov3_faster_rcnn", "sam2_segmentation", "samurai_tracking"]);
   assert.equal(fallback[0].source_type, "builtin");
   assert.equal(fallback[0].status, "ready");
 

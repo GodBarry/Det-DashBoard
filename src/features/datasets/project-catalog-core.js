@@ -63,6 +63,10 @@ export function buildHomeStats(currentFolder, projects, trashProjects) {
   };
 }
 
+export function shouldOpenProjectWorkspace(project) {
+  return Number(project?.child_count || 0) === 0;
+}
+
 export function getCreateProjectContext({
   view,
   activeProject,

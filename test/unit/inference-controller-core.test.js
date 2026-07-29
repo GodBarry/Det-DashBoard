@@ -30,6 +30,7 @@ test("createDefaultInferenceForm returns current defaults and applies restored v
   assert.equal(form.saveVisualization, true);
   assert.equal(form.createLabelVersion, false);
   assert.equal(form.fakeReferenceMode, false);
+  assert.deepEqual(form.recognitionClasses, ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"]);
 });
 
 test("resolveInferenceAlgorithm follows normal and fake-reference selection", async () => {
@@ -119,6 +120,7 @@ test("buildInferencePayload preserves conversions, filters, and fixed request va
   assert.equal(payload.params.iou, 0.6);
   assert.equal(payload.params.imgsz, 512);
   assert.equal(payload.params.batch, 8);
+  assert.deepEqual(payload.params.recognitionClasses, form.recognitionClasses);
   assert.deepEqual(payload.params.input.filters, {
     scenes: ["indoor", "outdoor"],
     views: ["front", "rear"],
@@ -127,7 +129,7 @@ test("buildInferencePayload preserves conversions, filters, and fixed request va
     labels: ["car", "person"],
     q: "night",
   });
-  assert.equal(payload.params.input.limit, 0);
+  assert.equal(payload.params.input.limit, 99);
   assert.equal(payload.params.input.cachePolicy, "reuse_asset_cache");
   assert.deepEqual(payload.params.output, {
     saveJson: false,
@@ -136,7 +138,7 @@ test("buildInferencePayload preserves conversions, filters, and fixed request va
   });
 });
 
-test("buildInferencePayload keeps project filters empty and fake model version null", async () => {
+test("buildInferencePayload applies filters in project scope and keeps fake model version null", async () => {
   const { buildInferencePayload, createDefaultInferenceForm } = await coreModulePromise;
   const form = createDefaultInferenceForm({
     datasetProjectId: "project-a",
@@ -152,7 +154,14 @@ test("buildInferencePayload keeps project filters empty and fake model version n
   assert.equal(payload.params.templateId, "fake-template");
   assert.equal(payload.params.fakeReferenceMode, true);
   assert.equal(payload.params.pythonEnvId, null);
-  assert.deepEqual(payload.params.input.filters, {});
+  assert.deepEqual(payload.params.input.filters, {
+    scenes: ["ignored"],
+    views: [],
+    modalities: [],
+    importBatchIds: [],
+    labels: [],
+    q: "",
+  });
 });
 
 test("normalizeInferenceJobIds removes empty and duplicate ids without reordering", async () => {

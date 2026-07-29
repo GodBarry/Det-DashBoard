@@ -1,4 +1,20 @@
 import { useMemo, useState } from "react";
+import { recordDatasetActivity } from "./datasetActivityLog.js";
+
+async function readImportResponse(response) {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(response.ok ? "导入服务返回了空响应" : `导入服务无响应（HTTP ${response.status}）`);
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`导入服务返回了无效响应（HTTP ${response.status}）`);
+  }
+  if (!response.ok) throw new Error(data?.error || data?.message || `导入失败（HTTP ${response.status}）`);
+  return data;
+}
 
 export function useDatasetImportController({
   activeProject,
@@ -14,6 +30,8 @@ export function useDatasetImportController({
   const [browseBusy, setBrowseBusy] = useState(false);
   const [dirPicker, setDirPicker] = useState(null);
   const [dirPickerBusy, setDirPickerBusy] = useState(false);
+  const [importMode, setImportMode] = useState("merge_project");
+  const [importStrategy, setImportStrategy] = useState("incremental");
 
   function splitImportPaths(value) {
     return Array.from(new Set(String(value || "").split(";").map((item) => item.trim()).filter(Boolean)));
@@ -122,15 +140,16 @@ export function useDatasetImportController({
     fetch("/api/imports", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId: activeProject.id, sourcePath: paths[0], sourcePaths: paths, rename: true }),
+      body: JSON.stringify({ projectId: activeProject.id, sourcePath: paths[0], sourcePaths: paths, rename: true, importMode, importStrategy }),
     })
-      .then((r) => Promise.all([r.status, r.json()]))
-      .then(([status, d]) => {
-        if (status >= 400) throw new Error(d.error || "导入失败，请检查路径是否正");
+      .then((r) => readImportResponse(r))
+      .then((d) => {
+        recordDatasetActivity("导入", `已提交导入：${activeProject.name}`, "info", paths.join("; "));
         setLatestImport(d.batch || null);
         loadWorkspace(activeProject.id);
       })
       .catch((err) => {
+        recordDatasetActivity("导入", `导入失败：${activeProject.name}`, "error", `${paths.join("; ")}\n${err.message}`);
         setError(err.message);
         setLatestImport(null);
       });
@@ -140,6 +159,10 @@ export function useDatasetImportController({
     showImportDialog,
     setShowImportDialog,
     parsedImportPaths,
+    importMode,
+    setImportMode,
+    importStrategy,
+    setImportStrategy,
     importPath,
     setImportPath,
     browseFolder,

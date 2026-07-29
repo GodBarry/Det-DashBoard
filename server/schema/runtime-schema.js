@@ -4,11 +4,17 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_image_assets_quick_hash_size ON image_assets(quick_hash, file_size)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+    "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS import_strategy TEXT NOT NULL DEFAULT 'incremental'",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_size BIGINT",
+    "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_mtime_ms BIGINT",
+    "CREATE INDEX IF NOT EXISTS idx_project_images_project_source ON project_images(project_id, source_path)",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE video_assets ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     `CREATE TABLE IF NOT EXISTS app_users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -24,6 +30,95 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       key TEXT PRIMARY KEY,
       value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS compute_tasks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      owner_user_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+      purpose TEXT NOT NULL DEFAULT 'inference',
+      operation TEXT NOT NULL,
+      adapter_id UUID,
+      model_asset_id UUID,
+      environment_asset_id UUID,
+      execution_mode TEXT NOT NULL DEFAULT 'oneshot',
+      session_key TEXT NOT NULL DEFAULT '',
+      input_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      parameters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      output_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending',
+      progress INT NOT NULL DEFAULT 0,
+      message TEXT NOT NULL DEFAULT '',
+      process_pid INT,
+      priority BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compute_tasks_queue
+      ON compute_tasks(status, priority, created_at)`,
+    `CREATE TABLE IF NOT EXISTS project_video_frames (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_video_id UUID NOT NULL REFERENCES project_videos(id) ON DELETE CASCADE,
+      project_image_id UUID NOT NULL UNIQUE REFERENCES project_images(id) ON DELETE CASCADE,
+      source_frame_index INT NOT NULL,
+      timestamp_ms BIGINT NOT NULL DEFAULT 0,
+      extraction_interval INT NOT NULL DEFAULT 1,
+      extraction_task_id UUID REFERENCES compute_tasks(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(project_video_id, source_frame_index)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_project_video_frames_sequence
+      ON project_video_frames(project_video_id, source_frame_index)`,
+    `CREATE TABLE IF NOT EXISTS compute_task_logs (
+      id BIGSERIAL PRIMARY KEY,
+      task_id UUID NOT NULL REFERENCES compute_tasks(id) ON DELETE CASCADE,
+      stream TEXT NOT NULL DEFAULT 'stdout',
+      line TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS annotation_sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      owner_user_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL DEFAULT 'manual',
+      adapter_id UUID,
+      model_asset_id UUID,
+      environment_asset_id UUID,
+      status TEXT NOT NULL DEFAULT 'active',
+      settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS annotation_suggestions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      session_id UUID NOT NULL REFERENCES annotation_sessions(id) ON DELETE CASCADE,
+      compute_task_id UUID REFERENCES compute_tasks(id) ON DELETE SET NULL,
+      project_image_id UUID NOT NULL REFERENCES project_images(id) ON DELETE CASCADE,
+      track_id TEXT NOT NULL DEFAULT '',
+      revision INT NOT NULL DEFAULT 1,
+      frame_index INT,
+      label TEXT NOT NULL DEFAULT 'unknown',
+      shape_type TEXT NOT NULL DEFAULT 'rectangle',
+      geometry_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      score REAL,
+      source TEXT NOT NULL DEFAULT 'algorithm',
+      status TEXT NOT NULL DEFAULT 'suggested',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_annotation_suggestions_session_frame
+      ON annotation_suggestions(session_id, frame_index, track_id)`,
+    `CREATE TABLE IF NOT EXISTS annotation_revisions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      session_id UUID NOT NULL REFERENCES annotation_sessions(id) ON DELETE CASCADE,
+      track_id TEXT NOT NULL,
+      revision INT NOT NULL,
+      correction_frame INT NOT NULL,
+      affected_start INT NOT NULL,
+      affected_end INT,
+      prompt_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(session_id, track_id, revision)
     )`,
     `CREATE TABLE IF NOT EXISTS baseline_merge_runs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -158,6 +253,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       priority INT NOT NULL DEFAULT 0,
       params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       progress INT NOT NULL DEFAULT 0,
+      process_pid INT,
       output_root TEXT NOT NULL DEFAULT '',
       message TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -214,6 +310,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     )`,
     "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
     "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
     "ALTER TABLE training_templates ADD COLUMN IF NOT EXISTS capabilities_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     `CREATE TABLE IF NOT EXISTS runtime_envs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -250,7 +347,10 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
   ];
   // Core project browsing, imports, and baseline generation must always have
   // their schema available. Only the larger ML platform schema is optional.
-  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true" ? statements : statements.slice(0, 15);
+  const annotationSchemaEnd = statements.findIndex((sql) => /CREATE TABLE IF NOT EXISTS\s+annotation_revisions/i.test(sql));
+  const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true"
+    ? statements
+    : statements.slice(0, annotationSchemaEnd >= 0 ? annotationSchemaEnd + 1 : 15);
   await query("SET statement_timeout = '5000ms'");
   await query("SET lock_timeout = '2000ms'");
   for (let index = 0; index < runtimeStatements.length; index += 1) {
@@ -411,6 +511,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
+        process_pid INT,
         output_root TEXT NOT NULL DEFAULT '',
         message TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -419,6 +520,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       )`,
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,
@@ -576,6 +678,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
         priority INT NOT NULL DEFAULT 0,
         params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         progress INT NOT NULL DEFAULT 0,
+        process_pid INT,
         output_root TEXT NOT NULL DEFAULT '',
         message TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -584,6 +687,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
       )`,
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0",
       "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+      "ALTER TABLE runtime_inference_jobs ADD COLUMN IF NOT EXISTS process_pid INT",
       `CREATE TABLE IF NOT EXISTS runtime_inference_results (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inference_job_id UUID NOT NULL REFERENCES runtime_inference_jobs(id) ON DELETE CASCADE,

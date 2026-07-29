@@ -7,6 +7,7 @@ function createProcessLifecycle({
   lifecycle,
   startTrainingWorker,
   startInferenceWorker,
+  startComputeWorker,
   pool,
   port,
   host,
@@ -47,8 +48,10 @@ function createProcessLifecycle({
     });
     const trainingWorker = startTrainingWorker();
     const inferenceWorker = startInferenceWorker();
+    const computeWorker = startComputeWorker?.();
     if (trainingWorker) lifecycle.registerWorker(trainingWorker);
     if (inferenceWorker) lifecycle.registerWorker(inferenceWorker);
+    if (computeWorker) lifecycle.registerWorker(computeWorker);
     return server;
   }
 

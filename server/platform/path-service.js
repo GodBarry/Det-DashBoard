@@ -27,9 +27,17 @@ function createPathService(options = {}) {
     return hostPathMode === "windows";
   }
 
+  function normalizeVirtualHostPath(value) {
+    let raw = String(value || "").trim();
+    if (!raw) return raw;
+    raw = raw.replace(/^\/host\/(?:browse|data)\/+/i, "");
+    raw = raw.replace(/^\\host\\(?:browse|data)\\+/i, "");
+    return raw;
+  }
+
   function windowsHostPathToInternal(value, internalRoot) {
     if (!isWindowsHostPathMode()) return null;
-    const raw = String(value || "").trim();
+    const raw = normalizeVirtualHostPath(value);
     if (!raw) return null;
     if (raw === "/" || raw === "\\") return path.resolve(internalRoot);
     const driveMatch = raw.match(/^([A-Za-z]):[\\/]*(.*)$/);
@@ -38,6 +46,7 @@ function createPathService(options = {}) {
     if (!match) return null;
     const drive = match[1].toUpperCase();
     const rest = String(match[2] || "").replace(/\\/g, "/").split("/").filter(Boolean);
+    if (platform === "win32") return path.resolve(`${drive}:\\`, ...rest);
     return path.resolve(internalRoot, drive, ...rest);
   }
 
@@ -68,6 +77,7 @@ function createPathService(options = {}) {
   }
 
   function toInternalDataPath(value) {
+    value = normalizeVirtualHostPath(value);
     const windowsBrowsePath = windowsHostPathToInternal(value, browseRoot);
     if (windowsBrowsePath) return windowsBrowsePath;
     const windowsDataPath = windowsHostPathToInternal(value, dataRoot);
@@ -98,6 +108,7 @@ function createPathService(options = {}) {
   }
 
   function toScopedInternalPath(value, internalRoot, displayRoot) {
+    value = normalizeVirtualHostPath(value);
     const windowsPath = windowsHostPathToInternal(value, internalRoot);
     if (windowsPath) return windowsPath;
     const resolved = path.resolve(value || displayRoot);
@@ -115,6 +126,23 @@ function createPathService(options = {}) {
     const root = scope === "data" ? dataRoot : browseRoot;
     const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
     const allDrives = scope === "browse" && browseAllDrives && platform === "win32";
+    if (scope === "browse" && target === "__roots__") {
+      if (platform === "win32") {
+        const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+          .map((letter) => `${letter}:\\`)
+          .filter((drive) => fs.existsSync(drive))
+          .map((drive) => ({ name: drive, path: drive }));
+        return { root: "__roots__", current: "__roots__", parent: "", platform: "windows", dirs };
+      }
+      if (isWindowsHostPathMode()) {
+        const dirs = fs.readdirSync(root, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory() && /^[A-Za-z]$/.test(entry.name))
+          .map((entry) => ({ name: `${entry.name.toUpperCase()}:\\`, path: `${entry.name.toUpperCase()}:\\` }));
+        return { root: "__roots__", current: "__roots__", parent: "", platform: "windows-mount", dirs };
+      }
+      return { root: "__roots__", current: "__roots__", parent: "", platform: "posix", dirs: [{ name: "文件系统 /", path: "/" }] };
+    }
+    if (target === "__drives__" && !allDrives) target = displayRoot;
     if (allDrives && (!target || target === "__drives__")) {
       const dirs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         .split("")
@@ -148,6 +176,27 @@ function createPathService(options = {}) {
           : ""),
       dirs,
     };
+  }
+
+  function listFiles(target, scope = "browse", extensions = []) {
+    const listing = listFolders(target, scope);
+    if (listing.current === "__drives__" || listing.current === "__roots__") return { ...listing, files: [] };
+    const root = scope === "data" ? dataRoot : browseRoot;
+    const displayRoot = scope === "data" ? dataRootDisplay : browseRootDisplay;
+    const current = toScopedInternalPath(target || displayRoot, root, displayRoot);
+    const allowed = new Set((Array.isArray(extensions) ? extensions : String(extensions || "").split(","))
+      .map((value) => String(value).trim().toLowerCase())
+      .filter(Boolean)
+      .map((value) => value.startsWith(".") ? value : `.${value}`));
+    const files = fs.readdirSync(current, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && (!allowed.size || allowed.has(path.extname(entry.name).toLowerCase())))
+      .map((entry) => {
+        const fullPath = path.join(current, entry.name);
+        const stat = fs.statSync(fullPath);
+        return { name: entry.name, path: toDisplayDataPath(fullPath), size: stat.size, modifiedAt: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+    return { ...listing, files };
   }
 
   function psQuote(value) {
@@ -228,6 +277,7 @@ function createPathService(options = {}) {
     toDisplayDataPath,
     toScopedInternalPath,
     listFolders,
+    listFiles,
     runFolderDialog,
     selectFolder,
   };

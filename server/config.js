@@ -41,6 +41,7 @@ module.exports = {
   dataRootDisplay: displayPath(process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT, path.join(projectRoot, "runtime", "data-root")),
   browseRoot: path.resolve(process.env.BROWSE_ROOT || process.env.DATA_ROOT || path.join(projectRoot, "runtime", "data-root")),
   browseRootDisplay: displayPath(process.env.BROWSE_ROOT_DISPLAY || process.env.DATA_ROOT_DISPLAY || process.env.DATA_ROOT, path.join(projectRoot, "runtime", "data-root")),
+  browseAllDrives: bool(process.env.BROWSE_ALL_DRIVES, false),
   hostPathMode,
   hostDialogUrl: process.env.HOST_DIALOG_URL || "",
   nativeDialogMode: process.env.NATIVE_DIALOG_MODE || "server",

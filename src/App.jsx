@@ -23,13 +23,14 @@ export default function App() {
 
 const {
   activeTrainingJobId,
-  consumeRestoredActiveProjectId,
+  activeProjectId,
   consumeRestoredSelected,
   currentFolderId,
   persistUiState,
   restoredInferenceForm,
   restoredTrainingForm,
   setActiveTrainingJobId,
+  setActiveProjectId,
   setCurrentFolderId,
   setTheme,
   setView,
@@ -83,7 +84,6 @@ const {
   refreshHome,
   restoreAllProjects,
   restoreProject,
-  setActiveProject,
   setEditingProjectName,
   setHomeExpandedIds,
   startRenameProject,
@@ -101,7 +101,8 @@ const {
   setCurrentFolderId,
   setView,
   setError,
-  consumeRestoredActiveProjectId,
+  activeProjectId,
+  setActiveProjectId,
   resetWorkspace: () => datasetWorkspaceRef.current?.resetWorkspace(),
 });
 
@@ -183,12 +184,14 @@ const {
   algorithmAssets,
   assetLinks,
   inferenceJobs,
+  addInferenceJob,
   loadMlPlatform,
   mlModels,
   modelVersions,
   pythonEnvs,
   trainingJobs,
   trainingTemplates,
+  refreshInferenceJobs,
 } = useMlPlatformController({ assetScope, currentUser, refreshHome, view });
 
 const {
@@ -214,26 +217,36 @@ const {
   deleteInferenceJob,
   deleteInferenceJobs,
   inferenceForm,
+  networkInferenceBusy,
+  networkInferenceService,
+  networkInferenceStatusReady,
   requeueInferenceJob,
+  updateInferenceJobState,
   setActiveInferenceResult,
   setInferenceForm,
   submitInferenceJob,
+  startNetworkInference,
+  stopNetworkInference,
   viewInferenceResults,
 } = useInferenceController({
   algorithmAssets,
+  addInferenceJob,
   confirmDelete: (message) => window.confirm(message),
   loadMlPlatform,
+  refreshInferenceJobs,
   restoredInferenceForm,
   setError,
 });
 
 const {
   createModel,
-  createModelVersion,
+    createModelVersion,
+    deleteModelVersion,
   createPythonEnv,
   envForm,
   modelForm,
-  renameModelVersion,
+    renameModelVersion,
+    inspectModelWeight,
   setEnvForm,
   setModelForm,
   setVersionForm,
@@ -251,8 +264,8 @@ const {
 });
 
 useEffect(() => {
-  persistUiState({ activeProject, selected, trainingForm, inferenceForm });
-}, [view, theme, currentFolderId, activeProject, selected, activeTrainingJobId, trainingForm, inferenceForm]);
+  persistUiState({ selected, trainingForm, inferenceForm });
+}, [view, theme, currentFolderId, activeProjectId, selected, activeTrainingJobId, trainingForm, inferenceForm]);
 
 const datasetImportController = useDatasetImportController({
   activeProject,
@@ -281,7 +294,7 @@ loadMlPlatform();
 
 }
 
-function moveRuntimeQueueJob(kind, jobId, direction) {
+function moveRuntimeQueueJob(kind, jobId, directionOrOrderedIds) {
 
 const path = kind === "training" ? "training-jobs" : "inference-jobs";
 
@@ -291,7 +304,7 @@ method: "PATCH",
 
 headers: { "content-type": "application/json" },
 
-body: JSON.stringify({ direction }),
+body: JSON.stringify(Array.isArray(directionOrOrderedIds) ? { orderedIds: directionOrOrderedIds } : { direction: directionOrOrderedIds }),
 
 })
 
@@ -329,6 +342,8 @@ openHomeFolder,
 createProject,
 
 homeStats,
+
+refreshHome,
 
 breadcrumbs,
 
@@ -508,6 +523,8 @@ pythonEnvs={pythonEnvs}
 
 assetLinks={assetLinks}
 
+loadMlPlatform={loadMlPlatform}
+
 activeTrainingJobId={activeTrainingJobId}
 
 setActiveTrainingJobId={setActiveTrainingJobId}
@@ -540,6 +557,10 @@ createModel={createModel}
 
 createModelVersion={createModelVersion}
 
+deleteModelVersion={deleteModelVersion}
+
+inspectModelWeight={inspectModelWeight}
+
 createPythonEnv={createPythonEnv}
 
 renameModelVersion={renameModelVersion}
@@ -552,11 +573,22 @@ deleteTrainingJob={deleteTrainingJob}
 
 submitInferenceJob={submitInferenceJob}
 
+networkInferenceService={networkInferenceService}
+
+networkInferenceBusy={networkInferenceBusy}
+
+networkInferenceStatusReady={networkInferenceStatusReady}
+
+startNetworkInference={startNetworkInference}
+
+stopNetworkInference={stopNetworkInference}
+
 deleteInferenceJob={deleteInferenceJob}
 
 deleteInferenceJobs={deleteInferenceJobs}
 
 requeueInferenceJob={requeueInferenceJob}
+updateInferenceJobState={updateInferenceJobState}
 
 moveRuntimeQueueJob={moveRuntimeQueueJob}
 

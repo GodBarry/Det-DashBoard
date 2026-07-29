@@ -12,6 +12,12 @@ const client = new Minio.Client({
   secretKey: minio.secretKey,
 });
 
+// Bucket readiness is process-wide. Checking it for every object makes large
+// imports turn one local file into one network round trip and races bucket
+// creation when several imports start together.
+let bucketState = "unknown";
+let bucketReadyPromise = null;
+
 async function ensureBucket() {
   const exists = await client.bucketExists(minio.bucket).catch(() => false);
   if (!exists) await client.makeBucket(minio.bucket);
@@ -134,21 +140,40 @@ function writableFallbackPath(objectKey) {
 }
 
 async function ensureBucketSafe() {
-  try {
-    await ensureBucket();
-    return true;
-  } catch (error) {
-    console.error("MinIO unavailable, using local fallback for new objects:", error.message);
-    fs.mkdirSync(path.join(storageRoot, "object-store-fallback"), { recursive: true });
-    return false;
+  if (bucketState === "ready") return true;
+  if (bucketState === "fallback") return false;
+  if (!bucketReadyPromise) {
+    bucketReadyPromise = ensureBucket()
+      .then(() => {
+        bucketState = "ready";
+        return true;
+      })
+      .catch((error) => {
+        bucketState = "fallback";
+        console.error("MinIO unavailable, using local fallback for new objects:", error.message);
+        fs.mkdirSync(path.join(storageRoot, "object-store-fallback"), { recursive: true });
+        return false;
+      });
   }
+  return bucketReadyPromise;
 }
 
 async function putFile(objectKey, filePath, meta = {}) {
   if (await ensureBucketSafe()) {
-    await client.fPutObject(minio.bucket, objectKey, filePath, meta);
-    writeFallbackFile(objectKey, filePath);
-    return objectKey;
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await client.fPutObject(minio.bucket, objectKey, filePath, meta);
+        writeFallbackFile(objectKey, filePath);
+        return objectKey;
+      } catch (error) {
+        lastError = error;
+        bucketState = "unknown";
+        bucketReadyPromise = null;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt)));
+      }
+    }
+    console.error(`MinIO upload failed after retries; using local fallback for ${objectKey}:`, lastError?.message || "unknown error");
   }
   writeFallbackFile(objectKey, filePath);
   return objectKey;
@@ -199,10 +224,38 @@ async function removeObject(objectKey) {
   if (!objectKey) return;
   if (await ensureBucketSafe()) {
     await client.removeObject(minio.bucket, objectKey).catch(() => {});
-    return;
   }
-  fs.rmSync(fallbackPath(objectKey), { force: true });
-  fs.rmSync(secondaryFallbackPath(objectKey), { force: true });
+  for (const filePath of [fallbackPath(objectKey), secondaryFallbackPath(objectKey), legacyFallbackPath(objectKey)]) {
+    fs.rmSync(filePath, { force: true });
+  }
+}
+
+async function removeObjects(objectKeys = [], options = {}) {
+  const keys = Array.from(new Set(objectKeys.map(String).filter(Boolean)));
+  if (!keys.length) return;
+  const collapsedPrefixes = Array.from(new Set((options.collapsePrefixes || []).map(String).filter(Boolean)));
+  if (await ensureBucketSafe()) {
+    for (let index = 0; index < keys.length; index += 1000) {
+      const batch = keys.slice(index, index + 1000);
+      await client.removeObjects(minio.bucket, batch).catch(async () => {
+        await Promise.all(batch.map((key) => client.removeObject(minio.bucket, key).catch(() => {})));
+      });
+    }
+  }
+  for (const prefix of collapsedPrefixes) {
+    for (const root of [
+      path.join(storageRoot, "object-store-fallback"),
+      path.join(fallbackStorageRoot, "object-store-fallback"),
+      path.join(__dirname, "..", "object-store-fallback"),
+    ]) {
+      fs.rmSync(path.join(root, ...prefix.split("/").filter(Boolean)), { recursive: true, force: true });
+    }
+  }
+  for (const key of keys.filter((item) => !collapsedPrefixes.some((prefix) => item.startsWith(prefix)))) {
+    for (const filePath of [fallbackPath(key), secondaryFallbackPath(key), legacyFallbackPath(key)]) {
+      fs.rmSync(filePath, { force: true });
+    }
+  }
 }
 
 async function objectSize(objectKey) {
@@ -245,7 +298,6 @@ async function listObjectKeys(prefix = "") {
     path.join(storageRoot, "object-store-fallback"),
     path.join(fallbackStorageRoot, "object-store-fallback"),
     path.join(__dirname, "..", "object-store-fallback"),
-    path.join(minio.dataDir, minio.bucket),
   ]) {
     for (const key of walkLocalObjectKeys(rootDir, prefix)) keys.add(key);
   }
@@ -269,5 +321,5 @@ function extOf(filePath) {
   return path.extname(filePath).toLowerCase() || ".bin";
 }
 
-module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, extOf, localFallbackPath, bucket: minio.bucket };
+module.exports = { client, ensureBucket, ensureBucketSafe, putFile, putJson, putText, getStream, objectExists, objectSize, listObjectKeys, removeObject, removeObjects, extOf, localFallbackPath, bucket: minio.bucket };
 

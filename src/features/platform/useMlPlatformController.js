@@ -43,6 +43,17 @@ export function useMlPlatformController({ assetScope, currentUser, refreshHome, 
     refreshHome();
   }
 
+  function refreshInferenceJobs() {
+    return fetch("/api/ml/inference-jobs")
+      .then((response) => response.json())
+      .then((data) => setInferenceJobs(sortRuntimeJobsByTime(data.jobs || [])));
+  }
+
+  function addInferenceJob(job) {
+    if (!job?.id) return;
+    setInferenceJobs((current) => sortRuntimeJobsByTime([job, ...current.filter((item) => item.id !== job.id)]));
+  }
+
   useEffect(() => {
     if (!currentUser) return;
 
@@ -59,11 +70,13 @@ export function useMlPlatformController({ assetScope, currentUser, refreshHome, 
     algorithmAssets,
     assetLinks,
     inferenceJobs,
+    addInferenceJob,
     loadMlPlatform,
     mlModels,
     modelVersions,
     pythonEnvs,
     trainingJobs,
     trainingTemplates,
+    refreshInferenceJobs,
   };
 }

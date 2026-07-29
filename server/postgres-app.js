@@ -39,9 +39,16 @@ const { createProjectService } = require("./dataset/project-service");
 const { createDatasetContentService } = require("./dataset/content-service");
 const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
+const { createVideoService } = require("./dataset/video-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
 const { createMlRoutes } = require("./routes/ml-routes");
+const { createAnnotationRoutes } = require("./routes/annotation-routes");
+const { createComputeTaskService } = require("./compute-tasks/compute-task-service");
+const { createAnnotationService } = require("./annotation/annotation-service");
+const { createAnnotationStandardService } = require("./annotation/annotation-standard-service");
+const { createComputeWorker } = require("./compute-tasks/compute-worker");
+const { createVideoFrameExecutor } = require("./compute-tasks/video-frame-executor");
 const { createRuntimeJobService } = require("./runtime-jobs/job-service");
 const { createTrainingCatalogService } = require("./runtime-jobs/training-catalog-service");
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
@@ -50,7 +57,9 @@ const { createInferenceWorker } = require("./runtime-jobs/inference-worker");
 const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
+const { createNetworkInferenceService } = require("./runtime-jobs/network-inference-service");
 const { createModelService } = require("./ml-assets/model-service");
+const { createModelWeightInspector } = require("./ml-assets/model-weight-inspector");
 const { createModelMaintenanceService } = require("./ml-assets/model-maintenance-service");
 const { createPythonEnvService } = require("./ml-assets/python-env-service");
 const { createAlgorithmAssetService } = require("./ml-assets/algorithm-asset-service");
@@ -109,14 +118,23 @@ let projectService;
 let datasetContentService;
 let baselineService;
 let importService;
+let videoService;
 let datasetRoutes;
 let mlRoutes;
+let annotationRoutes;
+let computeTaskService;
+let annotationService;
+let annotationStandardService;
+let computeWorkerController;
+let videoFrameExecutor;
 let inferenceSubmissionService;
+let networkInferenceService;
 let runtimeJobService;
 let trainingCatalogService;
 let runtimeQueueService;
 let prepareInferenceInputCache;
 let modelService;
+let modelWeightInspector;
 let modelMaintenanceService;
 let pythonEnvService;
 let algorithmAssetService;
@@ -148,6 +166,7 @@ const {
   toInternalDataPath,
   toDisplayDataPath,
   listFolders,
+  listFiles,
   selectFolder,
 } = pathService;
 modelMaintenanceService = createModelMaintenanceService({ query, store, fs, path, storageRoot, isInsideRoot });
@@ -318,6 +337,9 @@ async function route(req, res) {
   if (method === "GET" && parsed.pathname === "/api/fs/dirs") {
     return sendJson(res, listFolders(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse"));
   }
+  if (method === "GET" && parsed.pathname === "/api/fs/files") {
+    return sendJson(res, listFiles(parsed.query.path || browseRootDisplay, parsed.query.scope || "browse", parsed.query.extensions || ""));
+  }
   if (method === "GET" && parsed.pathname === "/api/dialog/folder") {
     if (nativeDialogMode === "disabled") {
       return sendJson(res, { status: "unavailable", selectedPath: "", error: "系统文件夹选择器未启用" }, 503);
@@ -335,6 +357,7 @@ async function route(req, res) {
   }
   if (await datasetRoutes.handle(req, res, parsed, actor)) return;
   if (await mlRoutes.handle(req, res, parsed, actor)) return;
+  if (await annotationRoutes.handle(req, res, parsed, actor)) return;
   if (method === "GET" && parsed.pathname === "/api/jobs") {
     const scoped = scopedSql("jobs", "j", actor, requestedScope(parsed, actor));
     const rows = await query(`SELECT j.* FROM jobs j WHERE ${scoped.sql} ORDER BY created_at DESC LIMIT 50`, scoped.params);
@@ -370,6 +393,9 @@ async function main() {
   runtimeQueueService = createRuntimeQueueService({ query, transaction, accessControl });
   resourceAccess = createResourceAccess({ query, transaction, httpError, accessControl });
   await resourceAccess.initializeSchema();
+  computeTaskService = createComputeTaskService({ query, transaction, resourceAccess, accessControl, httpError, stopProcess });
+  annotationService = createAnnotationService({ query, transaction, computeTaskService, resourceAccess, httpError });
+  videoService = createVideoService({ query, resourceAccess, computeTaskService, httpError });
   importService = createImportService({
     query,
     transaction,
@@ -437,12 +463,21 @@ async function main() {
     algorithmAssetPrefix,
     algorithmManifestKey,
     algorithmAdapterKey,
+    fs,
+    path,
   });
   trainingCatalogService = createTrainingCatalogService({
     query,
     scopedSql,
     algorithmAssetService,
     resourceAccess,
+  });
+  modelWeightInspector = createModelWeightInspector({
+    query,
+    fs,
+    childProcess: { spawn },
+    pythonEnvService,
+    processRef: process,
   });
   modelService = createModelService({
     query,
@@ -457,6 +492,7 @@ async function main() {
     modelWeightManifestKey,
     writeObjectToFile,
     sendError,
+    weightInspector: modelWeightInspector,
   });
   inferenceWorkerController = createInferenceWorker({
     query,
@@ -478,6 +514,7 @@ async function main() {
   });
   trainingWorkerController = createTrainingWorker({
     query,
+    sharp,
     fs,
     path,
     storageRoot,
@@ -498,6 +535,37 @@ async function main() {
     clock: runtimeWorkerClock,
     dateCode,
   });
+  videoFrameExecutor = createVideoFrameExecutor({
+    query,
+    transaction,
+    fs,
+    path,
+    storageRoot,
+    store,
+    writeObjectToFile,
+    runChildProcess,
+    hashFile,
+    imageObjectKey,
+    sharp,
+    processRef: process,
+  });
+  computeWorkerController = createComputeWorker({
+    query,
+    transaction,
+    fs,
+    path,
+    storageRoot,
+    store,
+    writeObjectToFile,
+    pythonEnvService,
+    modelService,
+    algorithmRuntimeSource,
+    runChildProcess,
+    videoFrameExecutor,
+    processRef: process,
+    logger: console,
+    clock: runtimeWorkerClock,
+  });
   inferenceSubmissionService = createInferenceSubmissionService({
     query,
     resourceAccess,
@@ -508,6 +576,26 @@ async function main() {
     storageRoot,
     logger: console,
   });
+  networkInferenceService = createNetworkInferenceService({
+    query,
+    transaction,
+    resourceAccess,
+    createInferenceJob: inferenceSubmissionService.createInferenceJob,
+    importService,
+    inferenceWorkerController,
+    pythonEnvService,
+    modelService,
+    algorithmRuntimeSource,
+    fs,
+    path,
+    sharp,
+    storageRoot,
+    logger: console,
+  });
+  const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
+  if (reconciledNetworkJobs) {
+    console.log(`Boot: reconciled ${reconciledNetworkJobs} interrupted network inference session(s)`);
+  }
   mlRoutes = createMlRoutes({
     query,
     readBody,
@@ -524,6 +612,7 @@ async function main() {
     runtimeQueueService,
     runtimeJobService,
     createInferenceJob: inferenceSubmissionService.createInferenceJob,
+    networkInferenceService,
   });
   projectService = createProjectService({ query, transaction, httpError, resourceAccess });
   datasetContentService = createDatasetContentService({
@@ -558,7 +647,14 @@ async function main() {
     trashService,
     importService,
     datasetContentService,
+    videoService,
     baselineService,
+  });
+  annotationRoutes = createAnnotationRoutes({
+    readBody,
+    sendJson,
+    annotationService,
+    computeTaskService,
   });
   collaborationService = createCollaborationService({
     query,
@@ -625,6 +721,17 @@ async function main() {
     }),
   });
   await collaborationService.ensureSchema();
+  annotationStandardService = createAnnotationStandardService({
+    query,
+    audit: (actor, action, resourceId, details) => accessControl.writeAudit({
+      actorUserId: actor.id,
+      action: `annotation_standard.${action}`,
+      resourceType: "annotation_standard",
+      resourceId,
+      details,
+    }),
+  });
+  await annotationStandardService.ensureSchema();
   multiUserRouter = createMultiUserRouter({
     accessControl,
     collaborationService,
@@ -655,6 +762,7 @@ async function main() {
       return (await query("SELECT permission FROM user_permissions WHERE user_id=$1 ORDER BY permission", [userId])).rows.map((item) => item.permission);
     },
     updateUserPermissions: accessControl.setUserPermissions,
+    annotationStandardService,
   });
   await cleanupLegacyHistoryProjects();
   await backfillUnknownScenes();
@@ -664,6 +772,7 @@ async function main() {
   await store.ensureBucketSafe();
   console.log("Boot: ensureBucketSafe done");
   await algorithmAssetService.ensureBuiltinAlgorithmAssets().catch((error) => console.warn("Algorithm asset seed skipped:", error.message));
+  algorithmAssetService.syncMinioAlgorithmAssets().catch((error) => console.warn("Algorithm asset MinIO sync skipped:", error.message));
   await resourceAccess.initializeSchema();
   return processLifecycle.startHttpServer();
 }
@@ -675,6 +784,7 @@ const processLifecycle = createProcessLifecycle({
   lifecycle,
   startTrainingWorker: () => trainingWorkerController.startTrainingWorker(),
   startInferenceWorker: () => inferenceWorkerController.startInferenceWorker(),
+  startComputeWorker: () => computeWorkerController.startComputeWorker(),
   pool,
   port,
   host,

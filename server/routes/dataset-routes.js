@@ -13,6 +13,7 @@ function createDatasetRoutes(deps) {
     trashService,
     importService,
     datasetContentService,
+    videoService,
     baselineService,
   } = deps;
 
@@ -78,6 +79,10 @@ function createDatasetRoutes(deps) {
       return true;
     }
 
+    if (method === "GET" && pathname === "/api/imports") {
+      sendJson(res, { imports: await importService.listActiveImports(actor, requestedScope(parsed, actor)) });
+      return true;
+    }
     if (method === "POST" && pathname === "/api/imports") {
       sendJson(res, await importService.importPath(await readBody(req), actor));
       return true;
@@ -152,6 +157,22 @@ function createDatasetRoutes(deps) {
       sendJson(res, await datasetContentService.listProjectImages(imageListMatch[1], parsed.query));
       return true;
     }
+    const videoListMatch = pathname.match(/^\/api\/projects\/([^/]+)\/videos$/);
+    if (method === "GET" && videoListMatch) {
+      sendJson(res, { videos: await videoService.listProjectVideos(videoListMatch[1], actor) });
+      return true;
+    }
+    const videoExtractMatch = pathname.match(/^\/api\/project-videos\/([^/]+)\/extract$/);
+    if (method === "POST" && videoExtractMatch) {
+      sendJson(res, { task: await videoService.createExtractionTask(videoExtractMatch[1], await readBody(req), actor) });
+      return true;
+    }
+    const imageCountMatch = pathname.match(/^\/api\/projects\/([^/]+)\/images-count$/);
+    if (method === "GET" && imageCountMatch) {
+      await resourceAccess.assertProjectRead(actor, imageCountMatch[1]);
+      sendJson(res, await datasetContentService.countProjectImages(imageCountMatch[1], parsed.query));
+      return true;
+    }
     const deleteImagesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/images\/delete$/);
     if (method === "POST" && deleteImagesMatch) {
       await resourceAccess.assertProjectWrite(actor, deleteImagesMatch[1]);
@@ -162,6 +183,13 @@ function createDatasetRoutes(deps) {
     if (method === "POST" && exportMatch) {
       await resourceAccess.assertProjectRead(actor, exportMatch[1]);
       sendJson(res, await datasetContentService.exportProject(exportMatch[1], await readBody(req), actor));
+      return true;
+    }
+    const annotationBatchMatch = pathname.match(/^\/api\/projects\/([^/]+)\/image-annotations\/batch$/);
+    if (method === "POST" && annotationBatchMatch) {
+      await resourceAccess.assertProjectRead(actor, annotationBatchMatch[1]);
+      const body = await readBody(req);
+      sendJson(res, await datasetContentService.getImageAnnotationsBatch(annotationBatchMatch[1], body.imageIds));
       return true;
     }
 
@@ -187,6 +215,12 @@ function createDatasetRoutes(deps) {
     if (method === "POST" && saveAnnotationsMatch) {
       await resourceAccess.assertProjectWrite(actor, await projectForImage(saveAnnotationsMatch[1]));
       sendJson(res, await datasetContentService.saveImageAnnotations(saveAnnotationsMatch[1], await readBody(req), actor));
+      return true;
+    }
+    const imageAnnotationsMatch = pathname.match(/^\/api\/project-images\/([^/]+)\/annotations$/);
+    if (method === "GET" && imageAnnotationsMatch) {
+      await resourceAccess.assertProjectRead(actor, await projectForImage(imageAnnotationsMatch[1]));
+      sendJson(res, await datasetContentService.getImageAnnotations(imageAnnotationsMatch[1]));
       return true;
     }
 

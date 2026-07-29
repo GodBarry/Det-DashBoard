@@ -113,10 +113,28 @@ test("listProjectImages preserves filter SQL ordering and annotated response sha
   assert.equal(result.total, 1);
   assert.deepEqual(result.items[0].annotations.map((item) => item.id), ["annotation-1", "annotation-2"]);
   assert.deepEqual(calls[0].params, ["project-1", ["road", "yard"], "%front%", ["car"], 20, 20]);
-  assert.match(calls[0].sql, /ORDER BY pi\.created_at DESC\s+LIMIT \$5 OFFSET \$6/);
+  assert.match(calls[0].sql, /ORDER BY COALESCE\(pv\.created_at,pi\.created_at\) DESC[\s\S]*LIMIT \$5 OFFSET \$6/);
   assert.deepEqual(calls[1].params, ["project-1", ["road", "yard"], "%front%", ["car"]]);
   assert.deepEqual(calls[2].params, ["project-1", ["image-1"], ["car"]]);
   assert.match(calls[2].sql, /ORDER BY a\.id/);
+});
+
+test("countProjectImages uses the same filters without loading image rows", async () => {
+  const calls = [];
+  const { service } = createFixture({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [{ count: 37 }] };
+    },
+  });
+
+  const result = await service.countProjectImages("project-1", { scenes: "city", modalities: "infrared", labels: "tank" });
+
+  assert.deepEqual(result, { count: 37 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].params, ["project-1", ["city"], ["infrared"], ["tank"]]);
+  assert.match(calls[0].sql, /SELECT count\(\*\)::int AS count/);
+  assert.match(calls[0].sql, /a\.label = ANY\(\$4\)/);
 });
 
 test("streamProjectImage preserves full and cached-thumbnail stream contracts", async () => {

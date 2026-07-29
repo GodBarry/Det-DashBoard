@@ -1,5 +1,18 @@
 export const colors = ["#31d0aa", "#72a7ff", "#ffcc66", "#ff7c7c", "#b48cff", "#6ee7ff", "#f59bd3", "#a3e635"];
 
+export function categoryColor(label = "") {
+  let hash = 2166136261;
+  for (const char of String(label).trim().toLowerCase()) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const value = hash >>> 0;
+  const hue = value % 360;
+  const saturation = 62 + ((value >>> 9) % 16);
+  const lightness = 46 + ((value >>> 17) % 10);
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
 export const evaluationClusterLabels = { detect: "目标检测", segment: "实例分割", classify: "图像分类" };
 
 export const evaluationTypeLabels = { training: "训练模型", inference: "推理模型" };
@@ -36,6 +49,9 @@ export function runStatusLabel(status) {
   if (completedEvaluationStatuses.has(normalized)) return "运行完成";
   if (["pending", "preparing"].includes(normalized)) return "等待处理";
   if (normalized === "running") return "运行中";
+  if (normalized === "listening") return "监听中";
+  if (normalized === "stopped") return "已停止";
+  if (normalized === "stopping") return "停止中";
   if (normalized === "failed") return "运行失败";
   if (normalized === "cancelled") return "已取消";
   return status || "未知状态态";

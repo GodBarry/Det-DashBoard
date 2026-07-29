@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 const MAX_CACHE_ENTRIES = 192;
 const imageCache = new Map();
 const pendingImages = new Map();
+const preloadQueue = new Set();
+let preloadScheduled = false;
 
 function cacheKey(src) {
   let scope = "anonymous";
@@ -25,11 +27,20 @@ function remember(key, objectUrl) {
   return objectUrl;
 }
 
-export function loadAuthenticatedImage(src) {
+export function loadAuthenticatedImage(src, options = {}) {
   if (!src) return Promise.resolve("");
   const key = cacheKey(src);
   const cached = imageCache.get(key);
   if (cached) return Promise.resolve(remember(key, cached));
+  // Viewer requests are cancellable and must not share a low-priority preload.
+  if (options.signal) {
+    return fetch(src, { signal: options.signal, cache: "force-cache" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Image request failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => remember(key, URL.createObjectURL(blob)));
+  }
   if (pendingImages.has(key)) return pendingImages.get(key);
 
   const request = fetch(src)
@@ -44,10 +55,20 @@ export function loadAuthenticatedImage(src) {
 }
 
 export function preloadAuthenticatedImage(src) {
-  return loadAuthenticatedImage(src).catch(() => "");
+  if (!src || preloadQueue.has(src)) return Promise.resolve("");
+  preloadQueue.add(src);
+  const run = () => {
+    preloadQueue.delete(src);
+    preloadScheduled = false;
+    return loadAuthenticatedImage(src).catch(() => "");
+  };
+  if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+    return new Promise((resolve) => window.requestIdleCallback(() => resolve(run()), { timeout: 350 }));
+  }
+  return new Promise((resolve) => window.setTimeout(() => resolve(run()), 120));
 }
 
-export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady, ...props }) {
+export const AuthenticatedImage = memo(function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady, ...props }) {
   const [objectUrl, setObjectUrl] = useState("");
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -56,6 +77,7 @@ export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     if (!src) {
       setObjectUrl("");
       return () => { active = false; };
@@ -67,7 +89,7 @@ export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady
       }).catch(() => {});
     }
 
-    loadAuthenticatedImage(src)
+    loadAuthenticatedImage(src, { signal: controller.signal })
       .then((nextObjectUrl) => {
         if (active) {
           setObjectUrl(nextObjectUrl);
@@ -80,10 +102,11 @@ export function AuthenticatedImage({ src, placeholderSrc, onError, onSourceReady
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [src, placeholderSrc]);
 
   return <img {...props} src={objectUrl || TRANSPARENT_PIXEL} />;
-}
+}, (previous, next) => previous.src === next.src && previous.placeholderSrc === next.placeholderSrc && previous.alt === next.alt && previous.className === next.className);
 
 export default AuthenticatedImage;

@@ -7,9 +7,12 @@ const {
   parseMetricLine,
 } = require("../training-format");
 const { exportBaseName, cleanName } = require("../utils");
+const { isMosaicAnnotation, mosaicPixelSize } = require("../annotation/special-labels");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeClassName, normalizeRecognitionClasses } = require("../recognition-classes");
 
 function createTrainingWorker({
   query,
+  sharp,
   fs,
   path,
   storageRoot,
@@ -43,6 +46,14 @@ function createTrainingWorker({
       test: requested.testProjectIds,
     };
     const datasetFilters = normalizeTrainingDatasetFilters({}, params);
+    const recognitionClasses = normalizeRecognitionClasses(params.recognitionClasses);
+    const classMappings = normalizeClassMappings(params.classMappings, recognitionClasses);
+    const classLookup = classMappingLookup(classMappings, recognitionClasses);
+    const labels = mappedRecognitionClasses(classMappings, recognitionClasses);
+    const mapAnnotation = (ann) => {
+      const label = mapClassName(ann.label, classLookup);
+      return label ? { ...ann, label, original_label: ann.label } : null;
+    };
     if (!splitProjectIds.train.length) throw new Error("Training split project is required");
     const selectedIds = [...new Set(Object.values(splitProjectIds).flat())];
     const projects = (await query("SELECT * FROM projects WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL", [selectedIds])).rows;
@@ -69,9 +80,9 @@ function createTrainingWorker({
        WHERE pi.project_id=ANY($1::uuid[]) AND a.label_version_id=p.active_label_version_id ORDER BY a.label, a.id`,
       [selectedIds],
     )).rows;
-    const labels = [...new Set(annRows.map((ann) => String(ann.label || "unknown")))].sort((a, b) => a.localeCompare(b));
-    if (!labels.length) throw new Error("Selected dataset splits have no annotations");
-    const labelToIndex = new Map(labels.map((label, index) => [label, index]));
+    const targetAnnRows = annRows.filter((ann) => !isMosaicAnnotation(ann)).map(mapAnnotation).filter(Boolean);
+    if (!targetAnnRows.length) throw new Error("Selected dataset splits have no annotations for the configured recognition classes");
+    const labelToIndex = new Map(labels.map((label, index) => [normalizeClassName(label), index]));
     const annsByImage = new Map();
     for (const ann of annRows) {
       const key = String(ann.project_image_id);
@@ -95,9 +106,12 @@ function createTrainingWorker({
     let duplicateImageCount = 0;
     for (let index = 0; index < deduplicatedRows.length; index += 1) {
       const item = deduplicatedRows[index];
-      const annotations = annsByImage.get(String(item.id)) || [];
+      const allAnnotations = annsByImage.get(String(item.id)) || [];
+      const sourceAnnotations = allAnnotations.filter((ann) => !isMosaicAnnotation(ann));
+      const annotations = sourceAnnotations.map(mapAnnotation).filter(Boolean);
+      const mosaicRegions = allAnnotations.filter(isMosaicAnnotation);
       const matchingParts = ["train", "val", "test"].filter((part) =>
-        splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, annotations, datasetFilters[part]));
+        splitProjectIds[part].includes(String(item.project_id)) && trainingImageMatchesFilter(item, sourceAnnotations, datasetFilters[part]));
       if (matchingParts.length > 1) {
         throw new Error(`Dataset split filters overlap: image ${item.display_name || item.id} matches ${matchingParts.join(", ")}`);
       }
@@ -114,12 +128,35 @@ function createTrainingWorker({
       const ext = item.original_ext || ".jpg";
       const base = `${exportBaseName(item, index + 1)}_${String(item.id).slice(0, 8)}`;
       const imageName = `${base}${ext}`;
-      await writeObjectToFile(item.object_key, path.join(snapshotRoot, "images", part, imageName));
-      const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(String(ann.label || "unknown")) ?? 0));
+      const snapshotImagePath = path.join(snapshotRoot, "images", part, imageName);
+      await writeObjectToFile(item.object_key, snapshotImagePath);
+      if (mosaicRegions.length && sharp) {
+        const overlays = [];
+        for (const region of mosaicRegions) {
+          const left = Math.max(0, Math.round(Number(region.bbox_x || 0)));
+          const top = Math.max(0, Math.round(Number(region.bbox_y || 0)));
+          const width = Math.max(0, Math.min(Number(item.width || 1) - left, Math.round(Number(region.bbox_w || 0))));
+          const height = Math.max(0, Math.min(Number(item.height || 1) - top, Math.round(Number(region.bbox_h || 0))));
+          if (!width || !height) continue;
+          const block = Math.max(1, mosaicPixelSize(region));
+          const input = await sharp(snapshotImagePath)
+            .extract({ left, top, width, height })
+            .resize(Math.max(1, Math.ceil(width / block)), Math.max(1, Math.ceil(height / block)), { kernel: "nearest" })
+            .resize(width, height, { kernel: "nearest" })
+            .toBuffer();
+          overlays.push({ input, left, top });
+        }
+        if (overlays.length) {
+          const temporaryPath = `${snapshotImagePath}.mosaic-tmp${ext}`;
+          await sharp(snapshotImagePath).composite(overlays).toFile(temporaryPath);
+          fs.renameSync(temporaryPath, snapshotImagePath);
+        }
+      }
+      const lines = annotations.map((ann) => yoloClassLine(ann, item.width, item.height, labelToIndex.get(normalizeClassName(ann.label)) ?? 0));
       fs.writeFileSync(path.join(snapshotRoot, "labels", part, `${base}.txt`), `${lines.join("\n")}${lines.length ? "\n" : ""}`, "utf8");
       cocoBySplit[part].images.push({ id: String(item.id), file_name: imageName, width: Number(item.width || 0), height: Number(item.height || 0) });
       for (const ann of annotations) cocoBySplit[part].annotations.push({
-        id: annotationId++, image_id: String(item.id), category_id: (labelToIndex.get(String(ann.label || "unknown")) ?? 0) + 1,
+        id: annotationId++, image_id: String(item.id), category_id: (labelToIndex.get(normalizeClassName(ann.label)) ?? 0) + 1,
         bbox: [Number(ann.bbox_x || 0), Number(ann.bbox_y || 0), Number(ann.bbox_w || 0), Number(ann.bbox_h || 0)],
         area: Number(ann.bbox_w || 0) * Number(ann.bbox_h || 0), iscrowd: 0,
       });
@@ -132,14 +169,14 @@ function createTrainingWorker({
     fs.writeFileSync(path.join(snapshotRoot, "data.yaml"), dataYaml, "utf8");
     const imageCount = split.train + split.val + split.test;
     const includedImageIds = new Set(Object.values(cocoBySplit).flatMap((coco) => coco.images.map((image) => String(image.id))));
-    const annotationCount = annRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
+    const annotationCount = targetAnnRows.filter((ann) => includedImageIds.has(String(ann.project_image_id))).length;
     if (!split.train) throw new Error("Training filters produced an empty train split");
-    fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
+    fs.writeFileSync(path.join(snapshotRoot, "snapshot.json"), JSON.stringify({ projectId: trainProject.id, datasetSplits: splitProjectIds, datasetFilters, recognitionClasses, classMappings, labels, split, imageCount, annotationCount, duplicateImageCount }, null, 2), "utf8");
     const snapshot = (await query(
       `INSERT INTO dataset_snapshots (name, source_project_id, label_version_id, format, split_json, path, image_count, annotation_count, metadata_json)
        VALUES ($1,$2,$3,'yolo+coco',$4,$5,$6,$7,$8) RETURNING *`,
       [snapshotName, trainProject.id, trainProject.active_label_version_id, JSON.stringify(split), snapshotRoot, imageCount, annotationCount,
-        JSON.stringify({ labels, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
+        JSON.stringify({ labels, recognitionClasses, classMappings, dataYaml: path.join(snapshotRoot, "data.yaml"), cocoAnnotations: path.join(snapshotRoot, "annotations"), datasetSplits: splitProjectIds, datasetFilters, duplicateImageCount })],
     )).rows[0];
     await resourceAccess.assignOwner("dataset_snapshots", snapshot.id, { id: job.created_by_user_id });
     await query("UPDATE runtime_training_jobs SET dataset_snapshot_id=$1 WHERE id=$2", [snapshot.id, job.id]);
@@ -182,7 +219,7 @@ function createTrainingWorker({
       "test_dataloader.dataset.ann_file=annotations/test.json",
       "test_dataloader.dataset.data_prefix.img=images/test/",
       `optim_wrapper.optimizer.lr=${Number(params.base_lr || params.learning_rate || params.lr0 || 0.0001)}`,
-      `default_hooks.checkpoint.interval=${Math.max(1, Number(params.save_period || 1))}`,
+      `default_hooks.checkpoint.interval=${Number(params.save_period || 0) > 0 ? Math.max(1, Number(params.save_period)) : Math.max(2, Number(params.epochs || job.total_epochs || 1) + 1)}`,
     ];
     if (params.amp === true) cfgOptions.push("optim_wrapper.type=AmpOptimWrapper");
     if (params.auto_scale_lr != null) cfgOptions.push(`auto_scale_lr.enable=${Boolean(params.auto_scale_lr)}`);
@@ -215,7 +252,7 @@ function createTrainingWorker({
       "name=run",
       "exist_ok=True",
     ];
-    args.push(`save_period=${Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1}`);
+    args.push(`save_period=${Number(params.save_period || 0) > 0 ? Number(params.save_period) : -1}`);
     if (params.optimizer) args.push(`optimizer=${params.optimizer}`);
     if (params.lr0 != null) args.push(`lr0=${Number(params.lr0)}`);
     if (params.resume && params.resolvedWeights) args.push("resume=True");
@@ -228,7 +265,7 @@ function createTrainingWorker({
       const trainOptions = {
         data: path.join(snapshot.path, "data.yaml"), epochs: Number(params.epochs || job.total_epochs || 100),
         imgsz: Number(params.imgsz || 640), batch: Number(params.batch || 16), project: job.output_root,
-        name: "run", exist_ok: true, save_period: Number.isFinite(Number(params.save_period)) ? Number(params.save_period) : -1,
+        name: "run", exist_ok: true, save_period: Number(params.save_period || 0) > 0 ? Number(params.save_period) : -1,
       };
       if (params.device !== "" && params.device != null) trainOptions.device = params.device;
       if (params.optimizer) trainOptions.optimizer = params.optimizer;

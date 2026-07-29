@@ -14,28 +14,22 @@ Node.js API + React 静态页面
    └── Ubuntu 只读目录挂载：浏览并导入本机数据
 ```
 
-推荐通过 Docker Compose 运行。开发模式也支持分别启动 PostgreSQL、MinIO、后端和 Vite。
+依赖服务通过 Podman/Docker Compose 运行，应用本体由 Node.js 直接启动，或用根目录 `Dockerfile` 构建镜像。
 
-## 对外发布：完整离线压缩包
+## 对外发布：Ubuntu 离线迁移包
 
-发布维护者在联网构建机执行：
-
-```bash
-npm run release:offline -- 0.1.0
-bash scripts/verify-release-archive.sh release-dist/det-dashboard-0.1.0-linux-amd64.tar.gz
-```
-
-产物包含应用、PostgreSQL、MinIO 三个 Docker 镜像及全部部署脚本。目标 Ubuntu 机器只需要 Docker Engine 与 Docker Compose：
+`migration/ubuntu24.04/` 提供免构建的离线运行包，内含 PostgreSQL 16 与 MinIO 镜像 tar 包、Compose 配置和启停脚本，用于在 Ubuntu 24.04 上恢复数据并运行依赖服务：
 
 ```bash
-tar -xzf det-dashboard-0.1.0-linux-amd64.tar.gz
-cd det-dashboard-0.1.0-linux-amd64
+cd migration/ubuntu24.04
+./load-images.sh
 ./start.sh
+./verify.sh
 ```
 
-无需克隆源码、Node.js、npm 或互联网。备份、恢复、GPU 和发布结构详见 [`docs/release-architecture.md`](./docs/release-architecture.md)，完整审查见 [`docs/code-audit-2026-07-03.md`](./docs/code-audit-2026-07-03.md)。
+详细步骤见 [`migration/ubuntu24.04/README-UBUNTU24.md`](./migration/ubuntu24.04/README-UBUNTU24.md)。推送 `v*` 标签时，GitHub Actions 会构建并发布 `linux/amd64`、`linux/arm64` 应用镜像到 GHCR。
 
-第一次接触本项目，建议直接阅读 [`0702使用说明.md`](./0702使用说明.md)，其中包含本次改动前后对比、零基础安装、完整操作流程、数据格式、备份和故障排查。
+第一次接触本项目，建议直接阅读 [`docs/平台使用说明书.md`](./docs/平台使用说明书.md)，其中包含完整功能与操作流程。
 
 ## 功能概览
 
@@ -55,186 +49,119 @@ cd det-dashboard-0.1.0-linux-amd64
 
 ### 1. 环境要求
 
-推荐环境：
-
-- Ubuntu 22.04 或更新版本
-- Docker Engine
-- Docker Compose Plugin（支持 `docker compose`）
-- 至少 4 GB 可用内存
+- Node.js `>=22.12.0` 和 npm
+- Podman（或 Docker）及 Compose，用于运行 PostgreSQL 与 MinIO
 - 足够容纳 PostgreSQL、MinIO 对象及导出数据的磁盘空间
 
-原生 Ubuntu 文件夹选择器还需要宿主机具有：
-
-- Node.js
-- `zenity`
-- 可用的图形桌面会话
-
-这些组件不是核心依赖；缺失时会自动使用网页文件夹选择器。
+Windows 下可直接运行 `restart-det-dashboard-podman.bat`，自动完成依赖启动、前端构建和前后端重启。
 
 ### 2. 克隆项目
 
 ```bash
 git clone https://github.com/GodBarry/Det-DashBoard.git
 cd Det-DashBoard
-git switch ZBH
 ```
 
 ### 3. 首次配置
 
-复制便携部署配置：
-
 ```bash
-cp .env.portable.example .env.portable
+cp .env.example .env
+npm ci
 ```
 
-编辑 `.env.portable`，至少修改以下密码：
+`.env` 不会提交到 Git；其中的密码和路径请按本机情况修改。
 
-```dotenv
-POSTGRES_PASSWORD=请替换为强密码
-MINIO_ROOT_PASSWORD=请替换为强密码
-```
-
-`.env.portable` 不会提交到 Git。
-
-### 4. 启动
+### 4. 启动依赖服务
 
 ```bash
-bash scripts/portable-start.sh
+podman compose -f podman-compose.yml up -d
 ```
 
-脚本会完成以下工作：
+该 Compose 只启动 PostgreSQL（`15432`）和 MinIO（`9000`/`9001`），数据持久化到 `runtime/`。使用 Docker 时请把 `podman` 换成 `docker`，并去掉卷挂载末尾的 `:Z,U` 标记。
 
-1. 创建运行数据目录。
-2. 构建应用镜像。
-3. 启动 PostgreSQL 和 MinIO。
-4. 迁移旧版 root 数据目录权限。
-5. 等待依赖和应用健康检查通过。
-6. 在条件允许时启动 Ubuntu 原生目录选择桥接。
-
-启动成功后访问：
-
-- 应用：http://localhost:5173
-- MinIO API：http://localhost:59000
-- MinIO Console：http://localhost:59001
-- PostgreSQL：`127.0.0.1:55432`
-
-所有端口默认只监听 `127.0.0.1`。
-
-### 5. 查看状态
+### 5. 启动应用
 
 ```bash
-docker compose --env-file .env.portable -f docker-compose.portable.yml ps
+npm run build
+npm start
 ```
 
-正常状态下，`app`、`postgres`、`minio` 应显示为 `healthy`；`permissions` 是一次性初始化服务，正常状态为退出码 `0`。
+`npm start` 运行 Node.js API 并托管前端静态页面，访问 http://localhost:4177。
 
-查看日志：
+开发模式也可以前后端分离：
 
 ```bash
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f app
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f postgres
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f minio
+npm run api:pg   # API，http://localhost:4177
+npm run dev      # Vite，http://localhost:5173，/api 代理到 4177
 ```
 
 ### 6. 停止
 
 ```bash
-bash scripts/portable-stop.sh
+podman compose -f podman-compose.yml down
 ```
 
 停止不会删除数据库、对象、导出结果或配置。
 
-## Docker 服务与目录
+## 依赖服务与目录
 
 ### 服务
 
+`podman-compose.yml` 只管理两个依赖服务；应用本体由 Node.js 直接运行，或通过根目录 `Dockerfile` 构建镜像运行。
+
 | 服务 | 作用 | 默认宿主端口 |
 | --- | --- | --- |
-| `app` | Node.js API、任务执行和 React 页面 | `5173` |
-| `postgres` | 业务数据库 | `55432` |
-| `minio` | 对象存储 API 和控制台 | `59000`、`59001` |
-| `permissions` | 一次性迁移持久化目录 UID/GID | 无 |
+| `postgres` | 业务数据库 | `15432` |
+| `minio` | 对象存储 API 和控制台 | `9000`、`9001` |
 
 ### 持久化目录
 
 ```text
 Det-DashBoard/
-├── datasets/                 # 默认数据集挂载目录
-├── exports/                  # 导出结果
-└── portable-data/
-    ├── postgres/             # PostgreSQL 数据
-    ├── minio/                # MinIO 对象
-    └── storage/              # 缩略图、临时文件和 fallback 对象
+├── runtime/
+│   ├── postgres/             # PostgreSQL 数据
+│   ├── minio/                # MinIO 对象
+│   └── cache/                # 缩略图、临时文件和 fallback 对象（STORAGE_ROOT）
+└── exports/                  # 导出结果
 ```
 
 需要迁移或备份时，至少保存：
 
-- `.env.portable`
-- `portable-data/`
+- `.env`
+- `runtime/`
 - `exports/`
-- 仍采用链接模式时的原始数据目录
 
 ## 配置说明
 
-便携部署配置位于 `.env.portable`。
+运行配置位于 `.env`，完整示例见 `.env.example`。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `APP_BIND_ADDRESS` | `127.0.0.1` | Web 服务监听地址 |
-| `APP_PORT` | `5173` | Web 服务宿主端口 |
-| `APP_IMAGE` | `det-dashboard:local` | 应用镜像名称 |
-| `BUILD_LOCAL_IMAGE` | `true` | 是否在启动时构建镜像 |
-| `DB_PORT` | `55432` | PostgreSQL 宿主端口 |
-| `POSTGRES_DB` | `det_dashboard` | 数据库名称 |
-| `POSTGRES_USER` | `det` | 数据库用户 |
-| `POSTGRES_PASSWORD` | 无安全默认值 | 数据库密码 |
-| `MINIO_HOST_PORT` | `59000` | MinIO API 宿主端口 |
-| `MINIO_CONSOLE_HOST_PORT` | `59001` | MinIO 控制台宿主端口 |
-| `MINIO_ROOT_USER` | `minioadmin` | MinIO 管理用户 |
-| `MINIO_ROOT_PASSWORD` | 无安全默认值 | MinIO 管理密码 |
-| `MINIO_BUCKET` | `zbh-datasets` | 对象 bucket |
-| `HOST_BROWSE_ROOT` | `/` | 容器允许浏览的宿主目录 |
-| `BROWSE_ROOT_DISPLAY` | `/` | 页面显示的浏览根路径 |
+| `HOST` | `127.0.0.1` | 监听地址 |
+| `PORT` | `4177` | API 与静态页面端口 |
+| `DATA_ROOT` / `DATA_ROOT_DISPLAY` | `./runtime/data-root` | 数据集来源根目录及页面显示路径 |
+| `BROWSE_ROOT` / `BROWSE_ROOT_DISPLAY` | 同 `DATA_ROOT` | 网页目录选择器允许浏览的根目录 |
+| `BROWSE_ALL_DRIVES` | `false` | Windows 下允许目录选择器列出全部盘符 |
 | `HOST_PATH_MODE` | `posix` | 宿主路径格式；Windows 盘符模式设为 `windows` |
-| `EXPORTS_DIR` | `./exports` | 宿主机导出目录 |
-| `OBJECT_STORE_WRITE_FALLBACK` | `false` | 是否使用本地链接/fallback 写入模式 |
+| `STORAGE_ROOT` | `./runtime/cache` | 缩略图、导出临时文件和对象 fallback 缓存根 |
+| `EXPORT_ROOT` / `EXPORT_ROOT_DISPLAY` | `./exports` | 数据集导出目录 |
+| `DATABASE_URL` | `postgres://det:det_password@localhost:15432/det_dashboard` | PostgreSQL 连接串 |
+| `MINIO_*` | localhost:9000 | MinIO 连接、bucket 与数据目录，见 `.env.example` |
 
 ### 收窄文件系统访问范围
 
-默认配置将 Ubuntu `/` 只读挂载到容器，便于浏览整个本机文件系统。若只需访问指定数据目录，建议改为：
+网页目录选择器只能浏览 `BROWSE_ROOT` 以内的路径。生产部署建议把它设置为专用数据目录，例如：
 
 ```dotenv
-HOST_BROWSE_ROOT=/home/barry/图片
+BROWSE_ROOT=/home/barry/图片
 BROWSE_ROOT_DISPLAY=/home/barry/图片
 ```
 
-该挂载始终为只读；应用只会写入专用的 `portable-data/storage` 和 `exports` 挂载。
+Windows 下设置 `HOST_PATH_MODE=windows`；如需跨盘符浏览，再开启 `BROWSE_ALL_DRIVES=true`。
 
-Windows 纯 Docker Desktop 启动请使用：
+### 对象存储与 fallback
 
-```bat
-portable-start.bat
-```
-
-该脚本会检测所有本机文件系统盘符，并生成 `portable-data/windows-drives.override.yml`，把 `C:\`、`D:\` 等只读挂载到容器的 `/host/browse/C`、`/host/browse/D`。网页中通过系统文件夹选择器选到的 `C:\data\images` 会自动映射为容器内路径读取。导出不写入这些只读盘符挂载，而是写入 `EXPORTS_DIR` 对应的可写目录，默认是仓库下 `exports`。
-
-### 独立对象模式与链接模式
-
-默认设置：
-
-```dotenv
-OBJECT_STORE_WRITE_FALLBACK=false
-```
-
-导入对象会写入 MinIO，移动或删除原始文件后仍能使用，更适合备份和迁移。
-
-设置为 `true` 时，后端优先创建硬链接或符号链接，减少大数据集的重复占用：
-
-```dotenv
-OBJECT_STORE_WRITE_FALLBACK=true
-```
-
-链接模式依赖原文件路径；移动、重命名或删除源数据会造成对象不可读。
+导入对象默认写入 MinIO，移动或删除原始文件后仍能使用，更适合备份和迁移。MinIO 暂时不可用时，后端使用 `STORAGE_ROOT` 下的本地 fallback 目录兜底，避免导入中断。
 
 ## 数据导入
 
@@ -354,10 +281,10 @@ exports/<项目名>_<时间戳>_<格式>/
 
 当前内部标注模型是矩形检测框，因此 COCO/YOLO 分割导入会转换为外接框；再次导出时不会恢复原始多边形轮廓。
 
-通过 `.env.portable` 修改导出位置：
+通过 `.env` 修改导出位置：
 
 ```dotenv
-EXPORTS_DIR=/mnt/datasets/exports
+EXPORT_ROOT=/mnt/datasets/exports
 EXPORT_ROOT_DISPLAY=/mnt/datasets/exports
 ```
 
@@ -392,42 +319,34 @@ curl -fsS http://localhost:5173/api/health/ready
 先停止服务，保证文件一致性：
 
 ```bash
-bash scripts/portable-stop.sh
-tar -czf det-dashboard-backup.tar.gz .env.portable portable-data exports
+podman compose -f podman-compose.yml down
+tar -czf det-dashboard-backup.tar.gz .env runtime exports
 ```
-
-如果启用了链接模式，还必须同时备份原始数据目录。
 
 ### 恢复
 
 ```bash
 tar -xzf det-dashboard-backup.tar.gz
-bash scripts/portable-start.sh
+podman compose -f podman-compose.yml up -d
+npm start
 ```
-
-启动脚本会自动处理旧版 root 容器遗留的持久化目录权限。
 
 ## 升级
 
 ```bash
-bash scripts/portable-stop.sh
+podman compose -f podman-compose.yml down
 git pull --ff-only
-bash scripts/portable-start.sh
+npm ci
+npm run build
+podman compose -f podman-compose.yml up -d
+npm start
 ```
 
-升级前建议先备份 `.env.portable`、`portable-data/` 和 `exports/`。
+升级前建议先备份 `.env`、`runtime/` 和 `exports/`。
 
 当前数据库新增结构由后端启动时补齐，但仓库尚未引入正式的版本化 migration 工具；跨大版本升级必须先备份。
 
 ## 使用已发布镜像
-
-默认启动脚本会在本机构建镜像。若镜像已发布到 registry：
-
-```bash
-APP_IMAGE=ghcr.io/godbarry/det-dashboard:<version> \
-BUILD_LOCAL_IMAGE=false \
-bash scripts/portable-start.sh
-```
 
 手动构建和推送：
 
@@ -457,7 +376,7 @@ npm ci
 
 ```bash
 cp .env.example .env
-docker compose up -d
+podman compose -f podman-compose.yml up -d
 ```
 
 基础 schema 只会在全新 PostgreSQL 数据目录初始化时自动导入；已有独立数据库可手动执行：
@@ -503,23 +422,17 @@ npm run build
 # 运行快速单元测试
 npm test
 
-# 构建隔离 Docker 栈并运行 API + Chrome 端到端测试
-PLAYWRIGHT_CHANNEL=chrome npm run test:docker
-
 # 启动正式 Node.js 服务
 npm start
 
-# 查看容器状态
-docker compose --env-file .env.portable -f docker-compose.portable.yml ps
+# 查看依赖容器状态
+podman compose -f podman-compose.yml ps
 
-# 查看应用日志
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs -f app
+# 查看数据库日志
+podman compose -f podman-compose.yml logs -f postgres
 
-# 重启应用
-docker compose --env-file .env.portable -f docker-compose.portable.yml restart app
-
-# 停止完整栈
-bash scripts/portable-stop.sh
+# 停止依赖服务
+podman compose -f podman-compose.yml down
 ```
 
 ## 故障排查
@@ -540,33 +453,18 @@ newgrp docker
 docker info
 ```
 
-### 5173 无法访问
+### 页面或 API 无法访问
 
 ```bash
-docker compose --env-file .env.portable -f docker-compose.portable.yml ps
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 100 app
-curl -v http://localhost:5173/api/health/ready
+podman compose -f podman-compose.yml ps
+curl -v http://localhost:4177/api/health/ready
 ```
 
-### 文件夹选择器没有弹出
+开发模式下再确认 Vite 终端（`npm run dev`）没有报错。
 
-Ubuntu 检查宿主机：
+### 文件夹选择器行为异常
 
-```bash
-command -v node
-command -v zenity
-echo "$DISPLAY"
-cat portable-data/folder-dialog.log
-```
-
-原生桥接失败时网页会自动使用内置目录选择器，不影响导入。
-
-Windows 使用 `portable-start.bat` 时，桥接服务通过 PowerShell 打开系统文件夹选择器；日志位于：
-
-```bat
-type portable-data\folder-dialog.log
-type portable-data\folder-dialog.err.log
-```
+网页内置目录选择器不依赖宿主组件，默认即可使用。`HOST_DIALOG_URL` 和 `NATIVE_DIALOG_MODE` 仅在自行部署原生目录选择桥接服务时使用；桥接不可用时页面会自动回退到内置选择器，不影响导入。
 
 ### “上一级”按钮不可用
 
@@ -584,44 +482,27 @@ type portable-data\folder-dialog.err.log
 表示数据库记录存在，但 MinIO 和 fallback 中都没有对应对象：
 
 ```bash
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 200 app
-docker compose --env-file .env.portable -f docker-compose.portable.yml logs --tail 200 minio
+podman compose -f podman-compose.yml logs --tail 200 minio
 ```
 
-检查 `portable-data/minio`、`portable-data/storage/object-store-fallback` 和源文件是否完整。
+检查 `runtime/minio`、`runtime/cache` 中的 fallback 对象和源文件是否完整。
 
 ### 磁盘空间不足
 
 ```bash
 df -h
-du -sh portable-data/* exports
+du -sh runtime/* exports
 ```
 
-默认独立对象模式会把导入文件写入 MinIO；请为 `portable-data/minio` 预留足够空间。
-
-### 清理失败导入
-
-先 dry-run：
-
-```bash
-node scripts/cleanup-failed-import.js <import_batch_id>
-```
-
-确认后执行：
-
-```bash
-node scripts/cleanup-failed-import.js <import_batch_id> --apply
-```
-
-使用该脚本前需要设置正确的 `DATABASE_URL`。
+导入文件默认写入 MinIO；请为 `runtime/minio` 预留足够空间。失败或废弃的导入批次可在"导入管理"界面直接删除。
 
 ## 安全边界
 
 - 当前应用没有账号认证、权限模型、租户隔离和 TLS。
 - Docker 发布配置默认只允许本机访问，不要直接暴露到公网或不可信局域网。
-- 如需远程部署，应在前方增加带认证和 TLS 的反向代理，并收窄 `HOST_BROWSE_ROOT`。
+- 如需远程部署，应在前方增加带认证和 TLS 的反向代理，并收窄 `BROWSE_ROOT`。
 - PostgreSQL 和 MinIO 管理端口也默认只绑定 `127.0.0.1`。
-- 不要提交 `.env`、`.env.portable`、数据库目录或访问密钥。
+- 不要提交 `.env`、数据库目录或访问密钥。
 
 ## 已知架构限制
 
@@ -639,27 +520,21 @@ Det-DashBoard/
 ├── src/                          # React 前端
 ├── server/
 │   ├── postgres-app.js           # 正式 API 与任务入口
-│   ├── dataset-formats.js        # LabelMe/COCO/YOLO 导入适配器
-│   ├── export-formats.js         # LabelMe/COCO/YOLO 导出适配器
+│   ├── dataset/                  # 项目、导入、基线、回收站服务
+│   ├── ml-assets/                # 模型、算法资产与 Python 环境服务
+│   ├── runtime-jobs/             # 训练/推理任务队列与 worker
+│   ├── compute-tasks/            # 智能标注计算任务
+│   ├── routes/                   # API 路由
 │   ├── config.js                 # 环境配置
-│   ├── db.js                     # PostgreSQL 连接池
 │   ├── object-store.js           # MinIO 与 fallback
 │   └── utils.js                  # 文件扫描和属性推断
 ├── db/schema.sql                 # 基础数据库 schema
-├── scripts/
-│   ├── portable-start.sh         # Docker 一键启动
-│   ├── portable-stop.sh          # Docker 一键停止
-│   ├── folder-dialog-bridge.js   # Ubuntu 原生目录选择桥接
-│   └── cleanup-failed-import.js  # 失败导入清理工具
-├── test/
-│   ├── unit/                     # 格式、导出和场景推断单元测试
-│   ├── integration/              # 真实 PostgreSQL/MinIO API 流程
-│   └── e2e/                      # Playwright 浏览器流程
-├── playwright.config.js          # 浏览器测试配置
+├── migration/ubuntu24.04/        # Ubuntu 离线迁移包（镜像 + Compose）
+├── scripts/                      # 数据导入与盘点脚本
+├── test/unit/                    # node:test 单元测试
 ├── Dockerfile                    # 多阶段生产镜像
-├── docker-compose.portable.yml   # 推荐发布拓扑
-├── docker-compose.yml            # 本地开发依赖
-├── .env.portable.example         # 发布配置模板
+├── podman-compose.yml            # PostgreSQL + MinIO 依赖服务
+├── .env.example                  # 配置模板
 └── .github/workflows/ci.yml      # CI 与 GHCR 发布
 ```
 

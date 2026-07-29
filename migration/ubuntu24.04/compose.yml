@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: det-dashboard-postgres:16
+    container_name: det-dashboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-det_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-det}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-det_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${RUNTIME_ROOT:-/opt/det-dashboard/runtime}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: det-dashboard-minio:latest
+    container_name: det-dashboard-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - ${RUNTIME_ROOT:-/opt/det-dashboard/runtime}/minio:/data

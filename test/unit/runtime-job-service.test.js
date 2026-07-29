@@ -373,29 +373,45 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
   const service = createService(async (sql, params) => {
     calls.push({ sql, params });
     if (sql === "SELECT * FROM runtime_inference_jobs WHERE id=$1") {
-      return { rows: [{ id: "job-1", dataset_project_id: "project-1" }] };
+      return { rows: [{ id: "job-1", dataset_project_id: "project-1", params_json: { recognitionClasses: ["car"] } }] };
     }
     if (sql.includes("FROM runtime_inference_results")) {
       return {
         rows: [
-          { project_image_id: "image-labeled", display_name: "Labeled", predictions_json: [{ label: "car" }] },
+          { project_image_id: "image-labeled", display_name: "Labeled", predictions_json: [{ label: "car" }, { label: "person" }] },
           { project_image_id: "image-unlabeled", display_name: "Unlabeled", predictions_json: [{ label: "bus" }] },
           { project_image_id: null, display_name: "Detached", predictions_json: [{ label: "truck" }] },
         ],
       };
     }
-    if (sql === "SELECT id, active_label_version_id FROM projects WHERE id=$1") {
-      return { rows: [{ id: "project-1", active_label_version_id: "labels-1" }] };
-    }
     if (sql.includes("FROM image_annotations")) {
       return {
         rows: [{
           project_image_id: "image-labeled",
+          label_version_id: "labels-1",
           label: "car",
           bbox_x: 1,
           bbox_y: 2,
           bbox_w: 3,
           bbox_h: 4,
+        }, {
+          project_image_id: "image-labeled",
+          label_version_id: "labels-1",
+          label: "person",
+          bbox_x: 5,
+          bbox_y: 6,
+          bbox_w: 7,
+          bbox_h: 8,
+        }],
+      };
+    }
+    if (sql.includes("FROM project_images pi") && sql.includes("LEFT JOIN image_assets")) {
+      return {
+        rows: [{
+          project_image_id: "image-labeled",
+          display_name: "Labeled",
+          image_width: 1280,
+          image_height: 720,
         }],
       };
     }
@@ -412,20 +428,22 @@ test("getInferenceEvaluation evaluates only images with ground-truth annotations
 
   const evaluation = await service.getInferenceEvaluation("job-1");
 
-  assert.deepEqual(calls[3].params, ["labels-1", ["image-labeled", "image-unlabeled"]]);
+  assert.deepEqual(calls[2].params, [["image-labeled", "image-unlabeled"]]);
   assert.deepEqual(evaluationInput.predictionRows, [{
     projectImageId: "image-labeled",
     predictions: [{ label: "car" }],
   }]);
   assert.equal(evaluationInput.groundTruthRows.length, 1);
+  assert.deepEqual(evaluation.recognitionClasses, ["car"]);
   assert.equal(evaluationInput.iouThreshold, 0.5);
+  assert.deepEqual(evaluationInput.expectedLabels, ["car"]);
   assert.deepEqual(evaluation.summary, {
     precision: 1,
     inferenceImages: 3,
     evaluatedImages: 1,
     skippedUnlabeledImages: 2,
   });
-  assert.equal(evaluation.labelVersionId, "labels-1");
+  assert.deepEqual(evaluation.labelVersionIds, ["labels-1"]);
   assert.equal(evaluation.errors[0].display_name, "Labeled");
   assert.equal(evaluation.errors[0].thumb_url, "/api/project-images/image-labeled/thumb");
 });
@@ -452,18 +470,29 @@ test("requeueInferenceJob preserves params and resets the persisted queue state"
   assert.deepEqual(result.params_json, originalParams);
 });
 
-test("deleteInferenceJob uses a returning delete and reports the deleted id", async () => {
+test("deleteInferenceJob stops its process, deletes the row, and removes its output", async () => {
   const calls = [];
+  const stopped = [];
+  const removed = [];
   const service = createService(async (sql, params) => {
     calls.push({ sql, params });
+    if (sql.startsWith("SELECT *")) {
+      return { rows: [{ id: "job-1", process_pid: 314, output_root: "/storage/runtime/inference/job-1" }] };
+    }
     return { rows: [{ id: "job-1" }] };
+  }, {
+    storageRoot: "/storage",
+    path: require("node:path").posix,
+    fs: { mkdirSync() {}, rmSync: (...args) => removed.push(args) },
+    stopProcess: (pid) => { stopped.push(pid); return true; },
   });
 
   const result = await service.deleteInferenceJob("job-1");
 
-  assert.deepEqual(calls, [{
-    sql: "DELETE FROM runtime_inference_jobs WHERE id=$1 RETURNING id",
-    params: ["job-1"],
-  }]);
-  assert.deepEqual(result, { deleted: true, id: "job-1" });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /^SELECT \*/);
+  assert.match(calls[1].sql, /^DELETE FROM runtime_inference_jobs/);
+  assert.deepEqual(stopped, [314]);
+  assert.deepEqual(removed, [["/storage/runtime/inference/job-1", { recursive: true, force: true }]]);
+  assert.deepEqual(result, { deleted: true, id: "job-1", processStopped: true, outputRemoved: true });
 });

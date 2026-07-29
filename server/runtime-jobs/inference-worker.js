@@ -10,6 +10,7 @@ const {
   metricLabel,
   averagePrecision,
 } = require("./inference-metrics");
+const { classMappingLookup, mapClassName, mappedRecognitionClasses, normalizeClassMappings, normalizeClassName, normalizeRecognitionClasses, recognitionInputClasses } = require("../recognition-classes");
 
 function createInferenceWorker({
   query,
@@ -30,6 +31,38 @@ function createInferenceWorker({
   clock,
 }) {
   const nowIso = () => new Date(clock.now()).toISOString();
+
+  function recognitionClassesForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return mappedRecognitionClasses(params.classMappings, normalizeRecognitionClasses(params.recognitionClasses));
+  }
+
+  function classMappingsForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return normalizeClassMappings(params.classMappings, params.recognitionClasses);
+  }
+
+  function classLookupForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return classMappingLookup(params.classMappings, params.recognitionClasses);
+  }
+
+  function inputClassesForJob(job) {
+    const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
+    return recognitionInputClasses(params.classMappings, params.recognitionClasses);
+  }
+
+  function filterPredictionRows(job, rows) {
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
+    return (rows || []).map((row) => ({
+      ...row,
+      predictions: (row.predictions || []).map((prediction) => {
+        const label = mapClassName(prediction.label, mappings, targets);
+        return label ? { ...prediction, label, ...(label === normalizeClassName(prediction.label) ? {} : { original_label: prediction.label }) } : null;
+      }).filter(Boolean),
+    }));
+  }
 
   function isDummyInferenceJob(job) {
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
@@ -138,14 +171,19 @@ function createInferenceWorker({
   async function loadFakeReferenceGroundTruth(job, images) {
     const imageIds = images.map((image) => image.projectImageId).filter(Boolean);
     if (!imageIds.length) throw new Error("Fake GT inference requires project image ids in the input manifest.");
-    const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
-    if (!project?.active_label_version_id) throw new Error("Fake GT inference requires an active label version with ground truth.");
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const gtRows = (await query(
-      `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
-       FROM image_annotations
-       WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
-      [project.active_label_version_id, imageIds],
-    )).rows;
+      `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id
+       JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
+       WHERE a.project_image_id = ANY($1::uuid[])`,
+      [imageIds],
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean);
     if (!gtRows.length) throw new Error("Fake GT inference did not find ground-truth boxes for the selected images.");
     const gtByImage = new Map();
     for (const gt of gtRows) {
@@ -325,16 +363,22 @@ function createInferenceWorker({
   }
 
   async function computeDetectionMetrics(job, predictionRows) {
+    predictionRows = filterPredictionRows(job, predictionRows);
+    const mappings = classLookupForJob(job);
+    const targets = recognitionClassesForJob(job);
     const imageIds = predictionRows.map((row) => row.projectImageId).filter(Boolean);
     if (!imageIds.length) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "没有可评估的图片 ID" };
-    const project = (await query("SELECT id, active_label_version_id FROM projects WHERE id=$1", [job.dataset_project_id])).rows[0];
-    if (!project?.active_label_version_id) return { images: predictionRows.length, predictions: 0, evaluated: false, reason: "项目没有 active_label_version_id" };
     const gtRows = (await query(
-      `SELECT project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h
-       FROM image_annotations
-       WHERE label_version_id=$1 AND project_image_id = ANY($2::uuid[])`,
-      [project.active_label_version_id, imageIds],
-    )).rows.map((row) => ({
+      `SELECT a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id
+       JOIN projects p ON p.id=pi.project_id AND p.active_label_version_id=a.label_version_id
+       WHERE a.project_image_id = ANY($1::uuid[])`,
+      [imageIds],
+    )).rows.map((row) => {
+      const label = mapClassName(row.label, mappings, targets);
+      return label ? { ...row, label, ...(label === normalizeClassName(row.label) ? {} : { original_label: row.label }) } : null;
+    }).filter(Boolean).map((row) => ({
       ...row,
       metricLabel: metricLabel(row),
     }));
@@ -470,6 +514,7 @@ function createInferenceWorker({
       imgsz: Number(params.imgsz ?? 640),
       batch: Math.max(1, Number(params.batch ?? 1)),
       device,
+      recognitionClasses: inputClassesForJob(job),
     };
     const runner = [
       "import json, os, sys",
@@ -490,6 +535,7 @@ function createInferenceWorker({
       "model = YOLO(cfg['weights'])",
       "rows = []",
       "names = getattr(model, 'names', {}) or {}",
+      "allowed_classes = {str(name).strip().lower() for name in cfg.get('recognitionClasses', [])}",
       "for abs_path in image_paths:",
       "    results = model.predict(source=abs_path, conf=cfg['conf'], iou=cfg['iou'], imgsz=cfg['imgsz'], batch=1, device=cfg['device'], verbose=False, stream=True)",
       "    result = next(iter(results))",
@@ -505,6 +551,7 @@ function createInferenceWorker({
       "            x1, y1, x2, y2 = [float(v) for v in coords]",
       "            cls_id = int(clss[index]) if clss[index] is not None else -1",
       "            label = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)",
+      "            if str(label).strip().lower() not in allowed_classes: continue",
       "            preds.append({'label': label, 'score': None if confs[index] is None else float(confs[index]), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2 - x1), 'bbox_h': max(0.0, y2 - y1), 'class_id': cls_id})",
       "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(source_path), 'width': item.get('width'), 'height': item.get('height'), 'predictions': preds})",
       "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'ultralytics_yolo', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
@@ -515,13 +562,17 @@ function createInferenceWorker({
     ].join("\n");
     fs.writeFileSync(runnerPath, runner, "utf8");
     await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`正在执行 YOLO 推理：${env.python_path}`, job.id]);
-    const result = await runChildProcess(env.python_path, [runnerPath], { cwd: outputRoot, env: { ...processRef.env, PYTHONIOENCODING: "utf-8" } });
+    const result = await runChildProcess(env.python_path, [runnerPath], {
+      cwd: outputRoot,
+      env: { ...processRef.env, PYTHONIOENCODING: "utf-8" },
+      onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
+    });
     const summaryLine = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "{}";
     let summary = {};
     try { summary = JSON.parse(summaryLine); } catch { summary = {}; }
     if (!fs.existsSync(predictionsPath)) throw new Error("YOLO 推理未生成 predictions.json");
     const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
-    const rows = Array.isArray(predictions.images) ? predictions.images : [];
+    const rows = filterPredictionRows(job, Array.isArray(predictions.images) ? predictions.images : []);
     const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
     const metrics = await computeDetectionMetrics(job, rows);
 
@@ -550,19 +601,21 @@ function createInferenceWorker({
         },
       };
       await client.query(
-        "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+        "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
         [JSON.stringify(nextParams), JSON.stringify(metrics), `YOLO 推理完成：${rows.length} 张图片，${predictionCount} 个预测框`, job.id],
       );
     });
     await runtimeAssetLinkService.recordSuccess(job, metrics);
   }
 
-  function normalizeTorchDevice(value, cudaAvailable = false) {
+  function normalizeTorchDevice(value, cudaAvailable = false, accelerator = "") {
+    const isNpu = String(accelerator || "").toLowerCase() === "npu";
+    const defaultDevice = isNpu ? "npu:0" : (cudaAvailable ? "cuda:0" : "cpu");
     const raw = String(value ?? "").trim().toLowerCase();
-    if (!raw) return cudaAvailable ? "cuda:0" : "cpu";
-    if (/^\d+$/.test(raw)) return `cuda:${raw}`;
-    if (raw === "-1") return cudaAvailable ? "cuda:0" : "cpu";
-    if (/^cuda:\d+$/.test(raw) || ["cpu", "mps"].includes(raw)) return raw;
+    if (!raw) return defaultDevice;
+    if (/^\d+$/.test(raw)) return `${isNpu ? "npu" : "cuda"}:${raw}`;
+    if (raw === "-1") return defaultDevice;
+    if (/^(cuda|npu):\d+$/.test(raw) || ["cpu", "mps"].includes(raw)) return raw;
     return raw;
   }
 
@@ -590,57 +643,101 @@ function createInferenceWorker({
     const visualizationDir = path.join(outputDir, "visualizations");
     fs.mkdirSync(visualizationDir, { recursive: true });
     const { configPath, sourceRoot } = await algorithmRuntimeSource.resolveDinoConfigPath({ env, cacheRoot, algorithm, params, weightPath, outputRoot });
-    const classNames = (await query(
-      `SELECT DISTINCT a.label FROM image_annotations a JOIN projects p ON p.active_label_version_id=a.label_version_id
-       WHERE p.id=$1 ORDER BY a.label`,
-      [job.dataset_project_id],
-    )).rows.map((row) => String(row.label));
+    const classNames = normalizeRecognitionClasses(params.recognitionClasses);
     const runnerPath = path.join(outputRoot, "run_dino_inference.py");
     const config = {
       jobId: job.id, configPath, weightPath, manifestPath, predictionsPath, visualizationDir,
       scoreThreshold: Number(params.conf ?? params.scoreThreshold ?? 0.25),
-      device: normalizeTorchDevice(params.device, env.cuda_available),
+      device: normalizeTorchDevice(params.device, env.cuda_available, env.accelerator),
+      batchSize: Math.max(1, Math.floor(Number(params.batch ?? 1))),
+      recognitionClasses: inputClassesForJob(job),
       classNames,
     };
     const runner = [
       "import json, os, sys, traceback",
       "import cv2",
+      "import torch",
       "import dino_detector",
-      "from mmdet.apis import init_detector, inference_detector",
+      "from mmcv.transforms import Compose",
+      "from mmengine.config import Config",
+      "from mmengine.dataset import pseudo_collate",
+      "from mmdet.apis import init_detector",
+      "from mmdet.utils import get_test_pipeline_cfg",
       `cfg = json.loads(${JSON.stringify(JSON.stringify(config))})`,
       "with open(cfg['manifestPath'], 'r', encoding='utf-8') as f: manifest = json.load(f)",
       "items = manifest.get('images') or []",
       "root = manifest.get('cacheRoot') or os.path.dirname(cfg['manifestPath'])",
       "print('[DINO] manifest loaded: %d images' % len(items), flush=True)",
       "print('[DINO] initializing model on %s' % cfg['device'], flush=True)",
-      "model = init_detector(cfg['configPath'], cfg['weightPath'], device=cfg['device'])",
+      "model_cfg = Config.fromfile(cfg['configPath'])",
+      "def normalize_inference_dataset(node):",
+      "    if isinstance(node, dict):",
+      "        node_type = str(node.get('type') or '')",
+      "        if node_type == 'MosaicCocoDataset': node['type'] = 'CocoDataset'",
+      "        if str(node.get('type') or '').endswith('Dataset'): node['lazy_init'] = True",
+      "        if isinstance(node.get('pipeline'), list): node['pipeline'] = [step for step in node['pipeline'] if not (isinstance(step, dict) and step.get('type') == 'ApplyMosaicMask')]",
+      "        for value in node.values(): normalize_inference_dataset(value)",
+      "    elif isinstance(node, list):",
+      "        for value in node: normalize_inference_dataset(value)",
+      "normalize_inference_dataset(model_cfg._cfg_dict)",
+      "model = init_detector(model_cfg, cfg['weightPath'], device=cfg['device'])",
       "print('[DINO] model initialized', flush=True)",
       "classes = list((getattr(model, 'dataset_meta', {}) or {}).get('classes') or cfg.get('classNames') or [])",
-      "rows = []",
-      "for item in items:",
+      "allowed_classes = {str(name).strip().lower() for name in cfg.get('recognitionClasses', [])}",
+      "test_pipeline = Compose(get_test_pipeline_cfg(model.cfg))",
+      "requested_batch = max(1, int(cfg.get('batchSize') or 1))",
+      "if str(cfg['device']).startswith('cuda'):",
+      "    total_gb = torch.cuda.get_device_properties(torch.device(cfg['device'])).total_memory / (1024 ** 3)",
+      "    safe_cap = 2 if total_gb < 6 else (4 if total_gb < 12 else 8)",
+      "    active_batch = min(requested_batch, safe_cap)",
+      "else:",
+      "    active_batch = 1",
+      "print('[DINO] requested batch=%d, initial batch=%d' % (requested_batch, active_batch), flush=True)",
+      "def image_path_for(item):",
       "    local_path = item.get('localPath') or item.get('cachedFileName')",
-      "    image_path = local_path if os.path.isabs(str(local_path)) else os.path.join(root, str(local_path))",
-      "    image_path = os.path.normpath(image_path)",
-      "    result = inference_detector(model, image_path)",
-      "    instances = result.pred_instances.to('cpu')",
-      "    boxes = instances.bboxes.numpy().tolist() if hasattr(instances, 'bboxes') else []",
-      "    scores = instances.scores.numpy().tolist() if hasattr(instances, 'scores') else [1.0] * len(boxes)",
-      "    labels = instances.labels.numpy().tolist() if hasattr(instances, 'labels') else [-1] * len(boxes)",
-      "    preds = []",
-      "    canvas = cv2.imread(image_path)",
-      "    for box, score, class_id in zip(boxes, scores, labels):",
-      "        if float(score) < cfg['scoreThreshold']: continue",
-      "        x1, y1, x2, y2 = [float(v) for v in box]",
-      "        label = str(classes[int(class_id)]) if 0 <= int(class_id) < len(classes) else str(int(class_id))",
-      "        preds.append({'label': label, 'score': float(score), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2-x1), 'bbox_h': max(0.0, y2-y1), 'class_id': int(class_id)})",
-      "        if canvas is not None:",
-      "            cv2.rectangle(canvas, (int(x1), int(y1)), (int(x2), int(y2)), (0, 220, 0), 2)",
-      "            cv2.putText(canvas, '%s %.3f' % (label, score), (int(x1), max(14, int(y1)-4)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1, cv2.LINE_AA)",
-      "    visual_name = '%06d_%s' % (int(item.get('index') or len(rows)+1), os.path.basename(image_path))",
-      "    visual_path = os.path.join(cfg['visualizationDir'], visual_name)",
-      "    if canvas is not None: cv2.imwrite(visual_path, canvas)",
-      "    rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(image_path), 'width': item.get('width'), 'height': item.get('height'), 'visualizationPath': visual_path if canvas is not None and os.path.isfile(visual_path) else None, 'predictions': preds})",
-      "    print('[DINO_PROGRESS] %d/%d %s predictions=%d' % (len(rows), len(items), os.path.basename(image_path), len(preds)), flush=True)",
+      "    value = local_path if os.path.isabs(str(local_path)) else os.path.join(root, str(local_path))",
+      "    return os.path.normpath(value)",
+      "def infer_batch(batch_items):",
+      "    data = [test_pipeline(dict(img_path=image_path_for(item), img_id=index)) for index, item in enumerate(batch_items)]",
+      "    with torch.inference_mode():",
+      "        return model.test_step(pseudo_collate(data))",
+      "rows = []",
+      "cursor = 0",
+      "while cursor < len(items):",
+      "    batch_items = items[cursor:cursor + active_batch]",
+      "    try:",
+      "        batch_results = infer_batch(batch_items)",
+      "    except torch.cuda.OutOfMemoryError:",
+      "        if active_batch <= 1: raise",
+      "        active_batch = max(1, active_batch // 2)",
+      "        torch.cuda.empty_cache()",
+      "        print('[DINO] CUDA OOM; reducing batch to %d and retrying' % active_batch, flush=True)",
+      "        continue",
+      "    batch_prediction_count = 0",
+      "    for item, result in zip(batch_items, batch_results):",
+      "        image_path = image_path_for(item)",
+      "        instances = result.pred_instances.to('cpu')",
+      "        boxes = instances.bboxes.numpy().tolist() if hasattr(instances, 'bboxes') else []",
+      "        scores = instances.scores.numpy().tolist() if hasattr(instances, 'scores') else [1.0] * len(boxes)",
+      "        labels = instances.labels.numpy().tolist() if hasattr(instances, 'labels') else [-1] * len(boxes)",
+      "        preds = []",
+      "        canvas = cv2.imread(image_path)",
+      "        for box, score, class_id in zip(boxes, scores, labels):",
+      "            if float(score) < cfg['scoreThreshold']: continue",
+      "            x1, y1, x2, y2 = [float(v) for v in box]",
+      "            label = str(classes[int(class_id)]) if 0 <= int(class_id) < len(classes) else str(int(class_id))",
+      "            if str(label).strip().lower() not in allowed_classes: continue",
+      "            preds.append({'label': label, 'score': float(score), 'bbox_x': x1, 'bbox_y': y1, 'bbox_w': max(0.0, x2-x1), 'bbox_h': max(0.0, y2-y1), 'class_id': int(class_id)})",
+      "            if canvas is not None:",
+      "                cv2.rectangle(canvas, (int(x1), int(y1)), (int(x2), int(y2)), (0, 220, 0), 2)",
+      "                cv2.putText(canvas, '%s %.3f' % (label, score), (int(x1), max(14, int(y1)-4)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 1, cv2.LINE_AA)",
+      "        visual_name = '%06d_%s' % (int(item.get('index') or len(rows)+1), os.path.basename(image_path))",
+      "        visual_path = os.path.join(cfg['visualizationDir'], visual_name)",
+      "        if canvas is not None: cv2.imwrite(visual_path, canvas)",
+      "        rows.append({'index': item.get('index'), 'cachedFileName': item.get('cachedFileName'), 'projectImageId': item.get('projectImageId'), 'imageAssetId': item.get('imageAssetId'), 'originalFileName': item.get('originalFileName') or os.path.basename(image_path), 'width': item.get('width'), 'height': item.get('height'), 'visualizationPath': visual_path if canvas is not None and os.path.isfile(visual_path) else None, 'predictions': preds})",
+      "        batch_prediction_count += len(preds)",
+      "    cursor += len(batch_items)",
+      "    print('[DINO_PROGRESS] %d/%d %s predictions=%d batch=%d' % (len(rows), len(items), os.path.basename(image_path_for(batch_items[-1])), batch_prediction_count, len(batch_items)), flush=True)",
       "payload = {'format': 'det-dashboard.predictions.v1', 'algorithm': 'dinov3_faster_rcnn', 'jobId': cfg['jobId'], 'imageCount': len(rows), 'predictionCount': sum(len(row['predictions']) for row in rows), 'images': rows}",
       "os.makedirs(os.path.dirname(cfg['predictionsPath']), exist_ok=True)",
       "with open(cfg['predictionsPath'], 'w', encoding='utf-8') as f: json.dump(payload, f, ensure_ascii=False, indent=2)",
@@ -661,7 +758,7 @@ function createInferenceWorker({
         if (!line) continue;
         logQueue = logQueue.then(async () => {
           await appendInferenceLog?.(job.id, stream, line);
-          const match = line.match(/^\[DINO_PROGRESS\]\s+(\d+)\/(\d+)\s+(.*?)\s+predictions=(\d+)$/);
+          const match = line.match(/^\[DINO_PROGRESS\]\s+(\d+)\/(\d+)\s+(.*?)\s+predictions=(\d+)(?:\s+batch=(\d+))?$/);
           if (!match) return;
           const completed = Number(match[1]);
           const total = Math.max(1, Number(match[2]));
@@ -680,6 +777,7 @@ function createInferenceWorker({
       result = await runChildProcess(env.python_path, commandArgs, {
         cwd: sourceRoot,
         env: { ...processRef.env, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1", PYTHONPATH: [sourceRoot, cacheRoot, processRef.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+        onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
         onOutput: handleOutput,
       });
       for (const stream of ["stdout", "stderr"]) {
@@ -696,7 +794,7 @@ function createInferenceWorker({
     }
     if (!fs.existsSync(predictionsPath)) throw new Error(`DINO inference command completed without predictions.json: ${env.python_path} ${commandArgs.join(" ")}`);
     const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
-    const rows = Array.isArray(predictions.images) ? predictions.images : [];
+    const rows = filterPredictionRows(job, Array.isArray(predictions.images) ? predictions.images : []);
     const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
     const metrics = await computeDetectionMetrics(job, rows);
     await transaction(async (client) => {
@@ -707,7 +805,7 @@ function createInferenceWorker({
       );
       const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: nowIso(), metrics, command: [env.python_path, ...commandArgs], stdout: result.stdout, stderr: result.stderr, executionLog: result.combined || `${result.stdout || ""}${result.stderr || ""}` } };
       await client.query(
-        "UPDATE runtime_inference_jobs SET status='done', progress=100, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+        "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
         [JSON.stringify(nextParams), JSON.stringify(metrics), `DINO inference completed: ${rows.length} images, ${predictionCount} boxes`, job.id],
       );
     });
@@ -761,7 +859,7 @@ function createInferenceWorker({
         },
       };
       await query(
-        "UPDATE runtime_inference_jobs SET status='failed', message=$1, params_json=$2, finished_at=now() WHERE id=$3",
+        "UPDATE runtime_inference_jobs SET status='failed', process_pid=NULL, message=$1, params_json=$2, finished_at=now() WHERE id=$3",
         [error.message || `推理 worker ${workerId} 执行失败`, JSON.stringify(nextParams), job.id],
       ).catch(() => {});
     }

@@ -4,9 +4,10 @@ import { readUiState, updateUiState } from "../../app/ui-state.js";
 import { formatDateTime } from "../../shared/presentation.js";
 
 export function useEvaluationController({ inferenceJobs }) {
-  const [evaluationCluster, setEvaluationCluster] = useState("all");
-  const [evaluationType, setEvaluationType] = useState("all");
-  const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState([]);
+  const restoredEvaluation = readUiState().evaluation || {};
+  const [evaluationCluster, setEvaluationCluster] = useState(() => restoredEvaluation.cluster || "all");
+  const [evaluationType, setEvaluationType] = useState(() => restoredEvaluation.type || "all");
+  const [hiddenEvaluationJobIds, setHiddenEvaluationJobIds] = useState(() => restoredEvaluation.hiddenJobIds || []);
   const [activeEvaluationTask, setActiveEvaluationTask] = useState(null);
   const [activeEvaluationReportTask, setActiveEvaluationReportTask] = useState(null);
   const [selectedEvaluationTaskId, setSelectedEvaluationTaskId] = useState(
@@ -14,8 +15,8 @@ export function useEvaluationController({ inferenceJobs }) {
   );
 
   useEffect(() => {
-    updateUiState({ evaluation: { selectedTaskId: selectedEvaluationTaskId } });
-  }, [selectedEvaluationTaskId]);
+    updateUiState({ evaluation: { selectedTaskId: selectedEvaluationTaskId, cluster: evaluationCluster, type: evaluationType, hiddenJobIds: hiddenEvaluationJobIds } });
+  }, [selectedEvaluationTaskId, evaluationCluster, evaluationType, hiddenEvaluationJobIds]);
 
   const evaluationTasks = inferenceJobs
     .filter((job) => !hiddenEvaluationJobIds.includes(job.id))

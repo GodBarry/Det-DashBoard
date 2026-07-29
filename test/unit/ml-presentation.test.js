@@ -99,9 +99,9 @@ test("prediction box style supports pixel and normalized coordinates", async () 
 test("prediction colors remain deterministic and use the shared palette", async () => {
   const { predictionColor } = await presentationPromise;
 
-  assert.equal(predictionColor(), "#31d0aa");
+  assert.match(predictionColor(), /^hsl\(\d+ \d+% \d+%\)$/);
   assert.equal(predictionColor("car"), predictionColor("car"));
-  assert.match(predictionColor("person"), /^#[0-9a-f]{6}$/i);
+  assert.match(predictionColor("person"), /^hsl\(\d+ \d+% \d+%\)$/);
 });
 
 test("prediction items preserve arrays and parse supported containers", async () => {

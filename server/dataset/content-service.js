@@ -81,10 +81,42 @@ function createDatasetContentService({
     });
   }
 
-  async function listProjectImages(projectId, queryParams) {
-    const page = Math.max(1, Number(queryParams.page || 1));
-    const pageSize = Math.min(200, Math.max(12, Number(queryParams.pageSize || 48)));
-    const offset = (page - 1) * pageSize;
+  async function getImageAnnotations(projectImageId) {
+    const result = await query(
+      `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h,
+              a.shape_type, a.difficult, a.score, a.attributes_json
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+       JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
+       WHERE a.project_image_id=$1 AND a.label_version_id=p.active_label_version_id
+       ORDER BY a.id`,
+      [projectImageId],
+    );
+    return { annotations: result.rows };
+  }
+
+  async function getImageAnnotationsBatch(projectId, imageIds = []) {
+    const ids = [...new Set((Array.isArray(imageIds) ? imageIds : []).filter(Boolean))].slice(0, 32);
+    if (!ids.length) return { annotationsByImage: {} };
+    const result = await query(
+      `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h,
+              a.shape_type, a.difficult, a.score, a.attributes_json
+       FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
+       JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
+       WHERE p.id=$1 AND pi.id = ANY($2::uuid[]) AND a.label_version_id=p.active_label_version_id
+       ORDER BY a.project_image_id, a.id`,
+      [projectId, ids],
+    );
+    const annotationsByImage = Object.fromEntries(ids.map((id) => [id, []]));
+    for (const annotation of result.rows) {
+      const key = String(annotation.project_image_id);
+      if (annotationsByImage[key]) annotationsByImage[key].push(annotation);
+    }
+    return { annotationsByImage };
+  }
+
+  function projectImageFilter(projectId, queryParams = {}) {
     const params = [projectId];
     const where = ["pi.project_id=$1", "pi.deleted_at IS NULL"];
 
@@ -133,21 +165,48 @@ function createDatasetContentService({
         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id AND a.label = ANY($${params.length})
       )`);
     }
+    return { params, where, labelValues };
+  }
+
+  async function countProjectImages(projectId, queryParams) {
+    const { params, where } = projectImageFilter(projectId, queryParams);
+    const result = await query(
+      `SELECT count(*)::int AS count
+       FROM project_images pi
+       JOIN projects p ON p.id = pi.project_id
+       LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+       WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)`,
+      params,
+    );
+    return { count: Number(result.rows[0]?.count || 0) };
+  }
+
+  async function listProjectImages(projectId, queryParams) {
+    const page = Math.max(1, Number(queryParams.page || 1));
+    const pageSize = Math.min(10000, Math.max(12, Number(queryParams.pageSize || 48)));
+    const sequenceMode = String(queryParams.sequence || "") === "1";
+    const offset = (page - 1) * pageSize;
+    const { params, where, labelValues } = projectImageFilter(projectId, queryParams);
     params.push(pageSize, offset);
     const rows = await query(
       `SELECT pi.*, ia.width AS image_width, ia.height AS image_height, ia.object_key,
+        pvf.project_video_id,pvf.source_frame_index,pvf.timestamp_ms,pvf.extraction_interval,
         COALESCE(NULLIF(pi.source_path, ''),
           CASE WHEN ib.source_path IS NOT NULL THEN regexp_replace(ib.source_path, '/+$', '') || '/' || pi.display_name ELSE pi.display_name END
         ) AS absolute_path,
-        (SELECT count(*)::int FROM image_annotations a
+        ${sequenceMode ? "0::int" : `(SELECT count(*)::int FROM image_annotations a
          JOIN projects p ON p.active_label_version_id = a.label_version_id
-         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id) AS annotation_count
+         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id)`} AS annotation_count
        FROM project_images pi
        JOIN projects p ON p.id = pi.project_id
        JOIN image_assets ia ON ia.id = pi.image_asset_id
        LEFT JOIN import_batches ib ON ib.id = pi.import_batch_id
+       LEFT JOIN project_video_frames pvf ON pvf.project_image_id=pi.id
+       LEFT JOIN project_videos pv ON pv.id=pvf.project_video_id
        WHERE ${where.join(" AND ")} AND (ib.id IS NULL OR ib.deleted_at IS NULL)
-       ORDER BY pi.created_at DESC
+       ORDER BY COALESCE(pv.created_at,pi.created_at) DESC,
+                CASE WHEN pvf.id IS NOT NULL THEN pvf.source_frame_index END ASC NULLS LAST,
+                pi.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -162,6 +221,12 @@ function createDatasetContentService({
 
     const items = rows.rows;
     if (!items.length) return { page, pageSize, total: count.rows[0].count, items };
+
+    // The full viewer sequence only needs lightweight image metadata. Loading
+    // every annotation for a large project delays the page-boundary transition.
+    if (sequenceMode) {
+      return { page, pageSize, total: count.rows[0].count, items };
+    }
 
     const annParams = [projectId, items.map((item) => item.id)];
     const annWhere = ["p.id=$1", "p.deleted_at IS NULL", "a.project_image_id = ANY($2::uuid[])"];
@@ -376,7 +441,7 @@ function createDatasetContentService({
     return { jobId: job.id, exportPrefix, outputDir: displayLocalRoot };
   }
 
-  return { saveImageAnnotations, listProjectImages, streamProjectImage, exportProject };
+  return { saveImageAnnotations, getImageAnnotations, getImageAnnotationsBatch, countProjectImages, listProjectImages, streamProjectImage, exportProject };
 }
 
 module.exports = { createDatasetContentService };

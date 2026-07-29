@@ -17,6 +17,7 @@ function createMlRoutes(deps) {
     runtimeQueueService,
     runtimeJobService,
     createInferenceJob,
+    networkInferenceService,
   } = deps;
 
   async function handle(req, res, parsed, actor) {
@@ -45,6 +46,14 @@ function createMlRoutes(deps) {
       sendJson(res, { version: await modelService.createModelVersion(await readBody(req), actor) });
       return true;
     }
+    if (method === "POST" && pathname === "/api/ml/model-versions/preflight") {
+      const body = await readBody(req);
+      if (body.modelId || body.model_id) {
+        await resourceAccess.assertIndependentAccess("model_clusters", body.modelId || body.model_id, actor, "read");
+      }
+      sendJson(res, { analysis: await modelService.inspectModelWeight(body) });
+      return true;
+    }
     if (method === "POST" && pathname === "/api/ml/model-assets/clear") {
       accessControl.requireAdmin(actor);
       sendJson(res, await modelMaintenanceService.clearModelAssets(await readBody(req)));
@@ -52,6 +61,13 @@ function createMlRoutes(deps) {
     }
     if (method === "GET" && pathname === "/api/ml/algorithm-assets") {
       sendJson(res, { algorithms: await algorithmAssetService.listAlgorithmAssets(actor, requestedScope(parsed, actor)) });
+      return true;
+    }
+    const algorithmSourceMatch = pathname.match(/^\/api\/ml\/algorithm-assets\/([^/]+)\/import-source$/);
+    if (method === "POST" && algorithmSourceMatch) {
+      accessControl.requireAdmin(actor);
+      const body = await readBody(req);
+      sendJson(res, await algorithmAssetService.importAlgorithmSource(algorithmSourceMatch[1], body.sourcePath || body.source_path));
       return true;
     }
     if (method === "GET" && pathname === "/api/ml/asset-links") {
@@ -78,13 +94,18 @@ function createMlRoutes(deps) {
     const pythonEnvDownloadMatch = pathname.match(/^\/api\/ml\/python-envs\/([^/]+)\/download$/);
     if (method === "GET" && pythonEnvDownloadMatch) {
       await resourceAccess.assertIndependentAccess("runtime_envs", pythonEnvDownloadMatch[1], actor, "read");
-      await pythonEnvService.streamPythonEnvArtifact(res, pythonEnvDownloadMatch[1]);
+      await pythonEnvService.streamPythonEnvArtifact(res, pythonEnvDownloadMatch[1], parsed.query.format || "tar.gz");
       return true;
     }
     const modelVersionMatch = pathname.match(/^\/api\/ml\/model-versions\/([^/]+)$/);
     if (method === "PATCH" && modelVersionMatch) {
       await resourceAccess.assertIndependentAccess("model_revisions", modelVersionMatch[1], actor, "write");
       sendJson(res, { version: await modelService.renameModelVersion(modelVersionMatch[1], await readBody(req)) });
+      return true;
+    }
+    if (method === "DELETE" && modelVersionMatch) {
+      await resourceAccess.assertIndependentAccess("model_revisions", modelVersionMatch[1], actor, "write");
+      sendJson(res, await modelService.deleteModelVersion(modelVersionMatch[1]));
       return true;
     }
     const modelVersionDownloadMatch = pathname.match(/^\/api\/ml\/model-versions\/([^/]+)\/download$/);
@@ -94,6 +115,7 @@ function createMlRoutes(deps) {
         res,
         modelVersionDownloadMatch[1],
         parsed.query.artifactId || parsed.query.artifact_id,
+        parsed.query.format || "original",
       );
       return true;
     }
@@ -114,6 +136,10 @@ function createMlRoutes(deps) {
     if (method === "PATCH" && trainingPriorityMatch) {
       await resourceAccess.assertTrainingJobWrite(actor, trainingPriorityMatch[1]);
       const body = await readBody(req);
+      if (Array.isArray(body.orderedIds)) {
+        sendJson(res, { orderedIds: await runtimeQueueService.reorderRuntimeJobs("runtime_training_jobs", body.orderedIds, actor) });
+        return true;
+      }
       sendJson(res, {
         job: await runtimeQueueService.moveRuntimeJobPriority(
           "runtime_training_jobs",
@@ -177,10 +203,26 @@ function createMlRoutes(deps) {
       sendJson(res, { job: await createInferenceJob(await readBody(req), actor) });
       return true;
     }
+    if (method === "GET" && pathname === "/api/ml/network-inference/status") {
+      sendJson(res, { service: networkInferenceService.status() });
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/ml/network-inference/start") {
+      sendJson(res, { service: await networkInferenceService.start(await readBody(req), actor) });
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/ml/network-inference/stop") {
+      sendJson(res, { service: await networkInferenceService.stop(actor) });
+      return true;
+    }
     const inferencePriorityMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/priority$/);
     if (method === "PATCH" && inferencePriorityMatch) {
       await resourceAccess.assertInferenceJobWrite(actor, inferencePriorityMatch[1]);
       const body = await readBody(req);
+      if (Array.isArray(body.orderedIds)) {
+        sendJson(res, { orderedIds: await runtimeQueueService.reorderRuntimeJobs("runtime_inference_jobs", body.orderedIds, actor) });
+        return true;
+      }
       sendJson(res, {
         job: await runtimeQueueService.moveRuntimeJobPriority(
           "runtime_inference_jobs",
@@ -195,6 +237,18 @@ function createMlRoutes(deps) {
     if (method === "POST" && requeueInferenceMatch) {
       await resourceAccess.assertInferenceJobWrite(actor, requeueInferenceMatch[1]);
       sendJson(res, { job: await runtimeJobService.requeueInferenceJob(requeueInferenceMatch[1]) });
+      return true;
+    }
+    const pauseInferenceMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/pause$/);
+    if (method === "POST" && pauseInferenceMatch) {
+      await resourceAccess.assertInferenceJobWrite(actor, pauseInferenceMatch[1]);
+      sendJson(res, { job: await runtimeJobService.pauseInferenceJob(pauseInferenceMatch[1]) });
+      return true;
+    }
+    const resumeInferenceMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)\/resume$/);
+    if (method === "POST" && resumeInferenceMatch) {
+      await resourceAccess.assertInferenceJobWrite(actor, resumeInferenceMatch[1]);
+      sendJson(res, { job: await runtimeJobService.resumeInferenceJob(resumeInferenceMatch[1]) });
       return true;
     }
     const inferenceJobMatch = pathname.match(/^\/api\/ml\/inference-jobs\/([^/]+)$/);
@@ -218,7 +272,7 @@ function createMlRoutes(deps) {
     }
     if (method === "GET" && inferenceResultsMatch) {
       await resourceAccess.assertInferenceJobRead(actor, inferenceResultsMatch[1]);
-      sendJson(res, { results: await runtimeJobService.listInferenceResults(inferenceResultsMatch[1]) });
+      sendJson(res, { results: await runtimeJobService.listInferenceResults(inferenceResultsMatch[1], { limit: parsed.query.limit }) });
       return true;
     }
 
