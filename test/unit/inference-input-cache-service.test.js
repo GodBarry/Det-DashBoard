@@ -159,7 +159,7 @@ test("prepareInferenceInputCache preserves filters, job-copy cache, manifests, a
   assert.match(select.sql, /ORDER BY random\(\)/);
   assert.match(select.sql, /LIMIT \$8/);
   assert.deepEqual(select.params, [
-    "project-1",
+    ["project-1"],
     ["night", "day"],
     ["front"],
     ["rgb"],
