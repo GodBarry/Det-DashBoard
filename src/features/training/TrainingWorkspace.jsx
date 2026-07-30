@@ -25,6 +25,7 @@ import { metadataLabel } from "../../shared/datasetMetadata.js";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
 import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
+import { reconcileClassMappings } from "../../components/class-mapping-utils.js";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function TrainingWorkspace({
 
@@ -80,6 +81,31 @@ export function TrainingWorkspace({
   const splitIds = { trainProjectId: trainProjectIds, valProjectId: valProjectIds, testProjectId: testProjectIds };
   const splitArrayKey = { trainProjectId: 'trainProjectIds', valProjectId: 'valProjectIds', testProjectId: 'testProjectIds' };
   const splitName = { trainProjectId: 'train', valProjectId: 'val', testProjectId: 'test' };
+  const labelsForProjectIds = (ids) => Array.from(new Set(projects.filter((project) => ids.includes(project.id)).flatMap((project) => {
+    const value = project.labels;
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(','); }
+  }).map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const updateDatasetSelection = (splitKey, nextIds) => {
+    setTrainingForm((current) => {
+      const next = { ...current, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" };
+      if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || "";
+      if (current.classMappingsConfigured) {
+        const trainIds = splitKey === "trainProjectId"
+          ? nextIds
+          : (current.trainProjectIds?.length ? current.trainProjectIds : [current.trainProjectId || current.datasetProjectId].filter(Boolean));
+        const valIds = splitKey === "valProjectId"
+          ? nextIds
+          : (current.valProjectIds?.length ? current.valProjectIds : [current.valProjectId].filter(Boolean));
+        const mappings = reconcileClassMappings(current.classMappings, labelsForProjectIds([...new Set([...trainIds, ...valIds])]));
+        next.classMappings = mappings.length ? mappings : null;
+        next.classMappingsConfigured = mappings.length > 0;
+        if (mappings.length) next.recognitionClasses = mappings.map((row) => row.target);
+      }
+      return next;
+    });
+  };
   const selectedProject = projects.find((project) => project.id === trainProjectIds[0]) || {};
 
   const selectedEnv = pythonEnvs.find((env) => env.id === trainingForm.pythonEnvId) || pythonEnvs.find((env) => String(env.name || '').includes('ultralytics')) || pythonEnvs[0] || {};
@@ -120,9 +146,7 @@ export function TrainingWorkspace({
         onClick: () => {
           const currentIds = splitIds[activeDatasetSplit];
           const nextIds = currentIds.includes(project.id) ? currentIds.filter((id) => id !== project.id) : [...currentIds, project.id];
-          const next = { ...trainingForm, [splitArrayKey[activeDatasetSplit]]: nextIds, [activeDatasetSplit]: nextIds[0] || "" };
-          if (activeDatasetSplit === 'trainProjectId') next.datasetProjectId = nextIds[0] || '';
-          setTrainingForm(next);
+          updateDatasetSelection(activeDatasetSplit, nextIds);
         },
       });
       appendDatasetRows(project.id, depth + 1);
@@ -143,9 +167,7 @@ export function TrainingWorkspace({
   const toggleDatasetSelection = (splitKey, projectId) => {
     const currentIds = splitIds[splitKey];
     const nextIds = currentIds.includes(projectId) ? currentIds.filter((id) => id !== projectId) : [...currentIds, projectId];
-    const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" };
-    if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || "";
-    setTrainingForm(next);
+    updateDatasetSelection(splitKey, nextIds);
   };
 
   const toggleDatasetNode = (projectId) => setExpandedDatasetNodes((current) => {
@@ -411,7 +433,7 @@ export function TrainingWorkspace({
             <h2>数据来源</h2>
             <div className="config-row training-task-name-row"><span className="row-label">任务名称</span><input value={trainingForm.name || ""} onChange={(event) => setField("name", event.target.value)} placeholder="可留空，将按 数据集_算法_时间 自动生成" /></div>
             <div className="training-cascading-splits">
-              {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => { const next = { ...trainingForm, [splitArrayKey[splitKey]]: nextIds, [splitKey]: nextIds[0] || "" }; if (splitKey === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }} storageKey={`training-${splitKey}`} ariaLabel={`${label}树形选择`} /></div>)}
+              {[["trainProjectId", "训练集", trainProjectIds], ["valProjectId", "验证集", valProjectIds]].map(([splitKey, label, selectedIds]) => <div className={`training-cascading-row ${activeDatasetSplit === splitKey ? "active" : ""}`} key={splitKey} onFocus={() => setActiveDatasetSplit(splitKey)} onClick={() => setActiveDatasetSplit(splitKey)}><span className="row-label">{label}</span><CascadingProjectPicker projects={projects} values={selectedIds} multiple onChange={(nextIds) => updateDatasetSelection(splitKey, nextIds)} storageKey={`training-${splitKey}`} ariaLabel={`${label}树形选择`} /></div>)}
             </div>
             <div className="config-row recognition-class-row">
               <span className="row-label">识别类别</span>
@@ -432,7 +454,7 @@ export function TrainingWorkspace({
             </div>
             <div className="dataset-split-grid legacy-training-dataset-controls">
               {[["trainProjectId", "训练集", "train", trainProjectIds], ["valProjectId", "验证集", "val", valProjectIds], ["testProjectId", "测试集", "test", testProjectIds]].map(([key, label, hint, selectedIds]) => (
-                <label className="training-multiselect" key={key}><span>{label}<small>{hint} · 可多选</small></span><select multiple value={selectedIds} size={Math.min(5, Math.max(3, projects.length))} onFocus={() => setActiveDatasetSplit(key)} onChange={(event) => { const nextIds = Array.from(event.target.selectedOptions, (option) => option.value); const next = { ...trainingForm, [splitArrayKey[key]]: nextIds, [key]: nextIds[0] || "" }; if (key === "trainProjectId") next.datasetProjectId = nextIds[0] || ""; setTrainingForm(next); }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {selectedIds.length} 个{label}</small></label>
+                <label className="training-multiselect" key={key}><span>{label}<small>{hint} · 可多选</small></span><select multiple value={selectedIds} size={Math.min(5, Math.max(3, projects.length))} onFocus={() => setActiveDatasetSplit(key)} onChange={(event) => updateDatasetSelection(key, Array.from(event.target.selectedOptions, (option) => option.value))}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · {formatCount(project.image_count || 0)} 图像</option>)}</select><small className="selection-summary">已选择 {selectedIds.length} 个{label}</small></label>
               ))}
             </div>
             <div className="dataset-filter-panel legacy-training-dataset-controls">
