@@ -31,6 +31,7 @@ import { AuthenticatedImage } from "../../components/AuthenticatedImage.jsx";
 import { CascadingProjectPicker } from "../../components/CascadingProjectPicker.jsx";
 import { RecognitionClassPicker } from "../../components/RecognitionClassPicker.jsx";
 import { ClassMappingPicker } from "../../components/ClassMappingPicker.jsx";
+import { reconcileClassMappings } from "../../components/class-mapping-utils.js";
 import { InferenceResultViewer } from "./InferenceResultViewer.jsx";
 import { usePersistentSet } from "../../shared/usePersistentSet.js";
 export function InferenceWorkspace({
@@ -156,6 +157,24 @@ const selectedInferenceLabels = Array.from(new Set(projects.filter((project) => 
   if (!value) return [];
   try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
 }).map((value) => String(value || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+const updateInferenceDatasetSelection = (projectIds) => {
+  setInferenceForm((current) => {
+    const next = { ...current, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" };
+    if (current.classMappingsConfigured) {
+      const labels = Array.from(new Set(projects.filter((project) => projectIds.includes(project.id)).flatMap((project) => {
+        const value = project.labels;
+        if (Array.isArray(value)) return value;
+        if (!value) return [];
+        try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return Array.isArray(parsed) ? parsed : [parsed]; } catch { return String(value).split(","); }
+      }).map((value) => String(value || "").trim()).filter(Boolean)));
+      const mappings = reconcileClassMappings(current.classMappings, labels);
+      next.classMappings = mappings.length ? mappings : null;
+      next.classMappingsConfigured = mappings.length > 0;
+      if (mappings.length) next.recognitionClasses = mappings.map((row) => row.target);
+    }
+    return next;
+  });
+};
 
   const selectedVersion = modelVersions.find((version) => version.id === inferenceForm.modelVersionId);
 
@@ -463,7 +482,7 @@ onToggle: () => setExpandedDataNodes((current) => { const next = new Set(current
 
 title: `${project.name}\n图片：${project.image_count || 0}\n视频：${project.video_count || 0}`,
 
-onClick: () => { const current = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean); const next = current.includes(project.id) ? current.filter((id) => id !== project.id) : [...current, project.id]; setInferenceForm({ ...inferenceForm, datasetProjectIds: next, datasetProjectId: next[0] || "" }); },
+onClick: () => { const current = inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean); const next = current.includes(project.id) ? current.filter((id) => id !== project.id) : [...current, project.id]; updateInferenceDatasetSelection(next); },
 
 })),
 
@@ -753,7 +772,7 @@ return (
           <div className="config-row dataset-source-row">
             <span className="row-label">数据来源</span>
             <span className="dataset-source-kind"><Database size={14} />数据集</span>
-            <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={(projectIds) => setInferenceForm({ ...inferenceForm, datasetProjectIds: projectIds, datasetProjectId: projectIds[0] || "" })} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
+            <CascadingProjectPicker projects={projects} values={inferenceForm.datasetProjectIds?.length ? inferenceForm.datasetProjectIds : [inferenceForm.datasetProjectId].filter(Boolean)} multiple onChange={updateInferenceDatasetSelection} storageKey="inference-datasets" ariaLabel="推理数据集树形选择" />
           </div>
           <div className="config-row recognition-class-row">
             <span className="row-label">识别类别</span>

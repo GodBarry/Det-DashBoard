@@ -1,15 +1,9 @@
 import { useMemo, useState } from "react";
 import { ArrowRight, ChevronDown, ChevronRight, Plus, Tags, X } from "lucide-react";
+import { normalizeClassMappings } from "./class-mapping-utils.js";
 
 const clean = (value) => String(value || "").trim().toLowerCase();
 const unique = (values) => Array.from(new Set((values || []).map(clean).filter(Boolean)));
-
-export function normalizeClassMappings(mappings = []) {
-  return (mappings || []).map((row) => ({
-    target: clean(row.target),
-    sources: unique(row.sources),
-  })).filter((row) => row.target && row.sources.length);
-}
 
 export function ClassMappingPicker({ availableSources = [], mappings = null, configured = false, defaultTargets = [], onChange }) {
   const [expanded, setExpanded] = useState(false);
