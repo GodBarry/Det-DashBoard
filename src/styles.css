@@ -13516,3 +13516,51 @@ body.resizing-table-column {
   .home-commandbar, .workspace-commandbar, .asset-commandbar, .inference-commandbar { align-content: center; flex-wrap: wrap; min-height: 54px; height: auto; padding-block: 4px; border-bottom: 1px solid var(--line); }
   .home-commandbar::after, .workspace-commandbar::after, .asset-commandbar::after, .inference-commandbar::after { display: none !important; }
 }
+
+/* 209 Institute platform identity. The source mark includes a wide wordmark,
+   so the fixed viewport intentionally reveals its graphic emblem only. */
+.brand-mark {
+  min-width: 292px !important;
+  gap: 9px !important;
+  margin-right: 0 !important;
+  white-space: nowrap !important;
+}
+
+.brand-logo {
+  position: relative;
+  width: 38px;
+  height: 32px;
+  flex: 0 0 38px;
+  overflow: hidden;
+}
+
+.brand-logo img {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  width: 128px;
+  height: 128px;
+  max-width: none;
+  object-fit: contain;
+}
+
+.brand-mark > span:last-child {
+  color: var(--text, #17212b);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .01em;
+}
+
+.app-shell.dark .brand-mark > span:last-child {
+  color: #e5edf4;
+}
+
+@media (max-width: 1540px) {
+  .brand-mark {
+    min-width: 262px !important;
+  }
+
+  .brand-mark > span:last-child {
+    font-size: 13px;
+  }
+}

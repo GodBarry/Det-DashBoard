@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Bell,
-  Boxes,
   Brain,
   ChevronDown,
   Cpu,
@@ -12,6 +11,7 @@ import {
   Settings,
   Sun,
 } from "lucide-react";
+import norincoGroupLogo from "../../assets/norinco-group-logo.png";
 
 const NAV_ITEMS = [
   { id: "home", label: "数据", icon: FolderOpen },
@@ -50,8 +50,10 @@ export function MainNav({
   return (
     <nav className="main-nav" aria-label="主导航">
       <div className="brand-mark">
-        <Boxes size={18} />
-        <span>Det Dashboard</span>
+        <span className="brand-logo" aria-hidden="true">
+          <img src={norincoGroupLogo} alt="" />
+        </span>
+        <span>209所数据-模型综合评估平台</span>
       </div>
 
       <div className="nav-tabs">
