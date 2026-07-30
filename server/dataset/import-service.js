@@ -4,6 +4,10 @@ const zlib = require("node:zlib");
 const { once } = require("node:events");
 const { finished } = require("node:stream/promises");
 
+function looksLikeWindowsDrivePath(value) {
+  return /^[A-Za-z]:[\\/]/.test(String(value || "").trim());
+}
+
 async function createRawLabelArchive(fs, path, sourceRoot, labelFiles) {
   if (!labelFiles.length) return null;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "det-dashboard-labels-"));
@@ -174,10 +178,24 @@ function createImportService(deps) {
     const rawSourcePaths = Array.isArray(body.sourcePaths)
       ? body.sourcePaths
       : String(body.sourcePath || "").split(";").map((item) => item.trim()).filter(Boolean);
-    const sourcePaths = Array.from(new Set(rawSourcePaths.map((item) => toInternalDataPath(item)).filter(Boolean)));
+    const rawSourceByInternalPath = new Map();
+    for (const rawSourcePath of rawSourcePaths) {
+      const internalPath = toInternalDataPath(rawSourcePath);
+      if (internalPath && !rawSourceByInternalPath.has(internalPath)) rawSourceByInternalPath.set(internalPath, rawSourcePath);
+    }
+    const sourcePaths = Array.from(rawSourceByInternalPath.keys());
     if (!sourcePaths.length) throw httpError(400, "No dataset folder path was selected.");
     for (const sourcePath of sourcePaths) {
-      if (!fs.existsSync(sourcePath)) throw httpError(400, "Import path does not exist: " + sourcePath);
+      if (!fs.existsSync(sourcePath)) {
+        const rawSourcePath = rawSourceByInternalPath.get(sourcePath);
+        if (looksLikeWindowsDrivePath(rawSourcePath) && process.platform !== "win32") {
+          throw httpError(
+            400,
+            `服务器无法直接访问本机 Windows 路径：${rawSourcePath}。请先把该目录同步到服务器数据根目录，再选择服务器路径导入。`,
+          );
+        }
+        throw httpError(400, "Import path does not exist: " + sourcePath);
+      }
       if (!fs.statSync(sourcePath).isDirectory()) throw httpError(400, "Import path must be a folder: " + sourcePath);
     }
     body.sourcePath = sourcePaths[0];

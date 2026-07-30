@@ -15,6 +15,7 @@ function createDatasetRoutes(deps) {
     datasetContentService,
     videoService,
     baselineService,
+    browserUploadService,
   } = deps;
 
   async function projectForImage(imageId) {
@@ -85,6 +86,27 @@ function createDatasetRoutes(deps) {
     }
     if (method === "POST" && pathname === "/api/imports") {
       sendJson(res, await importService.importPath(await readBody(req), actor));
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/import-uploads") {
+      const session = browserUploadService.createSession(await readBody(req), actor);
+      sendJson(res, { uploadId: session.id, rootName: session.rootName }, 201);
+      return true;
+    }
+    const uploadFileMatch = pathname.match(/^\/api\/import-uploads\/([^/]+)\/files$/);
+    if (method === "PUT" && uploadFileMatch) {
+      const session = browserUploadService.sessionFor(uploadFileMatch[1], actor);
+      sendJson(res, await browserUploadService.receiveFile(req, parsed.query.path, session));
+      return true;
+    }
+    const completeUploadMatch = pathname.match(/^\/api\/import-uploads\/([^/]+)\/complete$/);
+    if (method === "POST" && completeUploadMatch) {
+      sendJson(res, await browserUploadService.completeSession(completeUploadMatch[1], await readBody(req), actor));
+      return true;
+    }
+    const cancelUploadMatch = pathname.match(/^\/api\/import-uploads\/([^/]+)$/);
+    if (method === "DELETE" && cancelUploadMatch) {
+      sendJson(res, browserUploadService.cancelSession(cancelUploadMatch[1], actor));
       return true;
     }
 

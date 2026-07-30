@@ -1,0 +1,7 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+set(CMAKE_C_COMPILER "E:/projects/aarch64/arm-gnu-toolchain/bin/aarch64-none-linux-gnu-gcc.exe")
+set(CMAKE_CXX_COMPILER "E:/projects/aarch64/arm-gnu-toolchain/bin/aarch64-none-linux-gnu-g++.exe")
+set(CMAKE_AR "E:/projects/aarch64/arm-gnu-toolchain/bin/aarch64-none-linux-gnu-ar.exe")
+set(CMAKE_STRIP "E:/projects/aarch64/arm-gnu-toolchain/bin/aarch64-none-linux-gnu-strip.exe")
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)

@@ -1,0 +1,108 @@
+name: det-dashboard
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: det-dashboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${DEPLOY_ROOT}/runtime/postgres:/var/lib/postgresql/data:Z
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [det-internal]
+
+  minio:
+    image: minio/minio:latest
+    container_name: det-dashboard-minio
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ${DEPLOY_ROOT}/runtime/minio:/data:Z
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [det-internal]
+
+  app:
+    image: det-dashboard-app:arm64
+    container_name: det-dashboard-app
+    user: "0:0"
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5173
+      APP_ROOT: /app
+      DIST_ROOT: /app/dist
+      HOST_PATH_MODE: windows
+      BROWSE_ALL_DRIVES: "true"
+      DATA_ROOT: /data/data-root
+      DATA_ROOT_DISPLAY: /data/data-root
+      BROWSE_ROOT: /data/data-root
+      BROWSE_ROOT_DISPLAY: /data/data-root
+      STORAGE_ROOT: /data/cache
+      FALLBACK_STORAGE_ROOT: /data/cache
+      EXPORT_ROOT: /data/exports
+      EXPORT_ROOT_DISPLAY: /data/exports
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      TRAINING_WORKER_ENABLED: "false"
+      INFERENCE_WORKER_ENABLED: "true"
+      ASCEND_TOOLKIT_HOME: /usr/local/Ascend/ascend-toolkit
+      ASCEND_HOME_PATH: /usr/local/Ascend/ascend-toolkit/latest
+      ASCEND_OPP_PATH: /usr/local/Ascend/ascend-toolkit/latest/opp
+      ASCEND_RT_VISIBLE_DEVICES: "3"
+      TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: "1"
+      LD_LIBRARY_PATH: /models_data/det-dashboard/runtime/system-libs:/models_data/det-dashboard/runtime/python39-dev/lib:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/ascend-toolkit/latest/lib64/plugin/opskernel:/usr/local/Ascend/ascend-toolkit/latest/lib64/plugin/nnengine:/usr/local/Ascend/cann-9.0.0/aarch64-linux/lib64:/usr/local/Ascend/cann-9.0.0/aarch64-linux/lib64/device/lib64
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-5173}:5173"
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${NETWORK_INFERENCE_PORT:-4180}:4180"
+    volumes:
+      - ${DEPLOY_ROOT}/runtime/app:/data:Z
+      - ${DEPLOY_ROOT}/runtime:/models_data/det-dashboard/runtime:Z
+      - /usr/local/Ascend:/usr/local/Ascend:ro
+    devices:
+      - /dev/davinci0:/dev/davinci0
+      - /dev/davinci1:/dev/davinci1
+      - /dev/davinci2:/dev/davinci2
+      - /dev/davinci3:/dev/davinci3
+      - /dev/davinci4:/dev/davinci4
+      - /dev/davinci5:/dev/davinci5
+      - /dev/davinci6:/dev/davinci6
+      - /dev/davinci7:/dev/davinci7
+      - /dev/davinci_manager:/dev/davinci_manager
+      - /dev/devmm_svm:/dev/devmm_svm
+      - /dev/hisi_hdc:/dev/hisi_hdc
+    privileged: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [det-internal]
+
+networks:
+  det-internal:
+    name: det-dashboard-internal

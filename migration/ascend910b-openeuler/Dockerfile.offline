@@ -1,0 +1,28 @@
+FROM node:22-bookworm-slim
+
+WORKDIR /app
+
+COPY migration/ascend910b-openeuler/offline-build/node /usr/local/bin/node
+COPY migration/ascend910b-openeuler/offline-build/node_modules/node_modules/sharp /app/node_modules/sharp
+COPY migration/ascend910b-openeuler/offline-build/node_modules/node_modules/@img /app/node_modules/@img
+COPY migration/ascend910b-openeuler/offline-build/node_modules/node_modules/semver /app/node_modules/semver
+COPY migration/ascend910b-openeuler/offline-build/node_modules/node_modules/detect-libc /app/node_modules/detect-libc
+COPY migration/ascend910b-openeuler/offline-build/dist /app/dist
+COPY migration/ascend910b-openeuler/offline-build/server.bundle.cjs /app/server.bundle.cjs
+COPY migration/ascend910b-openeuler/launcher-offline.cjs /app/launcher.cjs
+COPY migration/ascend910b-openeuler/fonts/NotoSansCJKsc-Regular.otf /usr/local/share/fonts/NotoSansCJKsc-Regular.otf
+
+ENV NODE_ENV=production \
+    APP_ROOT=/app \
+    DIST_ROOT=/app/dist \
+    HOST=0.0.0.0 \
+    PORT=5173 \
+    TRAINING_WORKER_ENABLED=false \
+    INFERENCE_WORKER_ENABLED=false
+
+EXPOSE 5173
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:5173/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+CMD ["node", "/app/launcher.cjs"]

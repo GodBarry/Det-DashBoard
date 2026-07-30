@@ -39,6 +39,7 @@ const { createProjectService } = require("./dataset/project-service");
 const { createDatasetContentService } = require("./dataset/content-service");
 const { createBaselineService } = require("./dataset/baseline-service");
 const { createImportService } = require("./dataset/import-service");
+const { createBrowserUploadService } = require("./dataset/browser-upload-service");
 const { createVideoService } = require("./dataset/video-service");
 const { createTrashService } = require("./dataset/trash-service");
 const { createDatasetRoutes } = require("./routes/dataset-routes");
@@ -54,6 +55,8 @@ const { createTrainingCatalogService } = require("./runtime-jobs/training-catalo
 const { createRuntimeQueueService } = require("./runtime-jobs/queue-service");
 const { createRuntimeWorkerSupport } = require("./runtime-jobs/worker-support");
 const { createInferenceWorker } = require("./runtime-jobs/inference-worker");
+const { createInferenceServerService } = require("./runtime-jobs/inference-server-service");
+const { createInferenceReceiverService } = require("./runtime-jobs/inference-receiver-service");
 const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
@@ -118,6 +121,7 @@ let projectService;
 let datasetContentService;
 let baselineService;
 let importService;
+let browserUploadService;
 let videoService;
 let datasetRoutes;
 let mlRoutes;
@@ -141,6 +145,10 @@ let algorithmAssetService;
 let runtimeAssetLinkService;
 let inferenceWorkerController;
 let trainingWorkerController;
+let inferenceReceiverService;
+const inferenceServerService = createInferenceServerService({
+  baseUrl: process.env.INFERENCE_SIDECAR_URL,
+});
 const authService = createAuthService({ query, httpError });
 const settingsService = createSettingsService({
   query,
@@ -308,6 +316,9 @@ async function route(req, res) {
     await query("SELECT 1");
     const shuttingDown = lifecycle.isShuttingDown();
     return sendJson(res, { status: shuttingDown ? "stopping" : "ok" }, shuttingDown ? 503 : 200);
+  }
+  if (method === "POST" && parsed.pathname === "/api/ml/inference-receiver/events") {
+    return sendJson(res, await inferenceReceiverService.recordEvent(await readBody(req)));
   }
   if (multiUserRouter && await multiUserRouter.handle(req, res)) return;
   const actor = parsed.pathname.startsWith("/api/")
@@ -576,6 +587,20 @@ async function main() {
     storageRoot,
     logger: console,
   });
+  inferenceReceiverService = createInferenceReceiverService({
+    query,
+    resourceAccess,
+    inferenceServerService,
+    callbackUrl: process.env.INFERENCE_CALLBACK_URL,
+    callbackToken: process.env.INFERENCE_CALLBACK_TOKEN,
+    fs,
+    path,
+    sharp,
+    store,
+    hashFile,
+    quickHash,
+    imageObjectKey,
+  });
   networkInferenceService = createNetworkInferenceService({
     query,
     transaction,
@@ -591,6 +616,15 @@ async function main() {
     sharp,
     storageRoot,
     logger: console,
+  });
+  browserUploadService = createBrowserUploadService({
+    fs,
+    path,
+    crypto,
+    dataRoot,
+    storageRoot,
+    importService,
+    httpError,
   });
   const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
   if (reconciledNetworkJobs) {
@@ -611,6 +645,8 @@ async function main() {
     pythonEnvService,
     runtimeQueueService,
     runtimeJobService,
+    inferenceServerService,
+    inferenceReceiverService,
     createInferenceJob: inferenceSubmissionService.createInferenceJob,
     networkInferenceService,
   });
@@ -649,6 +685,7 @@ async function main() {
     datasetContentService,
     videoService,
     baselineService,
+    browserUploadService,
   });
   annotationRoutes = createAnnotationRoutes({
     readBody,

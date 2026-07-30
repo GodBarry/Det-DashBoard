@@ -69,7 +69,7 @@ function createPythonEnvService({
     const version = detectPythonVersion(pythonPath);
     const script = [
       "import json, importlib.util",
-      "info={'ultralytics': bool(importlib.util.find_spec('ultralytics')), 'mmdet': bool(importlib.util.find_spec('mmdet')), 'mmcv': bool(importlib.util.find_spec('mmcv')), 'detectron2': bool(importlib.util.find_spec('detectron2')), 'cv2': bool(importlib.util.find_spec('cv2')), 'numpy': bool(importlib.util.find_spec('numpy')), 'torch': False, 'torch_version': '', 'cuda_available': False, 'cuda_version': '', 'device_count': 0}",
+      "info={'ultralytics': bool(importlib.util.find_spec('ultralytics')), 'mmdet': bool(importlib.util.find_spec('mmdet')), 'mmcv': bool(importlib.util.find_spec('mmcv')), 'detectron2': bool(importlib.util.find_spec('detectron2')), 'cv2': bool(importlib.util.find_spec('cv2')), 'numpy': bool(importlib.util.find_spec('numpy')), 'torch': False, 'torch_version': '', 'cuda_available': False, 'cuda_version': '', 'npu_available': False, 'npu_version': '', 'device_count': 0}",
       "spec=importlib.util.find_spec('torch')",
       "if spec:",
       "    import torch",
@@ -78,6 +78,12 @@ function createPythonEnvService({
       "    info['cuda_available']=bool(torch.cuda.is_available())",
       "    info['cuda_version']=getattr(torch.version, 'cuda', '') or ''",
       "    info['device_count']=torch.cuda.device_count() if torch.cuda.is_available() else 0",
+      "    if importlib.util.find_spec('torch_npu'):",
+      "        import torch_npu",
+      "    npu=getattr(torch, 'npu', None)",
+      "    info['npu_available']=bool(npu is not None and npu.is_available())",
+      "    info['npu_version']=getattr(torch, '__ascend版本__', '') or getattr(torch, '__version__', '') if info['npu_available'] else ''",
+      "    if info['npu_available']: info['device_count']=npu.device_count()",
       "print(json.dumps(info, ensure_ascii=False))",
     ].join("\n");
     const result = spawnSync(pythonPath, ["-c", script], { encoding: "utf8", timeout: 30000 });
@@ -88,7 +94,7 @@ function createPythonEnvService({
       packages = { ultralytics: detectUltralytics(pythonPath) };
     }
     const platform = inferPlatform(pythonPath);
-    const accelerator = packages.cuda_available ? "cuda" : "cpu";
+    const accelerator = packages.npu_available ? "npu" : (packages.cuda_available ? "cuda" : "cpu");
     const status = packages.torch && (packages.ultralytics || packages.mmdet || packages.detectron2) ? "ready" : "missing_detection_runtime";
     return { version, packages, platform, accelerator, status };
   }
@@ -132,10 +138,12 @@ function createPythonEnvService({
     const text = `${lowerName}\n${listing}`;
     const osType = text.includes("scripts/python.exe") || text.includes("python.exe") || text.includes("win") ? "windows" : "linux";
     const arch = text.includes("aarch64") || text.includes("arm64") ? "arm64" : "x86_64";
-    const accelerator = /\b(cuda|cu11|cu12|gpu|nvidia)\b/.test(text) ? "cuda" : "cpu";
+    const accelerator = /\b(npu|torch_npu|ascend|cann)\b/.test(text)
+      ? "npu"
+      : (/\b(cuda|cu11|cu12|gpu|nvidia)\b/.test(text) ? "cuda" : "cpu");
     return {
       version: "",
-      packages: { archive_inspected: Boolean(listing), cuda_available: accelerator === "cuda" },
+      packages: { archive_inspected: Boolean(listing), cuda_available: accelerator === "cuda", npu_available: accelerator === "npu" },
       platform: { osType, arch },
       accelerator,
       status: "uploaded",

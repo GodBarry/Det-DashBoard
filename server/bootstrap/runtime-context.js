@@ -16,7 +16,7 @@ function createRuntimeContext(overrides = {}) {
   const http = overrides.http || defaultHttp;
   const lifecycle = overrides.lifecycle || createLifecycle();
   const staticHandler = overrides.staticHandler || createStaticHandler({
-    distRoot: overrides.distRoot || path.resolve(__dirname, "..", "..", "dist"),
+    distRoot: overrides.distRoot || process.env.DIST_ROOT || path.resolve(__dirname, "..", "..", "dist"),
     sendError: http.sendError,
   });
 

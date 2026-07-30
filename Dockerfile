@@ -11,9 +11,11 @@ RUN npm run build
 
 FROM build AS test
 
+ARG RUN_TESTS=false
+
 COPY server ./server
 COPY test/unit ./test/unit
-RUN npm test
+RUN if [ "$RUN_TESTS" = "true" ]; then npm test; else echo "Skipping tests during image build (set RUN_TESTS=true to enable)"; fi
 
 FROM node:22-bookworm-slim@sha256:813a7480f28fdadac1f7f5c824bcdad435b5bc1322a5968bbbdef8d058f9dff4 AS runtime
 

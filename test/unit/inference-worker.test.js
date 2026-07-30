@@ -11,7 +11,8 @@ test("DINO runner uses true batches with safe GPU fallback", () => {
   assert.match(source, /batchSize: Math\.max\(1, Math\.floor\(Number\(params\.batch/);
   assert.match(source, /model\.test_step\(pseudo_collate\(data\)\)/);
   assert.match(source, /safe_cap = 2 if total_gb < 6 else \(4 if total_gb < 12 else 8\)/);
-  assert.match(source, /except torch\.cuda\.OutOfMemoryError/);
+  assert.match(source, /active_batch = requested_batch/);
+  assert.match(source, /except \(torch\.cuda\.OutOfMemoryError, RuntimeError\) as error/);
   assert.match(source, /active_batch = max\(1, active_batch \/\/ 2\)/);
   assert.match(source, /allowed_classes = \{str\(name\)\.strip\(\)\.lower\(\)/);
   assert.match(source, /if str\(label\)\.strip\(\)\.lower\(\) not in allowed_classes: continue/);

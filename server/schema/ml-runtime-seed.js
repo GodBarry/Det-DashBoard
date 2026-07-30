@@ -1,4 +1,57 @@
 async function seedMlRuntimeConfig({ query, path, storageRoot, pythonEnvService, uniqueExistingPaths }) {
+  async function upsertRuntimeEnv(pythonPath, nameOverride = "") {
+    const info = pythonEnvService.inspectPythonEnv(pythonPath);
+    const packages = { ...(info.packages || {}) };
+    const accelerator = String(info.accelerator || "").toLowerCase();
+    const npuPath = /(^|\/)(npu-env|ascend|cann)(\/|$)/i.test(String(pythonPath || ""));
+    if (npuPath) {
+      packages.npu_available = packages.npu_available !== false;
+      packages.torch = packages.torch !== false;
+    }
+    const capabilities = {
+      ultralytics_detect: Boolean(packages.ultralytics),
+      mmdetection: Boolean(packages.mmdet || packages.mmcv),
+      torch: Boolean(packages.torch),
+      torch_npu: Boolean(packages.npu_available || npuPath),
+      npu: Boolean(packages.npu_available || npuPath),
+      dinov3_faster_rcnn: Boolean(packages.mmdet || npuPath),
+    };
+    const envName = nameOverride || (info.version ? info.version.replace(/^Python\s*/i, "Python ") : path.basename(pythonPath));
+    const exists = (await query("SELECT id FROM runtime_envs WHERE python_path=$1", [pythonPath])).rows[0];
+    const values = [
+      envName,
+      pythonPath,
+      pythonEnvService.inferEnvType(pythonPath),
+      npuPath ? "ready" : info.status,
+      JSON.stringify(packages),
+      info.platform.osType,
+      info.platform.arch,
+      npuPath ? "npu" : info.accelerator,
+      info.version,
+      packages.torch_version || "",
+      Boolean(packages.cuda_available),
+      packages.cuda_version || "",
+      JSON.stringify(capabilities),
+    ];
+    if (exists) {
+      await query(
+        `UPDATE runtime_envs
+         SET name=$1, env_type=$3, status=$4, packages_json=$5, os_type=$6, arch=$7, accelerator=$8,
+             python_version=$9, torch_version=$10, cuda_available=$11, cuda_version=$12,
+             capabilities_json=$13, source_type='server_python', visibility='public', updated_at=now()
+         WHERE id=$14`,
+        [...values, exists.id],
+      );
+      return;
+    }
+    await query(
+      `INSERT INTO runtime_envs
+       (name, python_path, env_type, status, packages_json, os_type, arch, accelerator, python_version, torch_version, cuda_available, cuda_version, capabilities_json, source_type, visibility)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'server_python','public')`,
+      values,
+    );
+  }
+
   const templateCount = (await query("SELECT count(*)::int AS count FROM training_templates")).rows[0].count;
   if (!templateCount) {
     await query(
@@ -84,53 +137,13 @@ async function seedMlRuntimeConfig({ query, path, storageRoot, pythonEnvService,
     "C:\\Python314\\python.exe",
     "python",
   ]);
-  for (const pythonPath of candidates) {
-    const info = pythonEnvService.inspectPythonEnv(pythonPath);
-    const exists = (await query("SELECT id FROM runtime_envs WHERE python_path=$1", [pythonPath])).rows[0];
-    if (exists) {
-      await query(
-        `UPDATE runtime_envs
-         SET env_type=$1, status=$2, packages_json=$3, os_type=$4, arch=$5, accelerator=$6,
-             python_version=$7, torch_version=$8, cuda_available=$9, cuda_version=$10,
-             capabilities_json=$11, updated_at=now()
-         WHERE id=$12`,
-        [
-          pythonEnvService.inferEnvType(pythonPath),
-          info.status,
-          JSON.stringify(info.packages),
-          info.platform.osType,
-          info.platform.arch,
-          info.accelerator,
-          info.version,
-          info.packages.torch_version || "",
-          Boolean(info.packages.cuda_available),
-          info.packages.cuda_version || "",
-          JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
-          exists.id,
-        ],
-      );
-      continue;
-    }
-    await query(
-      `INSERT INTO runtime_envs (name, python_path, env_type, status, packages_json, os_type, arch, accelerator, python_version, torch_version, cuda_available, cuda_version, capabilities_json)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [
-        info.version ? info.version.replace(/^Python\s*/i, "Python ") : path.basename(pythonPath),
-        pythonPath,
-        pythonEnvService.inferEnvType(pythonPath),
-        info.status,
-        JSON.stringify(info.packages),
-        info.platform.osType,
-        info.platform.arch,
-        info.accelerator,
-        info.version,
-        info.packages.torch_version || "",
-        Boolean(info.packages.cuda_available),
-        info.packages.cuda_version || "",
-        JSON.stringify({ ultralytics_detect: Boolean(info.packages.ultralytics), torch: Boolean(info.packages.torch) }),
-      ],
-    );
-  }
+  for (const pythonPath of candidates) await upsertRuntimeEnv(pythonPath);
+  for (const pythonPath of uniqueExistingPaths([
+    process.env.ASCEND_NPU_PYTHON,
+    process.env.NPU_PYTHON,
+    "/models_data/det-dashboard/runtime/npu-env/bin/python",
+    "/models_data/det-dashboard/runtime/npu-env/bin/python3",
+  ])) await upsertRuntimeEnv(pythonPath, "Ascend 910B NPU · DINOv3 Faster R-CNN");
 }
 
 module.exports = { seedMlRuntimeConfig };

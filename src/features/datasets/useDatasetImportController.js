@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { recordDatasetActivity } from "./datasetActivityLog.js";
 
 async function readImportResponse(response) {
@@ -14,6 +14,19 @@ async function readImportResponse(response) {
   }
   if (!response.ok) throw new Error(data?.error || data?.message || `导入失败（HTTP ${response.status}）`);
   return data;
+}
+
+function buildFailedImport(paths, message) {
+  return {
+    id: `client-failed-${Date.now()}`,
+    status: "failed",
+    message: message || "导入任务提交失败",
+    error_message: message || "导入任务提交失败",
+    source_path: paths.join("; "),
+    progress: 100,
+    processed_files: 0,
+    total_files: 1,
+  };
 }
 
 export function useDatasetImportController({
@@ -32,6 +45,9 @@ export function useDatasetImportController({
   const [dirPickerBusy, setDirPickerBusy] = useState(false);
   const [importMode, setImportMode] = useState("merge_project");
   const [importStrategy, setImportStrategy] = useState("incremental");
+  const [localFolder, setLocalFolder] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const localFolderInputRef = useRef(null);
 
   function splitImportPaths(value) {
     return Array.from(new Set(String(value || "").split(";").map((item) => item.trim()).filter(Boolean)));
@@ -53,6 +69,8 @@ export function useDatasetImportController({
     if (!activeProject) return;
 
     setImportPath("");
+    setLocalFolder(null);
+    setUploadProgress(null);
     setError(null);
     setShowImportDialog(true);
   }
@@ -60,6 +78,8 @@ export function useDatasetImportController({
   function importDataFromHome() {
     if (currentFolder) {
       setImportPath("");
+      setLocalFolder(null);
+      setUploadProgress(null);
       setError(null);
       openProject(currentFolder);
       setShowImportDialog(true);
@@ -69,7 +89,31 @@ export function useDatasetImportController({
     setError("请先打开一个具体项目后再导入数据集");
   }
 
-  async function browseFolder() {
+  function browseLocalFolder() {
+    setError(null);
+    localFolderInputRef.current?.click();
+  }
+
+  function updateImportPath(value) {
+    setLocalFolder(null);
+    setUploadProgress(null);
+    setImportPath(value);
+  }
+
+  function selectLocalFolder(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    const firstRelativePath = files[0].webkitRelativePath || files[0].name;
+    const rootName = firstRelativePath.split("/")[0] || "dataset";
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    setLocalFolder({ rootName, files, totalBytes });
+    setImportPath("");
+    setUploadProgress(null);
+    setError(null);
+  }
+
+  async function browseServerFolder() {
     setError(null);
     const selectedPaths = splitImportPaths(importPath);
     const initialPath = selectedPaths[selectedPaths.length - 1] || (appConfig.browseAllDrives ? "__drives__" : appConfig.browseRootDisplay || "/");
@@ -121,11 +165,80 @@ export function useDatasetImportController({
 
   function chooseDir(pathValue) {
     appendImportPath(pathValue);
+    setLocalFolder(null);
     setDirPicker(null);
     setError(null);
   }
 
+  async function uploadLocalFolder() {
+    if (!activeProject || !localFolder?.files?.length) return;
+    const { rootName, files, totalBytes } = localFolder;
+    let uploadId = "";
+    let completedFiles = 0;
+    let completedBytes = 0;
+    setError(null);
+    setUploadProgress({ completedFiles: 0, totalFiles: files.length, completedBytes: 0, totalBytes });
+    setLatestImport({ status: "uploading", message: `正在上传本机目录 ${rootName}`, progress: 0, processed_files: 0, total_files: files.length });
+    try {
+      const sessionResponse = await fetch("/api/import-uploads", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rootName, fileCount: files.length, totalBytes }),
+      });
+      const session = await readImportResponse(sessionResponse);
+      uploadId = session.uploadId;
+      const pending = [...files];
+      const workers = Array.from({ length: Math.min(3, pending.length) }, async () => {
+        while (pending.length) {
+          const file = pending.shift();
+          const browserRelativePath = file.webkitRelativePath || file.name;
+          const relativeParts = browserRelativePath.split("/");
+          const relativePath = relativeParts.length > 1 ? relativeParts.slice(1).join("/") : file.name;
+          const response = await fetch(`/api/import-uploads/${encodeURIComponent(uploadId)}/files?path=${encodeURIComponent(relativePath)}`, {
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            body: file,
+          });
+          await readImportResponse(response);
+          completedFiles += 1;
+          completedBytes += file.size;
+          const progress = Math.round((completedBytes / Math.max(1, totalBytes)) * 100);
+          setUploadProgress({ completedFiles, totalFiles: files.length, completedBytes, totalBytes });
+          setLatestImport({
+            status: "uploading",
+            message: `正在上传 ${completedFiles} / ${files.length} 个文件`,
+            progress,
+            processed_files: completedFiles,
+            total_files: files.length,
+          });
+        }
+      });
+      await Promise.all(workers);
+      const completeResponse = await fetch(`/api/import-uploads/${encodeURIComponent(uploadId)}/complete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: activeProject.id, rename: true, importMode, importStrategy }),
+      });
+      const result = await readImportResponse(completeResponse);
+      recordDatasetActivity("导入", `已上传并提交导入：${activeProject.name}`, "info", `${rootName}（${files.length} 个文件）`);
+      setLatestImport(result.batch || null);
+      setShowImportDialog(false);
+      setLocalFolder(null);
+      setUploadProgress(null);
+      loadWorkspace(activeProject.id);
+    } catch (err) {
+      if (uploadId) fetch(`/api/import-uploads/${encodeURIComponent(uploadId)}`, { method: "DELETE" }).catch(() => {});
+      const message = err.message || "本机目录上传失败";
+      setError(message);
+      setLatestImport(buildFailedImport([rootName], message));
+    }
+  }
+
   function confirmImport() {
+    if (localFolder?.files?.length) {
+      uploadLocalFolder();
+      return;
+    }
     const paths = splitImportPaths(importPath);
 
     if (!paths.length) {
@@ -151,7 +264,7 @@ export function useDatasetImportController({
       .catch((err) => {
         recordDatasetActivity("导入", `导入失败：${activeProject.name}`, "error", `${paths.join("; ")}\n${err.message}`);
         setError(err.message);
-        setLatestImport(null);
+        setLatestImport(buildFailedImport(paths, err.message));
       });
   }
 
@@ -159,13 +272,19 @@ export function useDatasetImportController({
     showImportDialog,
     setShowImportDialog,
     parsedImportPaths,
+    localFolder,
+    uploadProgress,
+    localFolderInputRef,
+    browseLocalFolder,
+    selectLocalFolder,
     importMode,
     setImportMode,
     importStrategy,
     setImportStrategy,
     importPath,
     setImportPath,
-    browseFolder,
+    updateImportPath,
+    browseFolder: browseServerFolder,
     browseBusy,
     confirmImport,
     dirPicker,
