@@ -86,6 +86,15 @@ function createStaticHandler({ distRoot, sendError } = {}) {
       // Missing static files may still be handled by the SPA fallback.
     }
 
+    // A stale browser tab may request an asset from the previous deployment.
+    // Returning index.html with a JavaScript MIME request creates an opaque
+    // module error and a blank page. Return a real 404 so the UI boundary can
+    // offer cache recovery instead.
+    if (pathname.startsWith("/assets/")) {
+      sendError(res, 404, "static asset not found");
+      return true;
+    }
+
     if (!pathname.startsWith("/api/")) {
       const indexPath = path.join(root, "index.html");
       try {
