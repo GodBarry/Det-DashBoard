@@ -58,6 +58,7 @@ const { createTrainingWorker } = require("./runtime-jobs/training-worker");
 const { createInferenceInputCacheService } = require("./runtime-jobs/inference-input-cache-service");
 const { createInferenceSubmissionService } = require("./runtime-jobs/inference-submission-service");
 const { createNetworkInferenceService } = require("./runtime-jobs/network-inference-service");
+const { createInferenceSidecarClient } = require("./runtime-jobs/inference-sidecar-client");
 const { createModelService } = require("./ml-assets/model-service");
 const { createModelWeightInspector } = require("./ml-assets/model-weight-inspector");
 const { createModelMaintenanceService } = require("./ml-assets/model-maintenance-service");
@@ -95,6 +96,7 @@ const runtimeWorkerClock = {
   setTimeout,
   clearTimeout,
 };
+const inferenceSidecarClient = createInferenceSidecarClient({ processRef: process });
 const algorithmRuntimeSource = createAlgorithmRuntimeSource({
   query,
   store,
@@ -511,6 +513,7 @@ async function main() {
     uniqueExistingPaths,
     logger: console,
     clock: runtimeWorkerClock,
+    sidecarClient: inferenceSidecarClient,
   });
   trainingWorkerController = createTrainingWorker({
     query,
@@ -591,6 +594,7 @@ async function main() {
     sharp,
     storageRoot,
     logger: console,
+    sidecarClient: inferenceSidecarClient,
   });
   const reconciledNetworkJobs = await networkInferenceService.reconcileStaleJobs();
   if (reconciledNetworkJobs) {

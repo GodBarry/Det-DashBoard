@@ -12,6 +12,7 @@ RUN npm run build
 FROM build AS test
 
 COPY server ./server
+COPY shared ./shared
 COPY test/unit ./test/unit
 RUN npm test
 
@@ -35,6 +36,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=node:node server ./server
+COPY --chown=node:node shared ./shared
 COPY --from=test --chown=node:node /app/dist ./dist
 
 ENV NODE_ENV=production \

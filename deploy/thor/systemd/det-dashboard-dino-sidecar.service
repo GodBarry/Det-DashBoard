@@ -1,0 +1,13 @@
+[Unit]
+Description=Det-DashBoard Thor DINO inference sidecar
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/cngc209/det-dashboard-data/config/sidecars.env
+ExecStart=/usr/bin/bash -lc 'exec "$SIDECAR_PYTHON" /home/cngc209/det-dashboard/deploy/thor/dino-platform-sidecar.py --host 172.17.0.1 --port 4181 --storage-root "$SIDECAR_STORAGE_ROOT" --config "$DINO_CONFIG" --checkpoint "$DINO_CHECKPOINT"'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

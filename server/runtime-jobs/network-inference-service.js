@@ -84,6 +84,7 @@ function createNetworkInferenceService({
   sharp,
   storageRoot,
   logger = console,
+  sidecarClient,
 }) {
   const port = Number(process.env.NETWORK_INFERENCE_PORT || 4180);
   const maxBytes = Number(process.env.NETWORK_INFERENCE_MAX_BODY_BYTES || 64 * 1024 * 1024);
@@ -122,11 +123,27 @@ function createNetworkInferenceService({
     );
     let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
     if (!env) throw new Error("网络推理运行环境不存在");
-    env = await pythonEnvService.resolveRuntimePythonEnv(env);
-    if (!fs.existsSync(env.python_path)) throw new Error(`网络推理 Python 不存在：${env.python_path}`);
     const weightPath = await modelService.findWeightArtifact(job.model_version_id);
     if (!weightPath) throw new Error("网络推理缺少可用模型权重文件");
     const device = normalizedDevice(params.device, Boolean(env.cuda_available), env.accelerator);
+    if (sidecarClient?.hasYolo) {
+      await query("UPDATE runtime_inference_jobs SET status='preparing',progress=35,message=$1 WHERE id=$2", ["正在通过 Thor GPU 侧车加载 YOLO 模型", job.id]);
+      const ready = await sidecarClient.startYoloServer({
+        weights: weightPath, port: Number(process.env.NETWORK_INFERENCE_SIDECAR_PORT || 4182),
+        conf: Number(params.conf ?? 0.25), iou: Number(params.iou ?? 0.7),
+        imgsz: Number(params.imgsz ?? 640), device, host: "127.0.0.1",
+      });
+      return {
+        type: "ultralytics_yolo", pid: ready.pid || null, device, model: weightPath,
+        async predict(imagePath) {
+          const result = await sidecarClient.yoloImage(fs.readFileSync(imagePath).toString("base64"));
+          return result.predictions || [];
+        },
+        stop: () => sidecarClient.stopYoloServer(),
+      };
+    }
+    env = await pythonEnvService.resolveRuntimePythonEnv(env);
+    if (!fs.existsSync(env.python_path)) throw new Error(`网络推理 Python 不存在：${env.python_path}`);
     const runnerRoot = path.join(storageRoot, "runtime", "network-inference", job.id, "model-runner");
     fs.mkdirSync(runnerRoot, { recursive: true });
     const configPath = path.join(runnerRoot, "config.json");
@@ -287,6 +304,20 @@ function createNetworkInferenceService({
     );
     let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
     if (!env) throw new Error("DINO 网络推理运行环境不存在");
+    if (sidecarClient?.hasDino) {
+      return {
+        type: "dinov3_faster_rcnn", pid: null, device: "cuda:0", model: job.model_version_id,
+        async predict(imagePath) {
+          const result = await sidecarClient.dinoImage({
+            image_base64: fs.readFileSync(imagePath).toString("base64"),
+            scoreThr: Number(params.conf ?? params.scoreThreshold ?? 0.25),
+            saveVisualization: false,
+          });
+          return result.predictions || [];
+        },
+        async stop() {},
+      };
+    }
     env = await pythonEnvService.resolveRuntimePythonEnv(env);
     if (!env.python_path || !fs.existsSync(env.python_path)) throw new Error(`DINO Python 不存在：${env.python_path || "(empty)"}`);
     const resolved = await algorithmRuntimeSource.resolveTrainingAlgorithmSource(params);
@@ -574,7 +605,7 @@ function createNetworkInferenceService({
     }, null, 2));
     const job = (await query("SELECT * FROM runtime_inference_jobs WHERE id=$1", [session.job.id])).rows[0];
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json) : job.params_json;
-    const history = (await query("SELECT * FROM runtime_inference_results WHERE inference_job_id=$1 ORDER BY created_at", [job.id])).rows;
+    let history = [];
     await query(
       "UPDATE runtime_inference_jobs SET status='running',progress=65,message=$1,started_at=COALESCE(started_at,now()) WHERE id=$2",
       [`正在推理网络图片 ${image.filename}`, job.id],
@@ -591,6 +622,10 @@ function createNetworkInferenceService({
         throw error;
       }
     } else {
+      // The generic one-shot worker replaces a job's results. Preserve history
+      // only for that compatibility path. Persistent YOLO/DINO runners append
+      // directly and must not read/rewrite the full session on every image.
+      history = (await query("SELECT * FROM runtime_inference_results WHERE inference_job_id=$1 ORDER BY created_at", [job.id])).rows;
       await inferenceWorkerController.runInferenceJob({
         ...job,
         output_root: root,
@@ -614,12 +649,14 @@ function createNetworkInferenceService({
     session.images += 1;
     session.predictions += predictions.length;
     await transaction(async (client) => {
-      await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
-      for (const row of history) await client.query(
-        `INSERT INTO runtime_inference_results (id,inference_job_id,project_image_id,predictions_json,artifact_path,created_at)
-         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
-        [row.id, job.id, row.project_image_id, JSON.stringify(row.predictions_json), row.artifact_path, row.created_at],
-      );
+      if (!session.runner) {
+        await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
+        for (const row of history) await client.query(
+          `INSERT INTO runtime_inference_results (id,inference_job_id,project_image_id,predictions_json,artifact_path,created_at)
+           VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+          [row.id, job.id, row.project_image_id, JSON.stringify(row.predictions_json), row.artifact_path, row.created_at],
+        );
+      }
       await client.query(
         "INSERT INTO runtime_inference_results (inference_job_id,project_image_id,predictions_json,artifact_path) VALUES ($1,$2,$3,$4)",
         [job.id, image.image.id, JSON.stringify(predictions), visualPath],

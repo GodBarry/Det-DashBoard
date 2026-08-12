@@ -1,7 +1,11 @@
 export const DEFAULT_RECOGNITION_CLASSES = ["car", "tank", "zhuangjiache", "fasheche", "hanma", "buzhanche", "kache", "daodanfasheche"];
 
 export function createDefaultTrainingForm(restoredTrainingForm) {
-  const storage = typeof localStorage === "undefined" ? null : localStorage;
+  const storage = typeof localStorage !== "undefined"
+    && typeof localStorage?.getItem === "function"
+    && typeof localStorage?.setItem === "function"
+    ? localStorage
+    : null;
   const legacySavePeriod = storage ? storage.getItem("det-dashboard.save-period-default-v2") !== "1" : false;
   if (legacySavePeriod) storage.setItem("det-dashboard.save-period-default-v2", "1");
   const form = {

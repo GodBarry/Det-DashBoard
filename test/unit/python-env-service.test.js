@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const path = require("node:path").win32;
 const crypto = require("node:crypto");
 
 const { createPythonEnvService } = require("../../server/ml-assets/python-env-service");
@@ -13,7 +13,7 @@ function createFixture(query, overrides = {}) {
     putJson: [],
     downloads: [],
   };
-  const files = new Set(overrides.files || []);
+  const files = overrides.files instanceof Set ? overrides.files : new Set(overrides.files || []);
   const fs = {
     existsSync: (target) => files.has(target),
     statSync: (target) => ({ size: target.endsWith("env.tar.gz") ? 123 : 0, isFile: () => true }),

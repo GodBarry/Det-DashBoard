@@ -52,9 +52,13 @@ function createModelMaintenanceService({ query, store, fs, path, storageRoot, is
     }
 
     for (const key of objectKeys) await store.removeObject(key);
+    let deletedLocalRoots = 0;
     for (const root of localRoots) {
       const resolved = path.resolve(root);
-      if (isInsideRoot(storageRoot, resolved) && fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true });
+      if (isInsideRoot(storageRoot, resolved) && fs.existsSync(resolved)) {
+        fs.rmSync(resolved, { recursive: true, force: true });
+        deletedLocalRoots += 1;
+      }
     }
     await query("DELETE FROM model_files");
     await query("DELETE FROM model_revisions");
@@ -66,7 +70,7 @@ function createModelMaintenanceService({ query, store, fs, path, storageRoot, is
         modelVersions: modelVersions.length,
         modelFiles: modelFiles.length,
         minioObjects: objectKeys.size,
-        localRoots: localRoots.filter((root) => !fs.existsSync(root)).length,
+        localRoots: deletedLocalRoots,
       },
     };
   }

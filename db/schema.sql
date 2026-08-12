@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS image_annotations (
   attributes_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS idx_image_ann_version ON image_annotations(label_version_id);
+CREATE INDEX IF NOT EXISTS idx_image_ann_version_image ON image_annotations(label_version_id, project_image_id);
 CREATE INDEX IF NOT EXISTS idx_image_ann_project_image ON image_annotations(project_image_id);
 CREATE INDEX IF NOT EXISTS idx_image_ann_label ON image_annotations(label);
 
@@ -196,4 +197,3 @@ CREATE TABLE IF NOT EXISTS export_items (
   export_json_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-

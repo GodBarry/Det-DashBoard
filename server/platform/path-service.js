@@ -8,6 +8,7 @@ function createPathService(options = {}) {
   const path = options.path || defaultPath;
   const childProcess = options.child_process || options.childProcess || defaultChildProcess;
   const platform = config.platform || process.platform;
+  const pathImpl = platform === "win32" && path.win32 ? path.win32 : path;
 
   const {
     dataRoot,
@@ -19,8 +20,8 @@ function createPathService(options = {}) {
   } = config;
 
   function isInsideRoot(root, target) {
-    const relative = path.relative(root, target);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+    const relative = pathImpl.relative(root, target);
+    return relative === "" || (!relative.startsWith("..") && !pathImpl.isAbsolute(relative));
   }
 
   function isWindowsHostPathMode() {
@@ -39,24 +40,24 @@ function createPathService(options = {}) {
     if (!isWindowsHostPathMode()) return null;
     const raw = normalizeVirtualHostPath(value);
     if (!raw) return null;
-    if (raw === "/" || raw === "\\") return path.resolve(internalRoot);
+    if (raw === "/" || raw === "\\") return pathImpl.resolve(internalRoot);
     const driveMatch = raw.match(/^([A-Za-z]):[\\/]*(.*)$/);
     const slashDriveMatch = raw.match(/^\/([A-Za-z])(?:\/(.*))?$/);
     const match = driveMatch || slashDriveMatch;
     if (!match) return null;
     const drive = match[1].toUpperCase();
     const rest = String(match[2] || "").replace(/\\/g, "/").split("/").filter(Boolean);
-    if (platform === "win32") return path.resolve(`${drive}:\\`, ...rest);
-    return path.resolve(internalRoot, drive, ...rest);
+    if (platform === "win32") return pathImpl.resolve(`${drive}:\\`, ...rest);
+    return pathImpl.resolve(internalRoot, drive, ...rest);
   }
 
   function internalToWindowsHostPath(value, internalRoot) {
     if (!isWindowsHostPathMode()) return null;
-    const resolved = path.resolve(value || "");
+    const resolved = pathImpl.resolve(value || "");
     if (!isInsideRoot(internalRoot, resolved)) return null;
-    const relative = path.relative(internalRoot, resolved);
+    const relative = pathImpl.relative(internalRoot, resolved);
     if (!relative) return "/";
-    const parts = relative.split(path.sep).filter(Boolean);
+    const parts = relative.split(pathImpl.sep).filter(Boolean);
     const drive = parts.shift();
     if (!/^[A-Za-z]$/.test(drive || "")) return null;
     return parts.length ? `${drive.toUpperCase()}:\\${parts.join("\\")}` : `${drive.toUpperCase()}:\\`;
@@ -70,7 +71,7 @@ function createPathService(options = {}) {
   }
 
   function bestMappingFor(value, key) {
-    const resolved = path.resolve(value || "");
+    const resolved = pathImpl.resolve(value || "");
     return pathMappings()
       .filter((mapping) => isInsideRoot(mapping[key], resolved))
       .sort((a, b) => b[key].length - a[key].length)[0] || null;
@@ -82,27 +83,27 @@ function createPathService(options = {}) {
     if (windowsBrowsePath) return windowsBrowsePath;
     const windowsDataPath = windowsHostPathToInternal(value, dataRoot);
     if (windowsDataPath) return windowsDataPath;
-    const resolved = path.resolve(value || dataRoot);
+    const resolved = pathImpl.resolve(value || dataRoot);
     const internalMapping = bestMappingFor(resolved, "internal");
     if (internalMapping) return resolved;
     const displayMapping = bestMappingFor(resolved, "display");
     if (displayMapping) {
-      const relative = path.relative(displayMapping.display, resolved);
-      return path.resolve(displayMapping.internal, relative);
+      const relative = pathImpl.relative(displayMapping.display, resolved);
+      return pathImpl.resolve(displayMapping.internal, relative);
     }
     return resolved;
   }
 
   function toDisplayDataPath(value) {
-    const resolved = path.resolve(value || dataRoot);
+    const resolved = pathImpl.resolve(value || dataRoot);
     const windowsBrowsePath = internalToWindowsHostPath(resolved, browseRoot);
     if (windowsBrowsePath) return windowsBrowsePath;
     const windowsDataPath = internalToWindowsHostPath(resolved, dataRoot);
     if (windowsDataPath) return windowsDataPath;
     const internalMapping = bestMappingFor(resolved, "internal");
     if (internalMapping) {
-      const relative = path.relative(internalMapping.internal, resolved);
-      return path.resolve(internalMapping.display, relative);
+      const relative = pathImpl.relative(internalMapping.internal, resolved);
+      return pathImpl.resolve(internalMapping.display, relative);
     }
     return resolved;
   }
@@ -111,13 +112,13 @@ function createPathService(options = {}) {
     value = normalizeVirtualHostPath(value);
     const windowsPath = windowsHostPathToInternal(value, internalRoot);
     if (windowsPath) return windowsPath;
-    const resolved = path.resolve(value || displayRoot);
+    const resolved = pathImpl.resolve(value || displayRoot);
     if (isWindowsHostPathMode() && (value === "/" || value == null || value === "")) {
-      return path.resolve(internalRoot);
+      return pathImpl.resolve(internalRoot);
     }
     if (isInsideRoot(internalRoot, resolved)) return resolved;
     if (isInsideRoot(displayRoot, resolved)) {
-      return path.resolve(internalRoot, path.relative(displayRoot, resolved));
+      return pathImpl.resolve(internalRoot, pathImpl.relative(displayRoot, resolved));
     }
     return resolved;
   }
@@ -161,11 +162,11 @@ function createPathService(options = {}) {
     const dirs = fs.readdirSync(current, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
-        const fullPath = path.join(current, entry.name);
+        const fullPath = pathImpl.join(current, entry.name);
         return { name: entry.name, path: toDisplayDataPath(fullPath) };
       })
       .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-    const parent = path.dirname(current);
+    const parent = pathImpl.dirname(current);
     return {
       root: displayRoot,
       current: toDisplayDataPath(current),
@@ -189,9 +190,9 @@ function createPathService(options = {}) {
       .filter(Boolean)
       .map((value) => value.startsWith(".") ? value : `.${value}`));
     const files = fs.readdirSync(current, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && (!allowed.size || allowed.has(path.extname(entry.name).toLowerCase())))
+      .filter((entry) => entry.isFile() && (!allowed.size || allowed.has(pathImpl.extname(entry.name).toLowerCase())))
       .map((entry) => {
-        const fullPath = path.join(current, entry.name);
+        const fullPath = pathImpl.join(current, entry.name);
         const stat = fs.statSync(fullPath);
         return { name: entry.name, path: toDisplayDataPath(fullPath), size: stat.size, modifiedAt: stat.mtime.toISOString() };
       })
@@ -247,7 +248,7 @@ function createPathService(options = {}) {
         "--title",
         description || "选择数据文件夹",
         "--filename",
-        path.join(initialDir, path.sep),
+        pathImpl.join(initialDir, pathImpl.sep),
       ]);
     }
 

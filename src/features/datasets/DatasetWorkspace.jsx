@@ -938,8 +938,6 @@ resolveSelected={resolveSelectedConflicts}
 
 items={items}
 
-sequenceUrl={activeProject?.id ? `/api/projects/${activeProject.id}/images?${buildWorkspaceSearchParams(1, filters).toString().replace("pageSize=48", "pageSize=10000")}&sequence=1` : ""}
-
 index={viewerIndex}
 
 setIndex={setViewerIndex}

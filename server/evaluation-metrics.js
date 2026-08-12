@@ -39,12 +39,34 @@ function averagePrecision(points, totalGt) {
   return Math.min(1, Math.max(0, ap));
 }
 
+function detectionSortKey(row = {}) {
+  return [
+    row.imageId || row.projectImageId || row.project_image_id || "",
+    row.label || row.normalized_label || "",
+    Number(row.class_id ?? -1),
+    Number(row.bbox_x || 0),
+    Number(row.bbox_y || 0),
+    Number(row.bbox_w || 0),
+    Number(row.bbox_h || 0),
+  ].join("\u0000");
+}
+
+function comparePredictions(a, b) {
+  return (b.score - a.score) || detectionSortKey(a).localeCompare(detectionSortKey(b));
+}
+
+function compareGroundTruth(a, b) {
+  return detectionSortKey(a).localeCompare(detectionSortKey(b));
+}
+
 function matchAtThreshold(predictions, groundTruth, minScore, iouThreshold, sameLabelOnly = true) {
   const used = new Set();
   let tp = 0;
   let fp = 0;
   let iouSum = 0;
-  const sorted = predictions.filter((row) => row.score >= minScore).sort((a, b) => b.score - a.score);
+  // evaluateDetections keeps each image's predictions score-sorted once. A
+  // threshold pass only needs to filter that stable ordering.
+  const sorted = predictions.filter((row) => row.score >= minScore);
   for (const prediction of sorted) {
     let bestIndex = -1;
     let bestIou = 0;
@@ -82,6 +104,22 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
     imageId: row.projectImageId || row.project_image_id,
     label: labelOf(row),
   }));
+  const grouped = (rows, keyOf) => {
+    const result = new Map();
+    for (const row of rows) {
+      const key = keyOf(row);
+      if (key == null || key === "") continue;
+      if (!result.has(key)) result.set(key, []);
+      result.get(key).push(row);
+    }
+    return result;
+  };
+  const predictionsByImage = grouped(predictions, (row) => row.imageId);
+  const groundTruthByImage = grouped(groundTruth, (row) => row.imageId);
+  const predictionsByLabel = grouped(predictions, (row) => row.label);
+  const groundTruthByLabel = grouped(groundTruth, (row) => row.label);
+  for (const rows of predictionsByImage.values()) rows.sort(comparePredictions);
+  for (const rows of groundTruthByImage.values()) rows.sort(compareGroundTruth);
   const labels = Array.from(new Set([...expectedLabels, ...groundTruth.map((row) => row.label), ...predictions.map((row) => row.label)].filter(Boolean))).sort();
   const allLabels = [...labels, "背景"];
   const matrix = allLabels.map(() => allLabels.map(() => 0));
@@ -90,7 +128,7 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
   for (const row of groundTruth) perClass.get(row.label).groundTruth += 1;
   for (const row of predictions) perClass.get(row.label).predictions += 1;
 
-  const imageIds = Array.from(new Set([...groundTruth.map((row) => row.imageId), ...predictions.map((row) => row.imageId)].filter(Boolean)));
+  const imageIds = Array.from(new Set([...groundTruthByImage.keys(), ...predictionsByImage.keys()])).sort();
   const errors = [];
   let totalTp = 0;
   let totalFp = 0;
@@ -98,8 +136,8 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
   let matchedIouSum = 0;
 
   for (const imageId of imageIds) {
-    const imageGt = groundTruth.filter((row) => row.imageId === imageId);
-    const imagePreds = predictions.filter((row) => row.imageId === imageId).sort((a, b) => b.score - a.score);
+    const imageGt = groundTruthByImage.get(imageId) || [];
+    const imagePreds = predictionsByImage.get(imageId) || [];
     const used = new Set();
     const imageErrors = [];
     for (const prediction of imagePreds) {
@@ -161,8 +199,8 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
   }
 
   for (const label of labels) {
-    const labelGt = groundTruth.filter((row) => row.label === label);
-    const labelPreds = predictions.filter((row) => row.label === label).sort((a, b) => b.score - a.score);
+    const labelGt = groundTruthByLabel.get(label) || [];
+    const labelPreds = [...(predictionsByLabel.get(label) || [])].sort(comparePredictions);
     const used = new Set();
     const points = [];
     for (const prediction of labelPreds) {
@@ -198,8 +236,8 @@ function evaluateDetections({ predictionRows = [], groundTruthRows = [], iouThre
     let fn = 0;
     for (const imageId of imageIds) {
       const matched = matchAtThreshold(
-        predictions.filter((row) => row.imageId === imageId),
-        groundTruth.filter((row) => row.imageId === imageId),
+        predictionsByImage.get(imageId) || [],
+        groundTruthByImage.get(imageId) || [],
         confidence,
         iouThreshold,
       );

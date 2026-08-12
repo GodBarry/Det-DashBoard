@@ -29,8 +29,27 @@ function createInferenceWorker({
   uniqueExistingPaths,
   logger,
   clock,
+  sidecarClient,
 }) {
   const nowIso = () => new Date(clock.now()).toISOString();
+
+  async function insertInferenceRows(client, jobId, rows, artifactPathOf, chunkSize = 200) {
+    for (let offset = 0; offset < rows.length; offset += chunkSize) {
+      const chunk = rows.slice(offset, offset + chunkSize).map((row) => ({
+        project_image_id: row.projectImageId || null,
+        predictions_json: row.predictions || [],
+        artifact_path: artifactPathOf(row) || "",
+      }));
+      await client.query(
+        `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
+         SELECT $1, item.project_image_id, item.predictions_json, item.artifact_path
+         FROM jsonb_to_recordset($2::jsonb) AS item(
+           project_image_id uuid, predictions_json jsonb, artifact_path text
+         )`,
+        [jobId, JSON.stringify(chunk)],
+      );
+    }
+  }
 
   function recognitionClassesForJob(job) {
     const params = typeof job.params_json === "string" ? JSON.parse(job.params_json || "{}") : (job.params_json || {});
@@ -108,13 +127,7 @@ function createInferenceWorker({
 
     await transaction(async (client) => {
       await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
-      for (const row of predictionRows) {
-        await client.query(
-          `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
-           VALUES ($1,$2,$3,$4)`,
-          [job.id, row.projectImageId || null, JSON.stringify(row.predictions), predictionsPath],
-        );
-      }
+      await insertInferenceRows(client, job.id, predictionRows, () => predictionsPath);
       const metrics = await computeDetectionMetrics(job, predictionRows);
       const nextParams = {
         ...params,
@@ -329,13 +342,7 @@ function createInferenceWorker({
 
     await transaction(async (client) => {
       await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
-      for (const row of bestRows) {
-        await client.query(
-          `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
-           VALUES ($1,$2,$3,$4)`,
-          [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), predictionsPath],
-        );
-      }
+      await insertInferenceRows(client, job.id, bestRows, () => predictionsPath);
       const nextParams = {
         ...params,
         output: {
@@ -413,6 +420,19 @@ function createInferenceWorker({
       }
     }
     const labels = Array.from(new Set([...gtRows.map((row) => row.metricLabel), ...detections.map((row) => row.metricLabel)].filter(Boolean)));
+    const groupBy = (rows, keyOf) => {
+      const grouped = new Map();
+      for (const row of rows) {
+        const key = keyOf(row);
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(row);
+      }
+      return grouped;
+    };
+    const gtByLabel = groupBy(gtRows, (row) => row.metricLabel);
+    const detectionsByLabel = groupBy(detections, (row) => row.metricLabel);
+    const gtByImageAndLabel = groupBy(gtRows, (row) => `${row.project_image_id}\u0000${row.metricLabel}`);
+    for (const rows of detectionsByLabel.values()) rows.sort((a, b) => b.score - a.score);
     const thresholds = Array.from({ length: 10 }, (_, index) => Number((0.5 + index * 0.05).toFixed(2)));
     const apByThreshold = [];
     let precision50 = 0;
@@ -423,13 +443,13 @@ function createInferenceWorker({
       let thresholdGt = 0;
       const labelAps = [];
       for (const label of labels) {
-        const labelGts = gtRows.filter((gt) => gt.metricLabel === label);
-        const labelPreds = detections.filter((prediction) => prediction.metricLabel === label).sort((a, b) => b.score - a.score);
+        const labelGts = gtByLabel.get(label) || [];
+        const labelPreds = detectionsByLabel.get(label) || [];
         thresholdGt += labelGts.length;
         const used = new Set();
         const points = [];
         for (const prediction of labelPreds) {
-          const candidates = (gtByImage.get(prediction.projectImageId) || []).filter((gt) => gt.metricLabel === label);
+          const candidates = gtByImageAndLabel.get(`${prediction.projectImageId}\u0000${label}`) || [];
           let best = null;
           let bestIou = 0;
           for (const gt of candidates) {
@@ -487,9 +507,12 @@ function createInferenceWorker({
     if (!envId) throw new Error("YOLO 推理缺少运行环境资产");
     let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
     if (!env) throw new Error("YOLO 推理运行环境不存在");
-    env = await pythonEnvService.resolveRuntimePythonEnv(env);
-    if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);  const capabilities = env.capabilities_json || {};
-    if (!capabilities.ultralytics_detect) throw new Error("所选运行环境未检测到 ultralytics，不能执行 YOLO 推理");
+    if (!sidecarClient?.hasYolo) {
+      env = await pythonEnvService.resolveRuntimePythonEnv(env);
+      if (!fs.existsSync(env.python_path)) throw new Error(`YOLO 推理 Python 不存在：${env.python_path}`);
+      const capabilities = env.capabilities_json || {};
+      if (!capabilities.ultralytics_detect) throw new Error("所选运行环境未检测到 ultralytics，不能执行 YOLO 推理");
+    }
     const weightPath = await modelService.findWeightArtifact(job.model_version_id);
     if (!weightPath) throw new Error("YOLO 推理缺少可用模型权重文件");
 
@@ -516,7 +539,16 @@ function createInferenceWorker({
       device,
       recognitionClasses: inputClassesForJob(job),
     };
-    const runner = [
+    let result;
+    if (sidecarClient?.hasYolo) {
+      await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在通过 Thor GPU 侧车执行 YOLO 推理", job.id]);
+      result = await sidecarClient.yoloBatch({
+        weights: weightPath, manifestPath, outputPath: predictionsPath,
+        conf: runnerConfig.conf, iou: runnerConfig.iou, imgsz: runnerConfig.imgsz,
+        batch: runnerConfig.batch, device: runnerConfig.device, jobId: job.id,
+      });
+    } else {
+      const runner = [
       "import json, os, sys",
       "from ultralytics import YOLO",
       `cfg = json.loads(${JSON.stringify(JSON.stringify(runnerConfig))})`,
@@ -559,14 +591,15 @@ function createInferenceWorker({
       "with open(cfg['outputPath'], 'w', encoding='utf-8') as f:",
       "    json.dump(payload, f, ensure_ascii=False, indent=2)",
       "print(json.dumps({'imageCount': payload['imageCount'], 'predictionCount': payload['predictionCount'], 'outputPath': cfg['outputPath']}, ensure_ascii=False))",
-    ].join("\n");
-    fs.writeFileSync(runnerPath, runner, "utf8");
-    await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`正在执行 YOLO 推理：${env.python_path}`, job.id]);
-    const result = await runChildProcess(env.python_path, [runnerPath], {
-      cwd: outputRoot,
-      env: { ...processRef.env, PYTHONIOENCODING: "utf-8" },
-      onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
-    });
+      ].join("\n");
+      fs.writeFileSync(runnerPath, runner, "utf8");
+      await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", [`正在执行 YOLO 推理：${env.python_path}`, job.id]);
+      result = await runChildProcess(env.python_path, [runnerPath], {
+        cwd: outputRoot,
+        env: { ...processRef.env, PYTHONIOENCODING: "utf-8" },
+        onSpawn: (child) => query("UPDATE runtime_inference_jobs SET process_pid=$1 WHERE id=$2", [child.pid || null, job.id]).catch(() => {}),
+      });
+    }
     const summaryLine = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || "{}";
     let summary = {};
     try { summary = JSON.parse(summaryLine); } catch { summary = {}; }
@@ -578,13 +611,7 @@ function createInferenceWorker({
 
     await transaction(async (client) => {
       await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
-      for (const row of rows) {
-        await client.query(
-          `INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path)
-           VALUES ($1,$2,$3,$4)`,
-          [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), predictionsPath],
-        );
-      }
+      await insertInferenceRows(client, job.id, rows, () => predictionsPath);
       const nextParams = {
         ...params,
         output: {
@@ -625,8 +652,40 @@ function createInferenceWorker({
     if (!envId) throw new Error("DINO inference requires a registered Python environment");
     let env = (await query("SELECT * FROM runtime_envs WHERE id=$1", [envId])).rows[0];
     if (!env) throw new Error(`DINO inference environment does not exist: ${envId}`);
-    env = await pythonEnvService.resolveRuntimePythonEnv(env);
-    if (!env.python_path || !fs.existsSync(env.python_path)) throw new Error(`DINO inference Python does not exist: ${env.python_path || "(empty)"}`);
+    if (!sidecarClient?.hasDino) {
+      env = await pythonEnvService.resolveRuntimePythonEnv(env);
+      if (!env.python_path || !fs.existsSync(env.python_path)) throw new Error(`DINO inference Python does not exist: ${env.python_path || "(empty)"}`);
+    }
+
+    if (sidecarClient?.hasDino) {
+      const input = params.input || {};
+      const manifestPath = input.manifestPath || path.join(job.output_root, "input-cache", "manifest.json");
+      if (!fs.existsSync(manifestPath)) throw new Error(`DINO inference input manifest does not exist: ${manifestPath}`);
+      const outputRoot = job.output_root || path.join(storageRoot, "runtime", "inference", job.id);
+      const predictionsPath = path.join(outputRoot, "output", "predictions.json");
+      await query("UPDATE runtime_inference_jobs SET progress=35, message=$1 WHERE id=$2", ["正在通过 Thor GPU 侧车执行 DINO 推理", job.id]);
+      const summary = await sidecarClient.dinoBatch({
+        jobId: job.id,
+        scoreThr: Number(params.conf ?? params.scoreThreshold ?? 0.25),
+        saveVisualization: Boolean(params.output?.saveVisualization ?? params.saveVisualization),
+      });
+      if (!fs.existsSync(predictionsPath)) throw new Error("DINO 侧车未生成 predictions.json");
+      const predictions = JSON.parse(fs.readFileSync(predictionsPath, "utf8"));
+      const rows = filterPredictionRows(job, Array.isArray(predictions.images) ? predictions.images : []);
+      const predictionCount = Number(predictions.predictionCount ?? rows.reduce((total, row) => total + (row.predictions || []).length, 0));
+      const metrics = await computeDetectionMetrics(job, rows);
+      await transaction(async (client) => {
+        await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
+        await insertInferenceRows(client, job.id, rows, () => predictionsPath);
+        const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, resultCount: rows.length, predictionCount, completedAt: nowIso(), metrics, runnerSummary: summary } };
+        await client.query(
+          "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",
+          [JSON.stringify(nextParams), JSON.stringify(metrics), `DINO inference completed: ${rows.length} images, ${predictionCount} boxes`, job.id],
+        );
+      });
+      await runtimeAssetLinkService.recordSuccess(job, metrics);
+      return;
+    }
 
     const resolved = await algorithmRuntimeSource.resolveTrainingAlgorithmSource(params);
     if (!resolved) throw new Error(`DINO algorithm asset is not registered: ${params.algorithmAssetId || "(missing id)"}`);
@@ -799,10 +858,7 @@ function createInferenceWorker({
     const metrics = await computeDetectionMetrics(job, rows);
     await transaction(async (client) => {
       await client.query("DELETE FROM runtime_inference_results WHERE inference_job_id=$1", [job.id]);
-      for (const row of rows) await client.query(
-        "INSERT INTO runtime_inference_results (inference_job_id, project_image_id, predictions_json, artifact_path) VALUES ($1,$2,$3,$4)",
-        [job.id, row.projectImageId || null, JSON.stringify(row.predictions || []), row.visualizationPath || predictionsPath],
-      );
+      await insertInferenceRows(client, job.id, rows, (row) => row.visualizationPath || predictionsPath);
       const nextParams = { ...params, output: { ...(params.output || {}), predictionsPath, visualizationDir, resultCount: rows.length, predictionCount, completedAt: nowIso(), metrics, command: [env.python_path, ...commandArgs], stdout: result.stdout, stderr: result.stderr, executionLog: result.combined || `${result.stdout || ""}${result.stderr || ""}` } };
       await client.query(
         "UPDATE runtime_inference_jobs SET status='done', progress=100, process_pid=NULL, params_json=$1, metrics_json=$2, message=$3, finished_at=now() WHERE id=$4",

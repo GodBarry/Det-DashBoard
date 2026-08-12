@@ -59,13 +59,12 @@ test("moveRuntimeJobPriority normalizes and swaps adjacent priorities", async ()
   const result = await service.moveRuntimeJobPriority("runtime_inference_jobs", "job-b", "up", { id: "admin" });
 
   assert.equal(result, returned);
-  assert.deepEqual(calls.slice(1, 6).map(({ params }) => params), [
-    [3, "job-a"],
-    [2, "job-b"],
-    [1, "job-c"],
-    [3, "job-b"],
-    [2, "job-a"],
+  assert.deepEqual(calls[1].params, [
+    ["job-a", "job-b", "job-c"],
+    [2, 3, 1],
   ]);
+  assert.match(calls[1].sql, /FROM unnest\(\$1::uuid\[\], \$2::int\[\]\)/);
+  assert.deepEqual(calls[2].params, ["job-b"]);
   assert.doesNotMatch(calls[0].sql, /created_by_user_id/);
   assert.deepEqual(calls[0].params, []);
 });

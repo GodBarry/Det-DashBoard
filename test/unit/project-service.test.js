@@ -107,7 +107,27 @@ test("listProjects preserves scope and active-or-latest label version SQL", asyn
   assert.equal((queryCall.sql.match(/EXISTS \(SELECT 1 FROM image_annotations a WHERE a\.label_version_id=lv\.id\)/g) || []).length, 2);
   assert.match(queryCall.sql, /COALESCE\(p\.active_label_version_id/);
   assert.match(queryCall.sql, /COALESCE\(c\.active_label_version_id/);
-  assert.match(queryCall.sql, /a\.label_version_id=COALESCE\(p\.active_label_version_id/);
+  assert.match(queryCall.sql, /avr\.label_version_id=subtree\.effective_label_version_id/);
+});
+
+test("listProjects coalesces concurrent identical catalog reads", async () => {
+  let queryCount = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const query = async () => {
+    queryCount += 1;
+    await gate;
+    return { rows: [{ id: "project-2" }] };
+  };
+  const { service } = createFixture(query);
+  const actor = { id: "user-2", role: "admin" };
+
+  const requests = Array.from({ length: 8 }, () => service.listProjects(false, actor, "all"));
+  release();
+  const results = await Promise.all(requests);
+
+  assert.equal(queryCount, 1);
+  assert.ok(results.every((rows) => rows[0]?.id === "project-2"));
 });
 
 test("trash listing returns only deleted subtree roots", async () => {

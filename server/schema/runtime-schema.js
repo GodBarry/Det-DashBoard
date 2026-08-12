@@ -3,6 +3,7 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT NOT NULL DEFAULT 'normal'",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES projects(id) ON DELETE SET NULL",
+    "ALTER TABLE projects DROP COLUMN IF EXISTS redundancy_rate",
     "CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)",
     "CREATE INDEX IF NOT EXISTS idx_image_assets_quick_hash_size ON image_assets(quick_hash, file_size)",
     "ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
@@ -11,9 +12,11 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_size BIGINT",
     "ALTER TABLE project_images ADD COLUMN IF NOT EXISTS source_mtime_ms BIGINT",
+    "ALTER TABLE project_images DROP COLUMN IF EXISTS redundancy_rate",
     "CREATE INDEX IF NOT EXISTS idx_project_images_project_source ON project_images(project_id, source_path)",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     "ALTER TABLE project_videos ADD COLUMN IF NOT EXISTS source_path TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE project_videos DROP COLUMN IF EXISTS redundancy_rate",
     "ALTER TABLE video_assets ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE label_versions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
     `CREATE TABLE IF NOT EXISTS app_users (
@@ -351,8 +354,6 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
   const runtimeStatements = process.env.RUN_EXTENDED_SCHEMA === "true"
     ? statements
     : statements.slice(0, annotationSchemaEnd >= 0 ? annotationSchemaEnd + 1 : 15);
-  await query("SET statement_timeout = '5000ms'");
-  await query("SET lock_timeout = '2000ms'");
   for (let index = 0; index < runtimeStatements.length; index += 1) {
     const sql = runtimeStatements[index];
     try {
@@ -757,6 +758,36 @@ async function ensureRuntimeSchema({ query, authService, seedMlRuntimeConfig }) 
     if (process.env.RUN_ML_SCHEMA === "true") await seedMlRuntimeConfig();
   }
   if (process.env.RUN_EXTENDED_SCHEMA === "true") await seedMlRuntimeConfig();
+
+  const performanceIndexStatements = [
+    `CREATE INDEX IF NOT EXISTS idx_projects_parent_active
+       ON projects(parent_id) WHERE deleted_at IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_project_images_project_created_active
+       ON project_images(project_id, created_at DESC, id) WHERE deleted_at IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_import_batches_project_created_active
+       ON import_batches(project_id, created_at DESC) WHERE deleted_at IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_label_versions_project_created_active
+       ON label_versions(project_id, created_at DESC) WHERE deleted_at IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_image_ann_version_image
+       ON image_annotations(label_version_id, project_image_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_image_ann_version_label
+       ON image_annotations(label_version_id, label)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_inference_jobs_queue
+       ON runtime_inference_jobs(status, priority DESC, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_inference_results_job_created
+       ON runtime_inference_results(inference_job_id, created_at, id)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_inference_results_job_image
+       ON runtime_inference_results(inference_job_id, project_image_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_inference_logs_job_id_desc
+       ON runtime_inference_logs(job_id, id DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_training_jobs_queue
+       ON runtime_training_jobs(status, priority DESC, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_training_logs_job_id_desc
+       ON runtime_training_logs(job_id, id DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_runtime_training_metrics_job_id_desc
+       ON runtime_training_metrics(job_id, id DESC)`,
+  ];
+  for (const sql of performanceIndexStatements) await query(sql);
 
   const modelArtifactMigrationStatements = [
     `ALTER TABLE IF EXISTS runtime_training_jobs

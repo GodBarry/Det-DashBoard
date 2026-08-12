@@ -1,0 +1,13 @@
+[Unit]
+Description=Det-DashBoard Thor YOLO inference sidecar
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/cngc209/det-dashboard-data/config/sidecars.env
+ExecStart=/usr/bin/bash -lc 'exec "$SIDECAR_PYTHON" /home/cngc209/det-dashboard/deploy/thor/inference-sidecar.py --host 172.17.0.1 --port 4178 --storage-root "$SIDECAR_STORAGE_ROOT" --python "$SIDECAR_PYTHON"'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

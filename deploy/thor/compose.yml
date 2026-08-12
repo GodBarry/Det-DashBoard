@@ -1,0 +1,114 @@
+# Podman-compatible compose file for Jetson Thor production.
+# Usage (from repository root):
+#   podman-compose --env-file deploy/thor/.env -f deploy/thor/compose.yml up -d
+#
+# Key differences from docker-compose.portable.yml:
+#   - Removed init:true (podman unsupported)
+#   - Removed cap_drop/cap_add (rootless podman unsupported)
+#   - Removed security_opt:no-new-privileges (rootless podman unsupported)
+#   - Removed permissions service (rootless podman runs as host user, no chown needed)
+#   - depends_on: service_started instead of service_healthy (podman-compose 1.0.6)
+
+services:
+  app:
+    container_name: det-dashboard-podman-app
+    build:
+      context: ../..
+    image: ${APP_IMAGE:-det-dashboard:local-arm64}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    userns_mode: keep-id
+    depends_on:
+      postgres:
+        condition: service_started
+      minio:
+        condition: service_started
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4177
+      DATA_ROOT: /data/datasets
+      DATA_ROOT_DISPLAY: ${DATA_ROOT_DISPLAY:-/data/datasets}
+      BROWSE_ROOT: /host/browse
+      BROWSE_ROOT_DISPLAY: ${BROWSE_ROOT_DISPLAY:-/}
+      HOST_DIALOG_URL: ${HOST_DIALOG_URL:-}
+      NATIVE_DIALOG_MODE: ${NATIVE_DIALOG_MODE:-disabled}
+      STORAGE_ROOT: /data/storage
+      FALLBACK_STORAGE_ROOT: /data/storage
+      EXPORT_ROOT: /data/exports
+      EXPORT_ROOT_DISPLAY: ${EXPORT_ROOT_DISPLAY:-./exports}
+      DATABASE_URL: postgres://${POSTGRES_USER:-det}:${POSTGRES_PASSWORD:-det_password}@postgres:5432/${POSTGRES_DB:-det_dashboard}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-zbh-datasets}
+      OBJECT_STORE_WRITE_FALLBACK: ${OBJECT_STORE_WRITE_FALLBACK:-false}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_IDLE_TIMEOUT_MS: ${DB_POOL_IDLE_TIMEOUT_MS:-30000}
+      DB_POOL_CONNECTION_TIMEOUT_MS: ${DB_POOL_CONNECTION_TIMEOUT_MS:-10000}
+      DB_POOL_MAX_LIFETIME_SECONDS: ${DB_POOL_MAX_LIFETIME_SECONDS:-300}
+      INFERENCE_WORKER_ENABLED: "true"
+      TRAINING_WORKER_ENABLED: "false"
+      # ── 推理/训练 HTTP 侧车 ──
+      # 设置为宿主机侧车地址（Podman 中通过 host.containers.internal 访问宿主机）
+      INFERENCE_SIDECAR_URL: ${INFERENCE_SIDECAR_URL:-http://host.containers.internal:4178}
+      DINO_SIDECAR_URL: ${DINO_SIDECAR_URL:-http://host.containers.internal:4181}
+      # 宿主机上 storage 目录的绝对路径，侧车用于路径翻译
+      HOST_STORAGE_ROOT: ${HOST_STORAGE_ROOT:-}
+      # ── 宿主机数据集与模型目录 ──
+      HOST_DATASETS_ROOT: ${HOST_DATASETS_ROOT:-}
+      HOST_MODELS_ROOT: ${HOST_MODELS_ROOT:-}
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-5173}:4177"
+    volumes:
+      - ${DATASETS_DIR:-/home/cngc209/Datasets}:/data/datasets:ro
+      - ${HOST_BROWSE_ROOT:-/home/cngc209/Datasets}:/host/browse:ro
+      - ${APP_STORAGE_DIR:-/home/cngc209/det-dashboard-data/storage}:/data/storage
+      - ${EXPORTS_DIR:-/home/cngc209/det-dashboard-data/exports}:/data/exports
+      # ── 宿主机数据集 & 模型（只读） ──
+      - ${HOST_DATASETS_ROOT:-/home/cngc209/Datasets}:/host/datasets:ro
+      - ${HOST_MODELS_ROOT:-/home/cngc209/Models}:/host/models:ro
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  postgres:
+    container_name: det-dashboard-podman-postgres
+    image: ${POSTGRES_IMAGE:-docker.io/library/postgres:16}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-det_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-det}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-det_password}
+    ports:
+      - "${DB_BIND_ADDRESS:-127.0.0.1}:${DB_PORT:-55432}:5432"
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/home/cngc209/det-dashboard-data/postgres}:/var/lib/postgresql/data
+      - ../../db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    container_name: det-dashboard-podman-minio
+    image: ${MINIO_IMAGE:-docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_HOST_PORT:-59000}:9000"
+      - "${MINIO_CONSOLE_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-59001}:9001"
+    volumes:
+      - ${MINIO_DATA_DIR:-/home/cngc209/det-dashboard-data/minio}:/data
+    healthcheck:
+      test: [CMD-SHELL, "curl -f http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped

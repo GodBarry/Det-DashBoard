@@ -139,8 +139,6 @@ test("clearModelAssets executes only for the exact token and preserves destructi
     ["query", "DELETE FROM model_files"],
     ["query", "DELETE FROM model_revisions"],
     ["query", "UPDATE model_clusters SET deleted_at=now(), updated_at=now() WHERE deleted_at IS NULL"],
-    ["existsSync", modelsRoot],
-    ["existsSync", cacheRoot],
   ]);
 });
 

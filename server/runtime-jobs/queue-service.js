@@ -1,4 +1,15 @@
 function createRuntimeQueueService({ query, transaction, accessControl }) {
+  async function updatePriorities(client, tableName, rows) {
+    if (!rows.length) return;
+    await client.query(
+      `UPDATE ${tableName} AS jobs
+       SET priority=updates.priority
+       FROM unnest($1::uuid[], $2::int[]) AS updates(id, priority)
+       WHERE jobs.id=updates.id`,
+      [rows.map((row) => row.id), rows.map((row) => row.priority)],
+    );
+  }
+
   async function moveRuntimeJobPriority(tableName, jobId, direction, actor) {
     const allowedTables = new Set(["runtime_training_jobs", "runtime_inference_jobs"]);
     if (!allowedTables.has(tableName)) throw new Error("unsupported queue type");
@@ -21,13 +32,10 @@ function createRuntimeQueueService({ query, transaction, accessControl }) {
       if (targetIndex < 0 || targetIndex >= rows.length) return rows[index];
 
       const normalized = rows.map((row, rowIndex) => ({ ...row, priority: rows.length - rowIndex }));
-      for (const row of normalized) {
-        await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [row.priority, row.id]);
-      }
       const current = normalized[index];
       const target = normalized[targetIndex];
-      await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [target.priority, current.id]);
-      await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [current.priority, target.id]);
+      [current.priority, target.priority] = [target.priority, current.priority];
+      await updatePriorities(client, tableName, normalized);
       return (await client.query(`SELECT * FROM ${tableName} WHERE id=$1`, [jobId])).rows[0];
     });
   }
@@ -38,16 +46,16 @@ function createRuntimeQueueService({ query, transaction, accessControl }) {
     const ids = [...new Set((Array.isArray(orderedIds) ? orderedIds : []).map(String).filter(Boolean))];
     if (!ids.length) throw new Error("orderedIds is required");
     return transaction(async (client) => {
-      const ownerFilter = accessControl.isAdmin(actor)
-        ? { sql: "", params: [] }
-        : { sql: "WHERE created_by_user_id=$1", params: [actor.id] };
-      const accessible = (await client.query(`SELECT id FROM ${tableName} ${ownerFilter.sql}`, ownerFilter.params)).rows;
+      const isAdmin = accessControl.isAdmin(actor);
+      const accessible = (await client.query(
+        `SELECT id FROM ${tableName}
+         WHERE id = ANY($1::uuid[])${isAdmin ? "" : " AND created_by_user_id=$2"}`,
+        isAdmin ? [ids] : [ids, actor.id],
+      )).rows;
       const accessibleIds = new Set(accessible.map((row) => String(row.id)));
       if (ids.some((id) => !accessibleIds.has(id))) throw new Error("queue contains an inaccessible job");
       const priorityBase = ids.length;
-      for (let index = 0; index < ids.length; index += 1) {
-        await client.query(`UPDATE ${tableName} SET priority=$1 WHERE id=$2`, [priorityBase - index, ids[index]]);
-      }
+      await updatePriorities(client, tableName, ids.map((id, index) => ({ id, priority: priorityBase - index })));
       return ids;
     });
   }
