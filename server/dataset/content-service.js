@@ -236,6 +236,7 @@ function createDatasetContentService({
     const annotations = await query(
       `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h, a.shape_type, a.difficult, a.score
        FROM image_annotations a
+       JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
        JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
        WHERE ${annWhere.join(" AND ")}
        ORDER BY a.id`,
