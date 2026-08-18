@@ -88,7 +88,7 @@ function createDatasetContentService({
        FROM image_annotations a
        JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
        JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
-       WHERE a.project_image_id=$1 AND a.label_version_id=p.active_label_version_id
+       WHERE a.project_image_id=$1
        ORDER BY a.id`,
       [projectImageId],
     );
@@ -104,7 +104,7 @@ function createDatasetContentService({
        FROM image_annotations a
        JOIN project_images pi ON pi.id=a.project_image_id AND pi.deleted_at IS NULL
        JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
-       WHERE p.id=$1 AND pi.id = ANY($2::uuid[]) AND a.label_version_id=p.active_label_version_id
+       WHERE p.id=$1 AND pi.id = ANY($2::uuid[])
        ORDER BY a.project_image_id, a.id`,
       [projectId, ids],
     );
@@ -194,9 +194,8 @@ function createDatasetContentService({
         COALESCE(NULLIF(pi.source_path, ''),
           CASE WHEN ib.source_path IS NOT NULL THEN regexp_replace(ib.source_path, '/+$', '') || '/' || pi.display_name ELSE pi.display_name END
         ) AS absolute_path,
-        ${sequenceMode ? "0::int" : `(SELECT count(*)::int FROM image_annotations a
-         JOIN projects p ON p.active_label_version_id = a.label_version_id
-         WHERE p.id = pi.project_id AND p.deleted_at IS NULL AND a.project_image_id = pi.id)`} AS annotation_count
+         ${sequenceMode ? "0::int" : `(SELECT count(*)::int FROM image_annotations a
+         WHERE a.project_image_id = pi.id)`} AS annotation_count
        FROM project_images pi
        JOIN projects p ON p.id = pi.project_id
        JOIN image_assets ia ON ia.id = pi.image_asset_id
@@ -237,7 +236,7 @@ function createDatasetContentService({
     const annotations = await query(
       `SELECT a.id, a.project_image_id, a.label, a.bbox_x, a.bbox_y, a.bbox_w, a.bbox_h, a.shape_type, a.difficult, a.score
        FROM image_annotations a
-       JOIN projects p ON p.active_label_version_id = a.label_version_id
+       JOIN projects p ON p.id=pi.project_id AND p.deleted_at IS NULL
        WHERE ${annWhere.join(" AND ")}
        ORDER BY a.id`,
       annParams,

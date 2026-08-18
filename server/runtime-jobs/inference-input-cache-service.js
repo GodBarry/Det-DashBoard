@@ -81,8 +81,8 @@ function createInferenceInputCacheService({
       sqlParams.push(labelValues);
       where.push(`EXISTS (
       SELECT 1 FROM image_annotations a
-      JOIN projects p ON p.active_label_version_id = a.label_version_id
-      WHERE p.id = pi.project_id AND a.project_image_id = pi.id AND a.label = ANY($${sqlParams.length})
+      JOIN projects p ON p.id = pi.project_id AND p.deleted_at IS NULL
+      WHERE a.project_image_id = pi.id AND a.label = ANY($${sqlParams.length})
     )`);
     }
 
