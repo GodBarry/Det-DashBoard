@@ -6,6 +6,8 @@ import {
   buildProjectById,
   buildProjectLastImportAt,
   getCreateProjectContext,
+  filterTechnicalDatasetFolders,
+  resolveDatasetWorkspaceProject,
   shouldOpenProjectWorkspace,
 } from "./project-catalog-core.js";
 import { recordDatasetActivity } from "./datasetActivityLog.js";
@@ -32,20 +34,21 @@ export function useProjectCatalogController({
   const [homeExpandedIds, setHomeExpandedIds] = useState(() => new Set());
 
   const projectById = useMemo(() => buildProjectById(projects), [projects]);
+  const displayProjects = useMemo(() => filterTechnicalDatasetFolders(projects), [projects]);
   const activeProject = activeProjectId ? projectById.get(activeProjectId) || null : null;
   const projectLastImportAt = useMemo(() => buildProjectLastImportAt(projects), [projects]);
   const currentFolder = currentFolderId ? projectById.get(currentFolderId) : null;
   const visibleProjects = useMemo(
-    () => projects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
-    [projects, currentFolderId],
+    () => displayProjects.filter((project) => (project.parent_id || null) === (currentFolderId || null)),
+    [displayProjects, currentFolderId],
   );
   const breadcrumbs = useMemo(
     () => buildProjectBreadcrumbs(currentFolder, projectById, 3),
     [currentFolder, projectById],
   );
   const activeChildProjects = useMemo(
-    () => activeProject ? projects.filter((project) => (project.parent_id || null) === activeProject.id) : [],
-    [projects, activeProject],
+    () => activeProject ? displayProjects.filter((project) => (project.parent_id || null) === activeProject.id) : [],
+    [displayProjects, activeProject],
   );
   const activeBreadcrumbs = useMemo(
     () => buildProjectBreadcrumbs(activeProject, projectById, 4),
@@ -210,7 +213,8 @@ export function useProjectCatalogController({
   }
 
   function openProject(project) {
-    setActiveProjectId(project.id);
+    const workspaceProject = resolveDatasetWorkspaceProject(project, projects);
+    setActiveProjectId(workspaceProject.id);
     setCurrentFolderId(project.parent_id || null);
     setView("workspace");
     resetWorkspace();
@@ -226,18 +230,20 @@ export function useProjectCatalogController({
   }
 
   function goUpFolder() {
-    if (!activeProject?.parent_id) {
+    const displayProject = activeBreadcrumbs[activeBreadcrumbs.length - 1] || activeProject;
+    if (!displayProject?.parent_id) {
       goHome();
       return;
     }
 
-    const parent = projectById.get(activeProject.parent_id);
+    const parent = projectById.get(displayProject.parent_id);
     if (parent) openProject(parent);
     else goHome();
   }
 
   function openHomeFolder(project) {
-    if (shouldOpenProjectWorkspace(project)) {
+    const workspaceProject = resolveDatasetWorkspaceProject(project, projects);
+    if (workspaceProject?.id !== project?.id || shouldOpenProjectWorkspace(project)) {
       openProject(project);
       return;
     }
@@ -266,6 +272,7 @@ export function useProjectCatalogController({
     deleteProjectPermanently,
     editingProjectId,
     editingProjectName,
+    displayProjects,
     emptyProjectTrash,
     goHome,
     goUpFolder,

@@ -70,6 +70,7 @@ const {
   deleteProjectPermanently,
   editingProjectId,
   editingProjectName,
+  displayProjects,
   emptyProjectTrash,
   goHome,
   goUpFolder,
@@ -323,7 +324,7 @@ loadMlPlatform();
 }
 const datasetViewModel = {
 
-projects,
+projects: displayProjects,
 
 currentFolder,
 

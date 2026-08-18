@@ -119,3 +119,27 @@ test("leaf projects always open a workspace even before assets are imported", as
   assert.equal(shouldOpenProjectWorkspace({ child_count: 0, image_count: 86, video_count: 0 }), true);
   assert.equal(shouldOpenProjectWorkspace({ child_count: 2, image_count: 86, video_count: 0 }), false);
 });
+
+test("technical storage folders stay hidden while their image project remains resolvable", async () => {
+  const {
+    buildProjectBreadcrumbs,
+    buildProjectById,
+    filterTechnicalDatasetFolders,
+    resolveDatasetWorkspaceProject,
+  } = await coreModulePromise;
+  const rows = [
+    { id: "scene", name: "沙漠场景", parent_id: null, child_count: 2 },
+    { id: "images", name: "images", parent_id: "scene", child_count: 0 },
+    { id: "jsons", name: "JSONS", parent_id: "scene", child_count: 0 },
+    { id: "visible", name: "验证集", parent_id: null, child_count: 0 },
+  ];
+  const byId = buildProjectById(rows);
+
+  assert.deepEqual(filterTechnicalDatasetFolders(rows).map((row) => row.id), ["scene", "visible"]);
+  assert.equal(resolveDatasetWorkspaceProject(rows[0], rows)?.id, "images");
+  assert.equal(resolveDatasetWorkspaceProject(rows[3], rows)?.id, "visible");
+  assert.deepEqual(
+    buildProjectBreadcrumbs(byId.get("images"), byId, 4).map((row) => row.id),
+    ["scene"],
+  );
+});

@@ -2,6 +2,22 @@ export function buildProjectById(projects) {
   return new Map(projects.map((project) => [project.id, project]));
 }
 
+export function isTechnicalDatasetFolder(project) {
+  const name = String(project?.name || "").trim().toLowerCase();
+  return name === "images" || name === "jsons";
+}
+
+export function filterTechnicalDatasetFolders(projects) {
+  return (projects || []).filter((project) => !isTechnicalDatasetFolder(project));
+}
+
+export function resolveDatasetWorkspaceProject(project, projects) {
+  if (!project) return project;
+  const children = (projects || []).filter((row) => row.parent_id === project.id);
+  if (children.some((row) => !isTechnicalDatasetFolder(row))) return project;
+  return children.find((row) => String(row.name || "").trim().toLowerCase() === "images") || project;
+}
+
 export function buildProjectLastImportAt(projects) {
   const childrenByParent = new Map();
 
@@ -37,7 +53,7 @@ export function buildProjectBreadcrumbs(project, projectById, limit) {
   const seen = new Set();
 
   while (cursor && !seen.has(cursor.id) && rows.length < limit) {
-    rows.unshift(cursor);
+    if (!isTechnicalDatasetFolder(cursor)) rows.unshift(cursor);
     seen.add(cursor.id);
     cursor = cursor.parent_id ? projectById.get(cursor.parent_id) : null;
   }
