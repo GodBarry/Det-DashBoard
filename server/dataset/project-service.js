@@ -5,7 +5,6 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
   if (!resourceAccess || typeof resourceAccess.scopeSql !== "function") {
     throw new TypeError("createProjectService requires resourceAccess");
   }
-  const pendingProjectLists = new Map();
 
   async function projectDepth(projectId) {
     const result = await query(
@@ -73,19 +72,6 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
   }
 
   async function listProjects(trash = false, actor, scope = "mine") {
-    const requestKey = [trash ? "trash" : "active", scope, actor?.id || "anonymous", actor?.role || ""].join(":");
-    const pending = pendingProjectLists.get(requestKey);
-    if (pending) return pending;
-    const operation = listProjectsFromDatabase(trash, actor, scope);
-    pendingProjectLists.set(requestKey, operation);
-    try {
-      return await operation;
-    } finally {
-      if (pendingProjectLists.get(requestKey) === operation) pendingProjectLists.delete(requestKey);
-    }
-  }
-
-  async function listProjectsFromDatabase(trash, actor, scope) {
     const scoped = resourceAccess.scopeSql({ table: "projects", alias: "p", actor, scope, params: [] });
     const result = await query(
       `WITH RECURSIVE scoped_projects AS (
@@ -119,12 +105,8 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
          JOIN projects c ON c.parent_id = subtree.project_id
          JOIN scoped_projects sp ON sp.id = c.id
        ),
-       image_rollups AS (
-         SELECT subtree.root_id,
-                count(DISTINCT pi.image_asset_id)::int AS image_count,
-                COALESCE(jsonb_agg(DISTINCT pi.scene) FILTER (WHERE pi.scene IS NOT NULL AND pi.scene<>''), '[]'::jsonb) AS scenes,
-                COALESCE(jsonb_agg(DISTINCT pi.view) FILTER (WHERE pi.view IS NOT NULL AND pi.view<>''), '[]'::jsonb) AS views,
-                COALESCE(jsonb_agg(DISTINCT pi.modality) FILTER (WHERE pi.modality IS NOT NULL AND pi.modality<>''), '[]'::jsonb) AS modalities
+       image_counts AS (
+         SELECT subtree.root_id, count(DISTINCT pi.image_asset_id)::int AS image_count
          FROM subtree
          JOIN project_images pi ON pi.project_id = subtree.project_id AND pi.deleted_at IS NULL
          GROUP BY subtree.root_id
@@ -135,53 +117,11 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
          JOIN project_videos pv ON pv.project_id = subtree.project_id AND pv.deleted_at IS NULL
          GROUP BY subtree.root_id
        ),
-       annotation_version_rollups AS (
-         SELECT a.label_version_id,
-                count(*)::int AS annotation_count,
-                COALESCE(jsonb_agg(DISTINCT a.label) FILTER (
-                  WHERE a.label IS NOT NULL AND a.label<>'' AND lower(trim(a.label))<>'mosaic'
-                ), '[]'::jsonb) AS labels
-         FROM image_annotations a
-         GROUP BY a.label_version_id
-       ),
        annotation_counts AS (
-         SELECT subtree.root_id, sum(avr.annotation_count)::int AS annotation_count
+         SELECT subtree.root_id, count(a.id)::int AS annotation_count
          FROM subtree
-         JOIN annotation_version_rollups avr ON avr.label_version_id=subtree.effective_label_version_id
+         JOIN image_annotations a ON a.label_version_id = subtree.effective_label_version_id
          GROUP BY subtree.root_id
-       ),
-       annotation_labels AS (
-         SELECT subtree.root_id, jsonb_agg(DISTINCT label.value) AS labels
-         FROM subtree
-         JOIN annotation_version_rollups avr ON avr.label_version_id=subtree.effective_label_version_id
-         CROSS JOIN LATERAL jsonb_array_elements_text(avr.labels) AS label(value)
-         GROUP BY subtree.root_id
-       ),
-       direct_image_counts AS (
-         SELECT pi.project_id, count(DISTINCT pi.image_asset_id)::int AS image_count
-         FROM project_images pi
-         JOIN scoped_projects sp ON sp.id=pi.project_id
-         WHERE pi.deleted_at IS NULL
-         GROUP BY pi.project_id
-       ),
-       direct_video_counts AS (
-         SELECT pv.project_id, count(DISTINCT pv.video_asset_id)::int AS video_count
-         FROM project_videos pv
-         JOIN scoped_projects sp ON sp.id=pv.project_id
-         WHERE pv.deleted_at IS NULL
-         GROUP BY pv.project_id
-       ),
-       direct_annotation_counts AS (
-         SELECT s.project_id, avr.annotation_count
-         FROM subtree s
-         JOIN annotation_version_rollups avr ON avr.label_version_id=s.effective_label_version_id
-         WHERE s.root_id=s.project_id
-       ),
-       child_counts AS (
-         SELECT p.parent_id, count(*)::int AS child_count
-         FROM projects p
-         WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
-         GROUP BY p.parent_id
        ),
        import_times AS (
          SELECT subtree.root_id, max(ib.created_at) AS last_import_at
@@ -190,30 +130,31 @@ function createProjectService({ query, transaction, httpError, resourceAccess })
          GROUP BY subtree.root_id
        )
        SELECT p.*,
-        COALESCE(ir.image_count, 0)::int AS image_count,
+        COALESCE(ic.image_count, 0)::int AS image_count,
         COALESCE(vc.video_count, 0)::int AS video_count,
         COALESCE(ac.annotation_count, 0)::int AS annotation_count,
-        COALESCE(dic.image_count, 0)::int AS direct_image_count,
-        COALESCE(dvc.video_count, 0)::int AS direct_video_count,
-        COALESCE(dac.annotation_count, 0)::int AS direct_annotation_count,
-        COALESCE(ir.image_count, 0)::int AS subtree_image_count,
+        (SELECT count(DISTINCT pi.image_asset_id)::int FROM project_images pi WHERE pi.project_id=p.id AND pi.deleted_at IS NULL) AS direct_image_count,
+        (SELECT count(DISTINCT pv.video_asset_id)::int FROM project_videos pv WHERE pv.project_id=p.id AND pv.deleted_at IS NULL) AS direct_video_count,
+        (SELECT count(a.id)::int FROM image_annotations a
+         JOIN project_images pi ON pi.id=a.project_image_id AND pi.project_id=p.id AND pi.deleted_at IS NULL
+         WHERE a.label_version_id=COALESCE(p.active_label_version_id, (
+           SELECT lv.id FROM label_versions lv
+           WHERE lv.project_id=p.id AND lv.deleted_at IS NULL
+           ORDER BY lv.created_at DESC LIMIT 1
+         ))) AS direct_annotation_count,
+        COALESCE(ic.image_count, 0)::int AS subtree_image_count,
         COALESCE(vc.video_count, 0)::int AS subtree_video_count,
         COALESCE(ac.annotation_count, 0)::int AS subtree_annotation_count,
-        COALESCE(cc.child_count, 0)::int AS child_count,
-        COALESCE(ir.scenes, '[]'::jsonb) AS scenes,
-        COALESCE(ir.views, '[]'::jsonb) AS views,
-        COALESCE(ir.modalities, '[]'::jsonb) AS modalities,
-        COALESCE(al.labels, '[]'::jsonb) AS labels,
+        (SELECT count(*)::int FROM projects c WHERE c.parent_id=p.id AND ${trash ? "c.deleted_at IS NOT NULL" : "c.deleted_at IS NULL"}) AS child_count,
+        COALESCE((SELECT jsonb_agg(DISTINCT pi.scene) FILTER (WHERE pi.scene IS NOT NULL AND pi.scene<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS scenes,
+        COALESCE((SELECT jsonb_agg(DISTINCT pi.view) FILTER (WHERE pi.view IS NOT NULL AND pi.view<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS views,
+        COALESCE((SELECT jsonb_agg(DISTINCT pi.modality) FILTER (WHERE pi.modality IS NOT NULL AND pi.modality<>'') FROM subtree s JOIN project_images pi ON pi.project_id=s.project_id AND pi.deleted_at IS NULL WHERE s.root_id=p.id), '[]'::jsonb) AS modalities,
+        COALESCE((SELECT jsonb_agg(DISTINCT a.label) FILTER (WHERE a.label IS NOT NULL AND a.label<>'' AND lower(trim(a.label))<>'mosaic') FROM subtree s JOIN image_annotations a ON a.label_version_id=s.effective_label_version_id WHERE s.root_id=p.id), '[]'::jsonb) AS labels,
         it.last_import_at
        FROM projects p
-       LEFT JOIN image_rollups ir ON ir.root_id = p.id
+       LEFT JOIN image_counts ic ON ic.root_id = p.id
        LEFT JOIN video_counts vc ON vc.root_id = p.id
        LEFT JOIN annotation_counts ac ON ac.root_id = p.id
-       LEFT JOIN annotation_labels al ON al.root_id = p.id
-       LEFT JOIN direct_image_counts dic ON dic.project_id = p.id
-       LEFT JOIN direct_video_counts dvc ON dvc.project_id = p.id
-       LEFT JOIN direct_annotation_counts dac ON dac.project_id = p.id
-       LEFT JOIN child_counts cc ON cc.parent_id = p.id
        LEFT JOIN import_times it ON it.root_id = p.id
        WHERE ${trash ? "p.deleted_at IS NOT NULL" : "p.deleted_at IS NULL"}
          AND p.id IN (SELECT id FROM scoped_projects)

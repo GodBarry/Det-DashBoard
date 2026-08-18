@@ -250,7 +250,6 @@ function createImportService(deps) {
       .map((item) => path.resolve(item || ""))
       .filter(Boolean)));
     let lastCancellationCheck = 0;
-    let lastProgressUpdate = 0;
     const sourceGroups = [];
     try {
       for (const sourceRoot of sourceRoots) {
@@ -346,13 +345,9 @@ function createImportService(deps) {
     const actualSplitCounts = { train: 0, val: 0, test: 0 };
     for (const imageEntry of images) {
       const imageFile = imageEntry.file;
-      const cancellationCheckAt = now();
-      if (cancellationCheckAt - lastCancellationCheck >= 500) {
-        lastCancellationCheck = cancellationCheckAt;
-        if (await importCancelled(batchId)) {
-          await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
-          return;
-        }
+      if (imageCount % 5 === 0 && await importCancelled(batchId)) {
+        await query("UPDATE import_batches SET status='cancelled', message=$1, finished_at=now() WHERE id=$2", ["Import cancelled", batchId]);
+        return;
       }
       const matched = imageEntry.matches.get(imageKey(imageFile));
       const split = splitForImage(imageFile, splitPlan);
@@ -411,43 +406,23 @@ function createImportService(deps) {
       });
       const shapes = Array.isArray(meta.shapes) ? meta.shapes : [];
       if (!shapes.length) unlabeledImageCount += 1;
-      const annotationRows = [];
       for (const shape of shapes) {
         const box = shapeToBox(shape, asset.width, asset.height);
         if (!box) {
           unresolved.push({ labelFile: matched?.labelFile || "", reason: "invalid_shape", imageFile });
           continue;
         }
-        annotationRows.push({
-          label: shape.label || "unknown",
-          bbox_x: box.x,
-          bbox_y: box.y,
-          bbox_w: box.width,
-          bbox_h: box.height,
-          shape_type: shape.shape_type || "rectangle",
-          difficult: Boolean(shape.difficult),
-          score: shape.score ?? null,
-          attributes_json: importedAnnotationAttributes(shape),
-        });
-      }
-      if (annotationRows.length) {
         await client.query(
           `INSERT INTO image_annotations
            (label_version_id, project_image_id, label, bbox_x, bbox_y, bbox_w, bbox_h, shape_type, difficult, score, attributes_json)
-           SELECT $1,$2,ann.label,ann.bbox_x,ann.bbox_y,ann.bbox_w,ann.bbox_h,ann.shape_type,ann.difficult,ann.score,ann.attributes_json
-           FROM jsonb_to_recordset($3::jsonb) AS ann(
-             label text, bbox_x double precision, bbox_y double precision, bbox_w double precision, bbox_h double precision,
-             shape_type text, difficult boolean, score double precision, attributes_json jsonb
-           )`,
-          [version.id, projectImage.id, JSON.stringify(annotationRows)],
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [version.id, projectImage.id, shape.label || "unknown", box.x, box.y, box.width, box.height, shape.shape_type || "rectangle", Boolean(shape.difficult), shape.score, importedAnnotationAttributes(shape)],
         );
-        annCount += annotationRows.length;
+        annCount += 1;
       }
       imageCount += 1;
-      const progressUpdateAt = now();
-      if (imageCount === images.length || imageCount % 100 === 0 || progressUpdateAt - lastProgressUpdate >= 1000) {
+      if (imageCount % 5 === 0 || imageCount === images.length) {
         await query("UPDATE import_batches SET processed_files=$1, message=$2 WHERE id=$3", [imageCount, `正在导入图片 ${imageCount} / ${images.length}`, batchId]);
-        lastProgressUpdate = progressUpdateAt;
       }
     }
 
