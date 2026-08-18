@@ -86,7 +86,7 @@ test("renameProject preserves sibling duplicate lookup and update contract", asy
   assert.match(calls[1].sql, /parent_id IS NOT DISTINCT FROM \$3/);
 });
 
-test("listProjects preserves scope and active-or-latest label version SQL", async () => {
+test("listProjects counts annotations through project images across legacy label versions", async () => {
   const actor = { id: "user-2" };
   let queryCall;
   const query = async (sql, params) => {
@@ -107,7 +107,9 @@ test("listProjects preserves scope and active-or-latest label version SQL", asyn
   assert.equal((queryCall.sql.match(/EXISTS \(SELECT 1 FROM image_annotations a WHERE a\.label_version_id=lv\.id\)/g) || []).length, 2);
   assert.match(queryCall.sql, /COALESCE\(p\.active_label_version_id/);
   assert.match(queryCall.sql, /COALESCE\(c\.active_label_version_id/);
-  assert.match(queryCall.sql, /a\.label_version_id=COALESCE\(p\.active_label_version_id/);
+  assert.match(queryCall.sql, /JOIN project_images pi ON pi\.project_id = subtree\.project_id AND pi\.deleted_at IS NULL/);
+  assert.match(queryCall.sql, /JOIN image_annotations a ON a\.project_image_id = pi\.id/);
+  assert.doesNotMatch(queryCall.sql, /a\.label_version_id=COALESCE\(p\.active_label_version_id/);
 });
 
 test("trash listing returns only deleted subtree roots", async () => {
@@ -124,7 +126,7 @@ test("trash listing returns only deleted subtree roots", async () => {
   assert.match(queryCall.sql, /p\.parent_id IS NULL OR NOT EXISTS \(SELECT 1 FROM projects parent WHERE parent\.id=p\.parent_id AND parent\.deleted_at IS NOT NULL\)/);
 });
 
-test("projectSummary preserves recursive label fallback and result shape", async () => {
+test("projectSummary counts annotations through project images across legacy label versions", async () => {
   const expected = { image_count: 7, annotation_count: 11, labels: ["car"] };
   let queryCall;
   const query = async (sql, params) => {
@@ -140,5 +142,6 @@ test("projectSummary preserves recursive label fallback and result shape", async
   assert.equal((queryCall.sql.match(/EXISTS \(SELECT 1 FROM image_annotations a WHERE a\.label_version_id=lv\.id\)/g) || []).length, 2);
   assert.match(queryCall.sql, /COALESCE\(active_label_version_id/);
   assert.match(queryCall.sql, /COALESCE\(p\.active_label_version_id/);
-  assert.match(queryCall.sql, /s\.effective_label_version_id=a\.label_version_id/);
+  assert.match(queryCall.sql, /FROM image_annotations a JOIN project_images pi ON pi\.id=a\.project_image_id/);
+  assert.doesNotMatch(queryCall.sql, /s\.effective_label_version_id=a\.label_version_id/);
 });
